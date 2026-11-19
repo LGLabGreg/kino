@@ -1,6 +1,6 @@
 # Kino
 
-React components with the motion already designed. Your agent builds it. Kino makes it move.
+React components with the motion already designed, and docs your agent can read.
 
 [Website](https://kinoui.com) · [Docs](https://kinoui.com/docs) · [Installation](https://kinoui.com/docs/installation)
 
