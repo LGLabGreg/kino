@@ -126,6 +126,24 @@ export function sameBox(
   )
 }
 
+/**
+ * Every box whose size can move `item` inside `group` without changing the
+ * size of the item or the group: its ancestors' siblings, up to the group.
+ * One section closing as another opens moves the rows of both and leaves the
+ * list as tall as it was (2026-11-19: the docs sidebar's current page tint
+ * stayed where the Blocks section's first row had been).
+ */
+export function boxesAround(item: Element, group: Element) {
+  const boxes: Element[] = []
+  for (let node = item; node !== group;) {
+    const parent = node.parentElement
+    if (!parent) break
+    for (const sibling of parent.children) if (sibling !== node) boxes.push(sibling)
+    node = parent
+  }
+  return boxes
+}
+
 /** Whether `item` is sliding into a new place on a translate transition. */
 function sliding(item: HTMLElement) {
   return runningTransitions(item, { property: 'translate' }).length > 0
@@ -383,17 +401,33 @@ export function createHighlight(layer: HTMLElement): Highlight {
     layer.dataset.highlight = next
   }
 
+  // The boxes around the item it is on, watched for a size change that moves it.
+  let around: Element[] = []
+  // A box stops being watched only once nothing it is watched for still needs it.
+  const release = (boxes: Iterable<Element | null>) => {
+    for (const box of boxes) {
+      if (!box || box === layer || box === item || box === fadingOver) continue
+      if (!around.includes(box)) sizes.unobserve(box)
+    }
+  }
+  const watchAround = () => {
+    const before = around
+    const group = layer.parentElement
+    around = item && group?.contains(item) ? boxesAround(item, group) : []
+    for (const box of around) sizes.observe(box)
+    release(before)
+  }
   const follow = (next: HTMLElement | null) => {
     if (next === item) return
-    if (item) {
-      item.removeAttribute('data-glided')
-      sizes.unobserve(item)
-    }
+    const last = item
+    last?.removeAttribute('data-glided')
+    item = next
     if (next) {
       next.setAttribute('data-glided', '')
       sizes.observe(next)
     }
-    item = next
+    watchAround()
+    release([last])
   }
 
   const send = (event: HighlightEvent, next: HTMLElement | null, from?: Box) => {
@@ -410,9 +444,10 @@ export function createHighlight(layer: HTMLElement): Highlight {
     if (next) place(boxOf(next), next)
     const last = item
     follow(next)
-    if (fadingOver && fadingOver !== next) sizes.unobserve(fadingOver)
+    const faded = fadingOver
     fadingOver = step === 'fade' ? last : null
     if (fadingOver) sizes.observe(fadingOver)
+    release([faded])
     // With no fade to wait for (a feel or a test that takes no time), it has faded now.
     if (step === 'fade' && !fadingOut()) send('faded', null)
   }
@@ -542,12 +577,17 @@ export function createHighlight(layer: HTMLElement): Highlight {
         if (state !== 'shown') enter('hidden')
         send('item', next)
       }),
-    refit: () => refit(),
+    // Asked from outside when the items around may have changed, so it rewatches them.
+    refit: () => {
+      watchAround()
+      refit()
+    },
     reset: (instant) => {
       stopPursuit()
       follow(null)
-      if (fadingOver) sizes.unobserve(fadingOver)
+      const faded = fadingOver
       fadingOver = null
+      release([faded])
       // Still on screen, it turns back from where it is. Out of sight, it hides
       // at once, so the next item it is sent to appears the way it did the
       // first time, in place of turning a fade round at full.
@@ -998,18 +1038,11 @@ export function followPick(
     else highlight.jump(item)
   }
 
-  // A neighbour that grows moves the picked item without resizing it, so
-  // every item is watched, and the highlight goes with the pick at once.
-  const laidOut = new ResizeObserver(() => highlight.refit())
-  const watch = () => {
-    for (const child of area.children) laidOut.observe(child)
-  }
-
   const first = picked()
   if (first) highlight.jump(first)
-  watch()
+  // Items that come or go change the boxes around the picked one.
   const changed = new MutationObserver(() => {
-    watch()
+    highlight.refit()
     sync()
   })
   // An item can also arrive already picked, as options that load late do.
@@ -1022,7 +1055,6 @@ export function followPick(
   return () => {
     cancelAnimationFrame(frame)
     changed.disconnect()
-    laidOut.disconnect()
     highlight.stop()
   }
 }
