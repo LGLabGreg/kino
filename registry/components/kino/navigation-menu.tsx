@@ -19,17 +19,24 @@ import {
 } from '@/registry/lib/highlight'
 import { popupPositionerProps, usePopupGrow } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
+import { transitionsSettled, withoutTransition } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import { NavigationMenu as NavigationMenuPrimitive } from '@base-ui/react/navigation-menu'
 import {
+  type ComponentProps,
   createContext,
+  type Dispatch,
+  type ReactNode,
   type RefObject,
+  type SetStateAction,
   use,
   useCallback,
+  useId,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 import { cn } from '@/lib/utils'
 
@@ -39,7 +46,9 @@ import { cn } from '@/lib/utils'
  * folds back in on close. New content slides in from the side the pointer
  * moved towards. A highlight glides between the triggers, and another between
  * the links inside the panel. The link to the page you are on keeps a tint,
- * which travels to the next one you go to.
+ * which travels to the next one you go to. A panel can hold a preview that
+ * shows the picture of the link the highlight is on, and a picture settles
+ * from a little zoomed in as it comes into view or as its link is pointed at.
  */
 
 /** Base UI's own wait: a click this soon after a hover opened the panel keeps it open. */
@@ -283,7 +292,11 @@ function NavigationMenuTrigger({
   )
 }
 
-const InPanelContext = createContext(false)
+/** Inside a panel: its preview's frame, where each link's picture is drawn, once there is one. */
+const PanelContext = createContext<{
+  frame: HTMLElement | null
+  setFrame: Dispatch<SetStateAction<HTMLElement | null>>
+} | null>(null)
 
 /**
  * A trigger's panel. New content slides in from the side the pointer moved
@@ -300,6 +313,8 @@ function NavigationMenuContent({
 }: Omit<NavigationMenuPrimitive.Content.Props, 'className'> & { className?: string }) {
   const fades = useEdgeFades<HTMLDivElement>()
   const refs = useMemo(() => mergeRefs(fades, ref), [fades, ref])
+  const [frame, setFrame] = useState<HTMLElement | null>(null)
+  const panel = useMemo(() => ({ frame, setFrame }), [frame])
   return (
     <NavigationMenuPrimitive.Content
       ref={refs}
@@ -316,7 +331,7 @@ function NavigationMenuContent({
       )}
       {...props}
     >
-      <InPanelContext value>
+      <PanelContext value={panel}>
         {/* The 8px around the links is the highlight's margin, so it stays the same at every density. */}
         <div
           data-slot='navigation-menu-panel'
@@ -325,7 +340,7 @@ function NavigationMenuContent({
           <Highlight items='[data-slot=navigation-menu-link]' />
           {children}
         </div>
-      </InPanelContext>
+      </PanelContext>
     </NavigationMenuPrimitive.Content>
   )
 }
@@ -333,22 +348,162 @@ function NavigationMenuContent({
 /**
  * A link: in the list, styled as a trigger; in a panel, a block the highlight
  * glides to, whose icons brighten as it arrives. Inside a panel it closes the
- * menu when followed.
+ * menu when followed, and its `preview` shows in the panel's
+ * `NavigationMenuPreview` while the highlight is on it.
  */
 function NavigationMenuLink({
   className,
   closeOnClick,
+  preview,
+  children,
   ...props
-}: Omit<NavigationMenuPrimitive.Link.Props, 'className'> & { className?: string }) {
-  const inPanel = use(InPanelContext)
+}: Omit<NavigationMenuPrimitive.Link.Props, 'className'> & {
+  className?: string
+  /** What the panel's preview shows for this link, such as a `NavigationMenuImage`. */
+  preview?: ReactNode
+}) {
+  const panel = use(PanelContext)
+  const id = useId()
+  const frame = preview ? panel?.frame : null
   return (
-    <NavigationMenuPrimitive.Link
-      data-slot='navigation-menu-link'
-      closeOnClick={closeOnClick ?? inPanel}
+    <>
+      <NavigationMenuPrimitive.Link
+        data-slot='navigation-menu-link'
+        data-preview-id={preview && panel ? id : undefined}
+        closeOnClick={closeOnClick ?? panel !== null}
+        className={cn(
+          panel
+            ? "focus-visible:ring-ring/50 flex min-w-0 flex-col gap-1 rounded-(--list-radius) p-(--control-padding) focus-visible:ring-3 focus-visible:outline-hidden forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText] [&_svg]:transition-colors [&_svg]:duration-(--motion-layout-duration) [&_svg]:ease-(--motion-layout-fade-easing) [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-glided:[&_svg:not([class*='text-'])]:text-foreground [&_.text-muted-foreground]:transition-colors [&_.text-muted-foreground]:duration-(--motion-layout-duration) [&_.text-muted-foreground]:ease-(--motion-layout-fade-easing) data-glided:[&_.text-muted-foreground]:text-foreground/80 forced-colors:data-glided:[&_.text-muted-foreground]:text-[HighlightText]"
+            : listItemClassName,
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </NavigationMenuPrimitive.Link>
+      {/* Beside the link, not in it: the picture is drawn in the preview, so its events never reach the link. */}
+      {frame
+        ? createPortal(
+            <span
+              data-slot='navigation-menu-preview-item'
+              data-preview-for={id}
+              // Set once: the preview moves it from here, without a render.
+              data-preview='hidden'
+              className={previewItemClassName}
+            >
+              {preview}
+            </span>,
+            frame,
+          )
+        : null}
+    </>
+  )
+}
+
+/*
+ * The picture that shows fades in on top of the ones before, which stay whole
+ * under it until it has, so the frame never shows through, and then go at
+ * once. Going back to one still whole under the others, those fade off it
+ * on `exit` (`leaving`).
+ */
+const previewItemClassName =
+  'absolute inset-0 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-[preview=hidden]:opacity-0 data-[preview=hidden]:transition-none data-[preview=leaving]:opacity-0 data-[preview=leaving]:duration-(--motion-exit-duration)'
+
+/**
+ * Shows in `frame` the picture of the link the highlight is on in `area`,
+ * and the first link's until then. Kept outside any component: the React
+ * Compiler can drop the forced style read it makes.
+ */
+function followPreview(area: HTMLElement, frame: HTMLElement) {
+  // The links whose pictures are drawn, the latest first.
+  let stack: string[] = []
+  const layers = () =>
+    Array.from(frame.querySelectorAll<HTMLElement>(':scope > [data-preview-for]'))
+  const restack = () => {
+    for (const layer of layers()) {
+      const at = stack.indexOf(layer.dataset.previewFor ?? '')
+      layer.style.zIndex = at < 0 ? '' : String(stack.length - at)
+    }
+  }
+  const show = (id: string | null | undefined, instant = false) => {
+    if (!id || stack[0] === id) return
+    const layer = layers().find((each) => each.dataset.previewFor === id)
+    if (!layer) return
+    const above = previewAbove(stack, id)
+    stack = previewStack(stack, id)
+    if (layer.dataset.preview === 'under') {
+      // Still whole under the ones it gave way to: they fade off it, so the
+      // change turns back from where it is.
+      for (const other of layers()) {
+        if (above.includes(other.dataset.previewFor ?? ''))
+          other.dataset.preview = 'leaving'
+      }
+      layer.dataset.preview = 'shown'
+    } else {
+      restack()
+      for (const other of layers()) {
+        if (other !== layer && other.dataset.preview === 'shown')
+          other.dataset.preview = 'under'
+      }
+      if (instant) {
+        withoutTransition(layer, () => (layer.dataset.preview = 'shown'), {
+          subtree: true,
+        })
+      } else layer.dataset.preview = 'shown'
+    }
+    void transitionsSettled(frame, { subtree: true }).then(() => {
+      if (stack[0] !== id) return
+      for (const other of layers()) if (other !== layer) other.dataset.preview = 'hidden'
+      stack = [id]
+      restack()
+    })
+  }
+  const linkSelector = '[data-slot=navigation-menu-link][data-preview-id]'
+  const glides = new MutationObserver(() => {
+    if (stack.length === 0) {
+      show(area.querySelector(linkSelector)?.getAttribute('data-preview-id'), true)
+    }
+    show(
+      area.querySelector(`${linkSelector}[data-glided]`)?.getAttribute('data-preview-id'),
+    )
+  })
+  // A link's picture arrives a render after the frame, and the highlight marks its link.
+  glides.observe(frame, { childList: true })
+  glides.observe(area, { subtree: true, attributeFilter: ['data-glided'] })
+  return () => glides.disconnect()
+}
+
+/**
+ * A frame beside a panel's links that shows the `preview` of the link the
+ * highlight is on: the first link's until one is pointed at or focused, and
+ * the last one's after the highlight leaves. Each new picture fades in over
+ * the last. It is a picture only, so it is hidden from assistive technology
+ * and the pointer passes through it. Give it a size in the panel's layout.
+ */
+function NavigationMenuPreview({ className, ref, ...props }: ComponentProps<'div'>) {
+  const setFrame = use(PanelContext)?.setFrame
+  const own = useCallback(
+    (frame: HTMLDivElement | null) => {
+      const area = frame?.closest<HTMLElement>('[data-slot=navigation-menu-panel]')
+      if (!frame || !area || !setFrame) return
+      setFrame(frame)
+      const stop = followPreview(area, frame)
+      return () => {
+        stop()
+        setFrame(null)
+      }
+    },
+    [setFrame],
+  )
+  const refs = useMemo(() => mergeRefs(own, ref), [own, ref])
+  return (
+    <div
+      ref={refs}
+      aria-hidden
+      data-slot='navigation-menu-preview'
       className={cn(
-        inPanel
-          ? "focus-visible:ring-ring/50 flex min-w-0 flex-col gap-1 rounded-(--list-radius) p-(--control-padding) focus-visible:ring-3 focus-visible:outline-hidden forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText] [&_svg]:transition-colors [&_svg]:duration-(--motion-layout-duration) [&_svg]:ease-(--motion-layout-fade-easing) [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-glided:[&_svg:not([class*='text-'])]:text-foreground [&_.text-muted-foreground]:transition-colors [&_.text-muted-foreground]:duration-(--motion-layout-duration) [&_.text-muted-foreground]:ease-(--motion-layout-fade-easing) data-glided:[&_.text-muted-foreground]:text-foreground/80 forced-colors:data-glided:[&_.text-muted-foreground]:text-[HighlightText]"
-          : listItemClassName,
+        // A faint line over the pictures keeps a pale photo's edge from melting into the panel.
+        "bg-muted pointer-events-none relative isolate overflow-hidden rounded-(--list-radius) after:absolute after:inset-0 after:z-10 after:rounded-[inherit] after:ring-1 after:ring-foreground/10 after:ring-inset after:content-['']",
         className,
       )}
       {...props}
@@ -356,11 +511,55 @@ function NavigationMenuLink({
   )
 }
 
+/**
+ * A picture that sits a little zoomed in, by `--navigation-menu-zoom` (1.06
+ * by default), and settles to its size when the highlight reaches its link or
+ * when a `NavigationMenuPreview` changes to it. The picture a preview opens on
+ * is already settled, since the panel itself is arriving. Its parent clips it. `alt` is
+ * empty by default, since the link around it, or the one it previews, names it.
+ */
+function NavigationMenuImage({ className, alt = '', ...props }: ComponentProps<'img'>) {
+  return (
+    // oxlint-disable-next-line next/no-img-element -- a registry part works in any React project, not only Next.js.
+    <img
+      data-slot='navigation-menu-image'
+      alt={alt}
+      decoding='async'
+      draggable={false}
+      className={cn(
+        // The settle eases on the fade curve, held at its end, because a
+        // spring that overshoots would shrink it past its frame's edges.
+        // Hidden in the preview, it zooms back at once, out of sight.
+        // Kept on its own layer: one dropped as the settle ends is drawn
+        // again snapped to whole pixels, and the picture jumps by one.
+        'size-full object-cover will-change-[scale] transition-[scale] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) scale-(--navigation-menu-zoom,1.06) in-data-glided:scale-100 in-data-[preview=shown]:scale-100 in-data-[preview=under]:scale-100 in-data-[preview=leaving]:scale-100 in-data-[preview=hidden]:transition-none motion-reduce:[--navigation-menu-zoom:1]',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** The pictures stacked over `id`'s, which fade off it when it comes back while still under them. */
+function previewAbove(stack: readonly string[], id: string): string[] {
+  const at = stack.indexOf(id)
+  return at < 0 ? [] : stack.slice(0, at)
+}
+
+/** The preview's pictures, the latest first, once `id`'s comes in on top. */
+function previewStack(stack: readonly string[], id: string): string[] {
+  return [id, ...stack.filter((each) => each !== id)]
+}
+
 export {
   NavigationMenu,
   NavigationMenuContent,
+  NavigationMenuImage,
   NavigationMenuItem,
   NavigationMenuLink,
   NavigationMenuList,
+  NavigationMenuPreview,
   NavigationMenuTrigger,
+  previewAbove,
+  previewStack,
 }
