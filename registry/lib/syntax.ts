@@ -1,0 +1,137 @@
+import type { BundledLanguage } from 'shiki/langs'
+
+/*
+ * Code as lines of coloured tokens, for the Code block. Shiki reads the
+ * grammar; the colours are CSS variables (`--code-keyword`, `--code-string`
+ * and the rest), so they follow the theme and a project changes them in its
+ * CSS. Shiki and each language load the first time they are needed, in the
+ * browser or on a server, so a page that shows no code never fetches them.
+ */
+
+/** A run of text in one colour. With no `color` it takes the block's text colour. */
+export interface CodeToken {
+  content: string
+  /** A CSS colour, such as `var(--code-keyword)`. */
+  color?: string
+  italic?: boolean
+}
+
+/** A language shiki knows, by its name or alias (`tsx`, `bash`, `sh`), or plain `text`. */
+export type CodeLanguage = Exclude<BundledLanguage, 'ansi'> | 'text'
+
+type Highlighter = import('shiki/core').HighlighterCore
+
+let highlighter: Promise<Highlighter> | undefined
+
+function getHighlighter(): Promise<Highlighter> {
+  highlighter ??= Promise.all([
+    import('shiki/core'),
+    import('shiki/engine/javascript'),
+  ]).then(
+    ([
+      { createHighlighterCore, createCssVariablesTheme },
+      { createJavaScriptRegexEngine },
+    ]) =>
+      createHighlighterCore({
+        // The regular expression engine in JavaScript, so there is no WebAssembly to fetch.
+        engine: createJavaScriptRegexEngine(),
+        themes: [
+          createCssVariablesTheme({
+            name: 'kino',
+            variablePrefix: '--code-',
+            fontStyle: true,
+          }),
+        ],
+        langs: [],
+      }),
+  )
+  return highlighter
+}
+
+/** The lines of `code`, without the newline that ends the last one. */
+export function codeLines(code: string): string[] {
+  return code.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
+}
+
+/** `code` as lines of one token each, as it shows before its colours load. */
+export function plainTokens(code: string): CodeToken[][] {
+  return codeLines(code).map((line) => (line ? [{ content: line }] : []))
+}
+
+/**
+ * Shiki's colour for a token, in Kino's names: `var(--code-token-keyword)`
+ * becomes `var(--code-keyword)`, and its text colour none, so it inherits.
+ */
+export function tokenColor(color: string | undefined): string | undefined {
+  if (!color || color === 'var(--code-foreground)') return undefined
+  // A diff's lines take the colours of the block's added and removed lines.
+  if (color === 'var(--code-token-inserted)') return 'var(--code-added)'
+  if (color === 'var(--code-token-deleted)') return 'var(--code-removed)'
+  return color.replace('var(--code-token-', 'var(--code-')
+}
+
+/** Joins tokens of one colour that follow each other, so a line has as few as it can. */
+export function mergeTokens(line: CodeToken[]): CodeToken[] {
+  const merged: CodeToken[] = []
+  for (const token of line) {
+    const last = merged.at(-1)
+    if (last && last.color === token.color && last.italic === token.italic) {
+      last.content += token.content
+    } else {
+      merged.push({ ...token })
+    }
+  }
+  return merged
+}
+
+/**
+ * `code` as lines of coloured tokens. A language shiki doesn't know, or one
+ * that fails to load, comes back as plain lines.
+ */
+export async function highlightCode(
+  code: string,
+  language: CodeLanguage,
+): Promise<CodeToken[][]> {
+  if (language === 'text') return plainTokens(code)
+  const [shiki, { bundledLanguages }] = await Promise.all([
+    getHighlighter(),
+    import('shiki/langs'),
+  ])
+  if (!Object.hasOwn(bundledLanguages, language)) return plainTokens(code)
+  try {
+    if (!shiki.getLoadedLanguages().includes(language)) {
+      await shiki.loadLanguage(bundledLanguages[language])
+    }
+  } catch {
+    return plainTokens(code)
+  }
+  const lines = shiki.codeToTokensBase(codeLines(code).join('\n'), {
+    lang: language,
+    theme: 'kino',
+  })
+  return lines.map((line) =>
+    mergeTokens(
+      line.map((token) => ({
+        content: token.content,
+        color: tokenColor(token.color),
+        // Shiki's FontStyle.Italic is 1.
+        italic: ((token.fontStyle ?? 0) & 1) === 1 || undefined,
+      })),
+    ),
+  )
+}
+
+/**
+ * The line numbers a list names, counting from 1: single lines and
+ * inclusive ranges, such as `[1, [4, 6]]` for 1, 4, 5 and 6. A range
+ * written backwards counts the same.
+ */
+export function lineSet(lines: readonly (number | readonly [number, number])[] = []) {
+  const set = new Set<number>()
+  for (const entry of lines) {
+    const [from, to] = typeof entry === 'number' ? [entry, entry] : entry
+    for (let line = Math.min(from, to); line <= Math.max(from, to); line += 1)
+      set.add(line)
+  }
+  return set
+}
