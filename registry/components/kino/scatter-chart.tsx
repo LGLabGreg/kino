@@ -38,6 +38,7 @@ import {
   memo,
   use,
   useMemo,
+  useState,
 } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -468,14 +469,20 @@ function Scatter({
   const chart = useChart()
   const scatter = useScatter()
   const { spotlit } = useChartActive()
+  const litNow = spotlit === null ? undefined : chart.current[spotlit]
+  const lit =
+    litNow !== undefined && !litNow.leaving && scatter.seriesOf(litNow) === dataKey
+      ? litNow
+      : undefined
+  // The last point lit, kept while its copy fades as the series comes back, so it never blinks.
+  const [held, setHeld] = useState<string | null>(null)
+  if (lit && lit.key !== held) setHeld(lit.key)
   if (chart.status === 'empty') return null
   const slot = chart.series.indexOf(dataKey)
   const marker = scatter.markerOf(dataKey)
-  const lit = spotlit === null ? undefined : chart.current[spotlit]
-  const shownLit =
-    lit !== undefined && !lit.leaving && scatter.seriesOf(lit) === dataKey
-      ? lit
-      : undefined
+  const shownLit = chart.current.find(
+    (category) => category.key === held && !category.leaving,
+  )
   const dim = spotlit !== null || (chart.emphasis !== null && chart.emphasis !== dataKey)
   const style = { '--point-color': seriesColor(dataKey) } as CSSProperties
   return (
@@ -513,8 +520,12 @@ function Scatter({
       {shownLit && (
         <div
           data-slot='scatter-chart-lit'
+          data-off={lit === undefined ? '' : undefined}
           aria-hidden
-          className={cn(plotLayerClassName, 'z-11')}
+          className={cn(
+            plotLayerClassName,
+            'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
+          )}
           style={style}
         >
           <ScatterPoint

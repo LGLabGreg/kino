@@ -5,8 +5,11 @@ import {
   axisLayerClassName,
   axisSlide,
   plotOffset,
+  stickTo,
   type ChartAxis,
+  type ChartAxisName,
   type ChartCategory,
+  type ChartContextValue,
   type ChartFormat,
   ChartGroup,
   ChartLegendToggles,
@@ -152,7 +155,9 @@ function ChartYAxis({
   categoryFormat,
   ...props
 }: AxisProps & { side?: 'start' | 'end' }) {
-  const { orientation, xy } = useChart()
+  const { orientation, xy, grid } = useChart()
+  // A grid of cells names its rows down the side.
+  if (grid) return <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
   return orientation === 'vertical' ? (
     <ValueAxis side={side} format={format} label={xy?.labels?.y} {...props} />
   ) : (
@@ -171,7 +176,9 @@ function ChartXAxis({
   categoryFormat,
   ...props
 }: AxisProps & { side?: 'top' | 'bottom' }) {
-  const { orientation, xy } = useChart()
+  const { orientation, xy, grid } = useChart()
+  // A grid of cells names its columns along it.
+  if (grid) return <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
   // On a chart whose x is a value, each axis is titled with what it measures unless given a label.
   if (xy)
     return (
@@ -204,6 +211,7 @@ function AxisFrame({
   label?: ReactNode
   slot: string
 }) {
+  const { direction } = useChart()
   const across = side === 'start' || side === 'end'
   const title = label && (
     <span
@@ -222,9 +230,16 @@ function AxisFrame({
   return (
     <div
       data-slot={slot}
+      data-side={side}
       className={cn(
         'flex min-h-0 min-w-0 select-none',
         across ? 'flex-row gap-1' : 'flex-col gap-0.5',
+        // While the chart scrolls sideways, an axis down a side stays in view over the marks
+        // passing under it, on the colour behind the chart, at the width of its names (each
+        // capped), which the plot's least width would otherwise squeeze out.
+        across &&
+          'group-data-scrolls/chart:sticky group-data-scrolls/chart:z-40 group-data-scroller/chart:min-w-max group-data-scrolls/chart:bg-(--chart-surface,var(--card))',
+        across && stickTo(side, direction),
         axisArea[side],
         className,
       )}
@@ -354,8 +369,11 @@ function CategoryAxis({
   className,
   ...props
 }: AxisProps & { side: AxisSide }) {
-  const { categories, current, categoryText, direction, status, textWidth } = useChart()
-  const { spotlit, active } = useChartActive()
+  const chart = useChart()
+  const { direction, status, textWidth, categoryText } = chart
+  const across = side === 'start' || side === 'end'
+  const axis = across === (chart.orientation === 'vertical') ? 'y' : 'x'
+  const { names: all, current, spotlit, active } = useAxisNames(chart, axis)
   const ref = useRef<HTMLDivElement>(null)
   const pill = useRef<HTMLSpanElement>(null)
   const names = useRef(new Map<string, HTMLElement>())
@@ -368,7 +386,6 @@ function CategoryAxis({
     const frame = requestAnimationFrame(() => setSettled(true))
     return () => cancelAnimationFrame(frame)
   }, [settled, length])
-  const across = side === 'start' || side === 'end'
   useLayoutEffect(() => {
     const element = ref.current
     if (!element) return
@@ -393,20 +410,20 @@ function CategoryAxis({
     const key = spotlit === null ? undefined : current[spotlit]?.key
     highlight.current?.move(key === undefined ? null : (names.current.get(key) ?? null))
   }, [spotlit, current, length])
-  const write = categoryFormat ?? categoryText
+  const write = categoryFormat ?? chart.grid?.[axis].format ?? categoryText
   // How wide a name is with its padding, measured in the chart's font.
-  const nameLength = (category: ChartCategory) => textWidth(write(category.value)) + 12
+  const nameLength = (name: ChartAxisName) => textWidth(write(name.value)) + 12
   // A few categories each keep a name, cut short if they must; a long run, such as days,
   // shows every few in full instead.
   const longest =
     current.length > MANY_CATEGORIES
       ? Math.max(MIN_LABEL, ...current.map(nameLength))
       : MIN_LABEL
-  const shown = status === 'loading' ? [] : categories
-  const centreOf = (category: ChartCategory) =>
+  const shown = status === 'loading' ? [] : all
+  const centreOf = (name: ChartAxisName) =>
     across
-      ? category.band.start + category.band.size / 2
-      : physicalStart(category.band, 'inline', direction) + category.band.size / 2
+      ? name.band.start + name.band.size / 2
+      : physicalStart(name.band, 'inline', direction) + name.band.size / 2
   const axisNamed = current.map((category) => ({
     centre: centreOf(category),
     width: nameLength(category),
@@ -419,6 +436,9 @@ function CategoryAxis({
       ? { room: 0, skipped: new Set<number>() }
       : axisNames(axisNamed, length, { ...spacing, lit: active })
   const axisId = useId()
+  // Down the side, the name the pill marks shows whole, a picked one at rest included.
+  const marked = spotlit === null ? null : (current[spotlit]?.index ?? null)
+  const acrossLit = active ?? marked
 
   // The names, drawn twice: once on the axis, and once in the pill's colours inside the pill,
   // which shows only the part under it, so the name it slides onto reads in its colours.
@@ -426,7 +446,8 @@ function CategoryAxis({
     <span className={axisLayerClassName}>
       {shown.map((category) => {
         const centre = centreOf(category)
-        const isLit = active === category.index && !category.leaving
+        const isLit =
+          (across ? acrossLit : active) === category.index && !category.leaving
         const isSkipped =
           !across && !isLit && !category.leaving && skipped.has(category.index)
         return (
@@ -467,9 +488,11 @@ function CategoryAxis({
                 // Its place, which `UnmeasuredAxisNames` picks names by.
                 '--axis-name': category.index,
                 // Centred on its category, but kept inside the axis, so a whole name at either
-                // end stays in view and inside the pill. Beside the plot, it sits against it.
+                // end stays in view and inside the pill. Beside the plot, it sits against it. A
+                // grid's rows are each a name's height or more, so each centres on its row, and
+                // names that `AcrossAxisNames` spaces never meet at the ends.
                 translate: across
-                  ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)`
+                  ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} ${chart.grid ? `calc(${centre * 100}cqh - 50%)` : `clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)`}`
                   : `clamp(0px, ${centre * 100}cqw - 50%, 100cqw - 100%) 0`,
                 // Before the axis is measured, `UnmeasuredAxisNames` gives the room.
                 maxWidth: across || isLit || length === 0 ? undefined : `${room}px`,
@@ -495,6 +518,10 @@ function CategoryAxis({
       <div
         ref={ref}
         data-axis={axisId}
+        // The name the pill marks, which `AcrossAxisNames` keeps whole.
+        style={
+          across ? ({ '--axis-lit': acrossLit ?? -1e3 } as CSSProperties) : undefined
+        }
         className={cn(
           'text-muted-foreground relative min-h-0 min-w-0 flex-1',
           across ? 'grid max-w-[40cqw]' : '[container-type:inline-size]',
@@ -517,6 +544,7 @@ function CategoryAxis({
             ))}
           </span>
         )}
+        {across && <AcrossAxisNames id={axisId} count={current.length} />}
         {!across && length === 0 && (
           <UnmeasuredAxisNames
             id={axisId}
@@ -541,6 +569,55 @@ function CategoryAxis({
       </div>
     </AxisFrame>
   )
+}
+
+/**
+ * The names on a category axis, and which is under the pointer or the
+ * focus (`active`) and which stays lit (`spotlit`), by place among the names
+ * still in the data: the categories, or on a grid of cells, the names of
+ * its columns (`x`) or its rows (`y`) over the cell lit.
+ */
+function useAxisNames(chart: ChartContextValue, axis: 'x' | 'y') {
+  const { spotlit, active } = useChartActive()
+  const { grid } = chart
+  if (!grid) {
+    return { names: chart.categories, current: chart.current, spotlit, active }
+  }
+  const { nameOf } = grid[axis]
+  // A grid's names come from its layout, so they wait for the cells as a category's do.
+  const names =
+    chart.status === 'ready' || chart.status === 'hidden' ? grid[axis].names : []
+  return {
+    names,
+    current: names,
+    spotlit: spotlit === null ? null : nameOf(spotlit),
+    active: active === null ? null : nameOf(active),
+  }
+}
+
+/** How tall a name on an axis down the side is, with the room it keeps from the next, in px. */
+const ACROSS_NAME = 18
+
+/**
+ * Every few names on an axis down the side, when its bands are shorter than
+ * a name, such as a calendar's days: worked out by container queries on the
+ * axis's height, so they are right from the first paint. The name the pill
+ * marks shows whole, and those it would touch step aside.
+ */
+function AcrossAxisNames({ id, count }: { id: string; count: number }) {
+  const scope = `[data-axis='${id}'] [data-name]:not([data-leaving])`
+  const rules: string[] = []
+  for (let every = 2; every <= count; every += 1) {
+    // Below this height, each name's band times `every - 1` is shorter than a name.
+    const below = (ACROSS_NAME * count) / (every - 1)
+    const away =
+      'max(var(--axis-name) - var(--axis-lit), var(--axis-lit) - var(--axis-name))'
+    rules.push(
+      `@container (height < ${below}px) { ${scope} { opacity: max(1 - min(1, ${away}), (1 - min(1, mod(var(--axis-name), ${every}))) * min(1, max(0, ${away} - ${every - 1}))) } }`,
+    )
+  }
+  // oxlint-disable-next-line react/no-danger -- the rules are worked out from the chart's own names
+  return <style dangerouslySetInnerHTML={{ __html: rules.join(' ') }} />
 }
 
 /**

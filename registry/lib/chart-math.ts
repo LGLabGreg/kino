@@ -710,3 +710,83 @@ export function pointRank(
 ): number {
   return Math.max(0, pointOrder(points, along).indexOf(index)) + 1
 }
+
+/**
+ * A cell of a chart drawn as a grid of cells, such as a heatmap's: its
+ * column, from 0 at the reading start, and its row, from 0 at the top.
+ */
+export interface GridCell {
+  column: number
+  row: number
+}
+
+/**
+ * Where a key goes from the cell at `from` among `cells`, as the WAI-ARIA
+ * grid's keys move: the arrow pointing along reading order to the next
+ * column and the other to the one before, Up and Down a row, Home and End
+ * to the first and last cell of its row, and Page Up and Page Down to the
+ * top and the bottom of its column. Where no cell is there, past an edge,
+ * the cell reached stays. Null for a key that isn't the chart's.
+ */
+export function stepCell(
+  cells: readonly GridCell[],
+  from: number,
+  key: string,
+  direction: ReadingDirection,
+): number | null {
+  const at = cells[from]
+  if (!at) return null
+  const forward = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'
+  const back = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft'
+  const inRow = (index: number) => cells[index]?.row === at.row
+  const inColumn = (index: number) => cells[index]?.column === at.column
+  const indexes = cells.map((_, index) => index)
+  const ends = (
+    keep: (index: number) => boolean,
+    along: 'column' | 'row',
+    last: boolean,
+  ) =>
+    indexes
+      .filter(keep)
+      .reduce((best, index) =>
+        cells[index]![along] > cells[best]![along] === last ? index : best,
+      )
+  const target =
+    key === forward
+      ? { column: at.column + 1, row: at.row }
+      : key === back
+        ? { column: at.column - 1, row: at.row }
+        : key === 'ArrowUp'
+          ? { column: at.column, row: at.row - 1 }
+          : key === 'ArrowDown'
+            ? { column: at.column, row: at.row + 1 }
+            : null
+  if (target) {
+    const found = cells.findIndex(
+      (cell) => cell.column === target.column && cell.row === target.row,
+    )
+    return found === -1 ? from : found
+  }
+  if (key === 'Home') return ends(inRow, 'column', false)
+  if (key === 'End') return ends(inRow, 'column', true)
+  if (key === 'PageUp') return ends(inColumn, 'row', false)
+  if (key === 'PageDown') return ends(inColumn, 'row', true)
+  return null
+}
+
+/**
+ * The column and row under `at`, a point given as fractions of a grid of
+ * `columns` by `rows` from its physical left and its top: columns run from
+ * the reading start. A point past an edge takes the cell at that edge.
+ */
+export function gridCellAt(
+  at: { x: number; y: number },
+  columns: number,
+  rows: number,
+  direction: ReadingDirection,
+): GridCell {
+  const along = direction === 'rtl' ? 1 - at.x : at.x
+  const clamp = (value: number, count: number) =>
+    Math.min(count - 1, Math.max(0, Math.floor(value * count)))
+  return { column: clamp(along, columns), row: clamp(at.y, rows) }
+}

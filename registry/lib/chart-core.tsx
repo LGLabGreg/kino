@@ -19,6 +19,7 @@ import {
   extentWith,
   extentWithRoom,
   fractionOf,
+  type GridCell,
   indexAt,
   labelLength,
   nearestPoint,
@@ -29,6 +30,7 @@ import {
   type ReadingDirection,
   sliderValue,
   type Span,
+  stepCell,
   stepIndex,
   stepPoint,
   tickCountFor,
@@ -41,6 +43,7 @@ import { CutTooltip } from '@/registry/lib/cut'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { transitionsQuiet } from '@/registry/lib/resize'
+import { revealBehavior, revealBy } from '@/registry/lib/scroll'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
@@ -162,6 +165,43 @@ interface ChartXY {
   labels?: { x: string; y: string }
 }
 
+/**
+ * A name on a category axis: a category's, or on a grid of cells, a
+ * column's or a row's, over the band of the axis it names, such as a month
+ * over its weeks.
+ */
+interface ChartAxisName {
+  key: string
+  /** The name as the data has it, which the axis writes. */
+  value: unknown
+  /** Its place among the axis's names. */
+  index: number
+  band: Band
+  leaving: boolean
+}
+
+/** One axis of a grid of cells: its names, and which one each cell is under. */
+interface ChartGridAxis {
+  names: readonly ChartAxisName[]
+  /** The name over the cell at `index`, by its place among the categories, or none. */
+  nameOf: (index: number) => number | null
+  /** How the axis writes its names, unless it is given a `categoryFormat`. */
+  format: (value: unknown) => string
+}
+
+/**
+ * The cell grid: what a chart drawn as a grid of cells, such as a heatmap,
+ * has in place of a category axis. Each category is a cell; the keys step
+ * through them by column and by row, and each axis names its columns or its
+ * rows.
+ */
+interface ChartCellGrid {
+  /** Each cell's column and row, by its place among the categories. */
+  cells: readonly GridCell[]
+  x: ChartGridAxis
+  y: ChartGridAxis
+}
+
 /** The x scale of a chart with categories, which has none: never drawn. */
 const NO_SCALE: ValueScale = { domain: [0, 1], ticks: [] }
 
@@ -188,6 +228,14 @@ interface ChartContextValue {
   previousScale: ValueScale
   /** The x scale and its points, for a chart whose x is a value too; none for a chart with categories. */
   xy?: ChartXY
+  /** The cells and the names of their columns and rows, for a chart drawn as a grid of cells. */
+  grid?: ChartCellGrid
+  /**
+   * The narrowest the plot gets, in px, for a chart of many columns, such as
+   * a year of weeks: past it the chart scrolls sideways, opening at its
+   * end, while its axes down the sides stay in view.
+   */
+  leastPlotWidth?: number
   /** The px kept clear inside each edge of the plot, as `--chart-inset`, for marks drawn round a point. */
   inset: number
   /** A value as the chart's `format` writes it. */
@@ -723,19 +771,21 @@ function useEntered(ref: { current: Element | null }, skip: boolean) {
  * it: a size change moves everything by the same amount at once, rather
  * than easing the bars behind the axes. Only the chart's own size counts: the
  * plot also changes size when new values widen the value axis, and that move
- * eases with the rest.
+ * eases with the rest. A chart whose height comes from its data, such as a
+ * grid of cells growing a row or its legend arriving, counts only a change
+ * of width, so its data still arrives as it moves.
  */
-function useResizing(root: RefObject<HTMLElement | null>) {
+function useResizing(root: RefObject<HTMLElement | null>, widthOnly: boolean) {
   useEffect(() => {
     const element = root.current
     if (!element) return
-    let first = true
+    let width: number | null = null
     let frame = 0
-    const observer = new ResizeObserver(() => {
-      if (first) {
-        first = false
-        return
-      }
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return
+      const was = width
+      width = entry.contentRect.width
+      if (was === null || (widthOnly && was === width)) return
       element.dataset.resizing = ''
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
@@ -749,7 +799,7 @@ function useResizing(root: RefObject<HTMLElement | null>) {
       observer.disconnect()
       cancelAnimationFrame(frame)
     }
-  }, [root])
+  }, [root, widthOnly])
 }
 
 /** An element's size in px, kept up to date. */
@@ -1082,6 +1132,24 @@ function ChangeText({
  * Enter or Space picks the one reached. Over each category sits a column the
  * tooltip's trigger fills.
  */
+/** Half the width the keys bring into view around a mark of a chart that scrolls, in px. */
+const REVEAL_HALF = 8
+
+/** The part of a chart that scrolls sideways that its marks show in: inside the axes that stay at its sides. */
+function inView(frame: HTMLElement): { left: number; right: number } {
+  const view = frame.getBoundingClientRect()
+  let { left, right } = view
+  const middle = (view.left + view.right) / 2
+  for (const axis of frame.querySelectorAll(
+    ':scope > [data-side=start], :scope > [data-side=end]',
+  )) {
+    const box = axis.getBoundingClientRect()
+    if (box.right <= middle) left = Math.max(left, box.right)
+    else right = Math.min(right, box.left)
+  }
+  return { left, right }
+}
+
 function ChartColumns() {
   const chart = useChart()
   const {
@@ -1107,9 +1175,37 @@ function ChartColumns() {
   const [along, setAlong] = useState<'x' | 'y'>('x')
   const ready = status === 'ready'
   const count = current.length
-  const resting = Math.min(lastIndex ?? chart.selected ?? 0, Math.max(0, count - 1))
+  // A chart that scrolls opens at its end, so the keys start there too.
+  const resting = Math.min(
+    lastIndex ?? chart.selected ?? (chart.leastPlotWidth === undefined ? 0 : count - 1),
+    Math.max(0, count - 1),
+  )
   const reached = active ?? resting
   const centres = current.map((category) => bandCentre(category.band))
+  // In a chart that scrolls sideways, the keys bring the mark they reach into view, clear of
+  // the axes that stay at its sides; the pointer only lights what is already in view.
+  const pointOf = chart.pointOf
+  const revealed = useRef<number | null>(null)
+  useEffect(() => {
+    if (active === revealed.current) return
+    revealed.current = active
+    const element = plot.current
+    const frame = element?.parentElement
+    if (active === null || !element || !frame || !element.matches(':focus-visible'))
+      return
+    if (frame.scrollWidth <= frame.clientWidth) return
+    const point = pointOf(active)
+    if (!point) return
+    const box = element.getBoundingClientRect()
+    const x = box.left + point.x * box.width
+    frame.scrollTo({
+      // From where it is now, so a glide still running for the last key is replaced.
+      left:
+        frame.scrollLeft +
+        revealBy(inView(frame), { left: x - REVEAL_HALF, right: x + REVEAL_HALF }),
+      behavior: revealBehavior(frame),
+    })
+  }, [active, plot, pointOf])
 
   const pick = (event: {
     clientX: number
@@ -1150,7 +1246,7 @@ function ChartColumns() {
   }
 
   const className = cn(
-    'focus-visible:ring-ring/50 relative z-30 min-h-0 min-w-0 rounded-(--control-radius-capped) focus-visible:outline-hidden [grid-area:plot] focus-visible:ring-3',
+    'focus-visible:ring-ring/50 relative z-30 min-h-0 min-w-0 rounded-(--control-radius-capped) focus-visible:outline-hidden [grid-area:plot] focus-visible:ring-3 group-data-scrolls/chart:focus-visible:ring-inset',
     orientation === 'vertical' ? 'touch-pan-y' : 'touch-pan-x',
     ready && selectable && 'cursor-pointer',
   )
@@ -1179,7 +1275,9 @@ function ChartColumns() {
       aria-valuenow={
         chart.xy
           ? pointRank(chart.xy.points, reached, along)
-          : sliderValue(reached, Math.max(1, count), orientation)
+          : chart.grid
+            ? reached + 1
+            : sliderValue(reached, Math.max(1, count), orientation)
       }
       aria-valuetext={columnLabel(chart, reached)}
       data-slot='chart-columns'
@@ -1232,10 +1330,13 @@ function ChartColumns() {
           setActive(reached)
           return
         }
-        // Points placed by two values step by x along it, and by y up and down.
+        // Points placed by two values step by x along it, and by y up and down; cells step
+        // by column along it, and by row up and down.
         const next = chart.xy
           ? stepPoint(chart.xy.points, reached, event.key, direction)
-          : stepIndex(event.key, reached, count, orientation, direction)
+          : chart.grid
+            ? stepCell(chart.grid.cells, reached, event.key, direction)
+            : stepIndex(event.key, reached, count, orientation, direction)
         if (next === null) return
         event.preventDefault()
         if (chart.xy) setAlong(keyAxis(event.key))
@@ -1547,6 +1648,8 @@ interface CategoryChartOptions<Shapes> {
   }
   /** Round the value axis's ends out to a tick; off for shares that fill the axis. */
   nice: boolean
+  /** Whether the chart's height comes from its data, so only a change of width is a resize. */
+  heightFromData?: boolean
   /**
    * The series each row is of, for a chart whose rows each belong to one,
    * such as a donut's slices, keyed by their category, or a scatter's
@@ -1714,7 +1817,7 @@ function useCategoryChart<Shapes>(
   const selectedAt = picked === null ? -1 : current.findIndex((c) => c.key === picked)
   const selected = selectedAt === -1 ? null : selectedAt
 
-  useResizing(root)
+  useResizing(root, options.heightFromData ?? false)
   const textWidth = useTextWidth(root)
   const seen = useEntered(root, !options.entrance)
   // The data that arrived as the placeholder went: until it changes, its marks grow out of the
@@ -1995,6 +2098,37 @@ function CategoryChartFrame({
 }) {
   const figureRef = useMemo(() => mergeRefs(root, ref, markMounted), [root, ref])
   const descriptionId = `${chart.id}-description`
+  // A chart of many columns scrolls sideways once its plot would be narrower than it allows,
+  // only while it shows its marks, so a note in their place stays in view. It takes the
+  // opposite direction to the page, so it opens at its end, the latest column, from the first
+  // paint, and stays there as it narrows; its parts take the page's direction again.
+  const scroller =
+    chart.leastPlotWidth !== undefined &&
+    (chart.status === 'ready' || chart.status === 'hidden')
+  // Whether it overflows: until it is measured, it is taken to, so the axes that hold still
+  // hide what passes under them from the first paint.
+  const [fits, setFits] = useState(false)
+  useLayoutEffect(() => {
+    const frame = root.current
+    if (!scroller || !frame) return
+    const measure = () => setFits(frame.scrollWidth <= frame.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(frame)
+    return () => observer.disconnect()
+  }, [scroller, root, chart.leastPlotWidth])
+  // A new range opens at its end again.
+  const last = chart.current.at(-1)?.key
+  useLayoutEffect(() => {
+    const frame = root.current
+    frame?.scrollTo({ left: 0, behavior: 'instant' })
+  }, [last, root])
+  const scrolls = scroller && !fits
+  const style = {
+    ...(chart.inset ? { '--chart-inset': `${chart.inset}px` } : {}),
+    ...(scroller ? { '--plot-least': `${chart.leastPlotWidth}px` } : {}),
+    ...props.style,
+  } as CSSProperties
   return (
     <ChartContext value={chart}>
       <ChartActive>
@@ -2005,13 +2139,20 @@ function CategoryChartFrame({
           data-orientation={chart.orientation}
           aria-label={chart.label}
           aria-describedby={description ? descriptionId : undefined}
-          className={cn(chartFrameClassName, className)}
+          data-scroller={scroller ? '' : undefined}
+          data-scrolls={scrolls ? '' : undefined}
+          className={cn(
+            chartFrameClassName,
+            scroller &&
+              'scrollbar-thin grid-cols-[auto_minmax(var(--plot-least),1fr)_auto] overflow-x-auto overflow-y-hidden [grid-template-areas:"top_top_top"_"._top-axis_."_"end-axis_plot_start-axis"_"._bottom-axis_."_"bottom_bottom_bottom"]',
+            scroller &&
+              (chart.direction === 'rtl'
+                ? '[direction:ltr] *:[direction:rtl]'
+                : '[direction:rtl] *:[direction:ltr]'),
+            className,
+          )}
           {...props}
-          style={
-            chart.inset
-              ? ({ '--chart-inset': `${chart.inset}px`, ...props.style } as CSSProperties)
-              : props.style
-          }
+          style={style}
         >
           <ChartStyle id={chart.id} config={chart.config} series={chart.series} />
           {description && (
@@ -2022,12 +2163,38 @@ function CategoryChartFrame({
           {children}
           {placeholder}
           <ChartColumns />
+          {scroller && <ScrollCorners direction={chart.direction} />}
           <ChartStatusOverlay empty={empty} />
           <ChartDataTable />
         </figure>
       </ChartActive>
     </ChartContext>
   )
+}
+
+/** The corners beside the axes along the top and bottom of a chart that scrolls sideways, which hold still with the axes down its sides, so the names passing under them hide there too. */
+function ScrollCorners({ direction }: { direction: ReadingDirection }) {
+  return (['top', 'bottom'] as const).flatMap((row) =>
+    (['start', 'end'] as const).map((side) => (
+      <span
+        key={`${row}-${side}`}
+        aria-hidden
+        className={cn(
+          'pointer-events-none group-data-scrolls/chart:sticky group-data-scrolls/chart:z-40 group-data-scrolls/chart:bg-(--chart-surface,var(--card))',
+          row === 'top' ? '[grid-row:top-axis]' : '[grid-row:bottom-axis]',
+          side === 'start' ? '[grid-column:start-axis]' : '[grid-column:end-axis]',
+          stickTo(side, direction),
+        )}
+      />
+    )),
+  )
+}
+
+/** The physical side a part of a chart that scrolls sideways holds still on: the frame takes the opposite direction to the page, so a logical inset would land on the wrong side. */
+function stickTo(side: 'start' | 'end', direction: ReadingDirection) {
+  return (side === 'start') === (direction === 'ltr')
+    ? 'group-data-scrolls/chart:left-0'
+    : 'group-data-scrolls/chart:right-0'
 }
 
 /** The props a chart's root takes that `useCategoryChart` reads, so the root passes the rest to its frame. */
@@ -2080,6 +2247,7 @@ function figureProps<P extends CategoryChartProps>(
 
 export {
   axisLayerClassName,
+  stickTo,
   axisSlide,
   CategoryChartFrame,
   type CategoryChartProps,
@@ -2101,6 +2269,9 @@ export {
   rowsShown,
   type ChartAxis,
   type ChartXY,
+  type ChartAxisName,
+  type ChartCellGrid,
+  type ChartGridAxis,
   scalesOf,
   xyPlace,
   type EntrancePhase,
