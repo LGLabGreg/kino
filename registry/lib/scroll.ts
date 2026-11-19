@@ -5,6 +5,7 @@ import {
   type RefCallback,
   type RefObject,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useState,
 } from 'react'
@@ -13,7 +14,8 @@ import {
  * What a box that scrolls shows about it: its edges fade while content is
  * hidden past them, as the Tabs' list, a wide Table and a Scroll area do, and
  * it takes focus while its content is larger than it, so the keyboard can
- * scroll it, as a panel's body and a Table do.
+ * scroll it, as a panel's body and a Table do. And what moves as the page
+ * scrolls past it, as the Hero's product shot does.
  */
 
 const EDGE_FADE_PX = 24
@@ -297,4 +299,187 @@ export function revealInRow(
     stopEdges()
     scroller.removeEventListener('focusin', focused)
   }
+}
+
+/**
+ * Where a scroll-linked move starts and ends, in px of scrolling: it starts
+ * when the element's top is `from` of the way down the scroller's view (1 is
+ * its bottom edge) and ends at `to`. A move that would start before the top
+ * of the page starts there, so an element at the top of a page begins it from
+ * its first state. Nothing, when the page can't scroll far enough for the
+ * move to read as one.
+ */
+export function scrollLinkedRange({
+  top,
+  view,
+  max,
+  from,
+  to,
+}: {
+  /** The element's top, in px from the start of the scroller's content. */
+  top: number
+  /** The scroller's visible height, in px. */
+  view: number
+  /** How far the scroller scrolls, in px. */
+  max: number
+  from: number
+  to: number
+}): { start: number; end: number } | null {
+  if (max <= 0 || view <= 0) return null
+  const start = Math.round(Math.min(max, Math.max(0, top - from * view)))
+  const end = Math.round(Math.min(max, Math.max(0, top - to * view)))
+  // Less than a tenth of a screen of scrolling would make it a jump.
+  if (end - start < view * 0.1) return null
+  return { start, end }
+}
+
+/** An element's top in the page, from layout alone, so a transform on it or above it doesn't move it. */
+function pageTop(element: HTMLElement) {
+  let top = 0
+  for (
+    let at: HTMLElement | null = element;
+    at;
+    at = at.offsetParent as HTMLElement | null
+  ) {
+    top += at.offsetTop
+  }
+  return top
+}
+
+/**
+ * Moves `ref`'s element from `from` to `to` as the page scrolls it into
+ * view, on the scroll itself, off the main thread: a scroll timeline on the
+ * element that actually scrolls it, never the nearest box that clips, which
+ * would hold a `view()` timeline still. The move is placed again only when
+ * where it starts or ends changes, and follows a feel or a reduced-motion
+ * preference set after load. Where the page can't scroll far enough for the
+ * move, the element rests at `to`. Where motion is reduced, or the browser has
+ * no scroll timelines, nothing moves it: it rests where its own CSS puts it, so
+ * a starting pose set in CSS for the first paint sits under
+ * `motion-safe:supports-[animation-timeline:scroll()]:`.
+ */
+export function useScrollLinked(
+  ref: RefObject<HTMLElement | null>,
+  {
+    from,
+    to,
+    range,
+    pace = 'settle',
+  }: {
+    from: Keyframe
+    to: Keyframe
+    /** Where the element's top sits in the view, as a share down it, when the move starts and ends. */
+    range: readonly [number, number]
+    /**
+     * How the move follows the scroll: `settle` on the `layout` role's curve
+     * without its overshoot, quick at first and easing into place, or `even`,
+     * at the scroll's own rate, for layers that drift at a depth.
+     */
+    pace?: 'settle' | 'even'
+  },
+) {
+  const [rangeFrom, rangeTo] = range
+  const fromKey = JSON.stringify(from)
+  const toKey = JSON.stringify(to)
+  useEffect(() => {
+    const element = ref.current
+    if (!element || typeof ScrollTimeline === 'undefined') return
+    const start = JSON.parse(fromKey) as Keyframe
+    const end = JSON.parse(toKey) as Keyframe
+    let animation: Animation | undefined
+    let placed = ''
+    let frame = 0
+
+    const place = () => {
+      // A box that scrolls it, or else the page.
+      const own = scrollerOf(element)
+      const scroller = own ?? document.scrollingElement ?? document.documentElement
+      const reduced = reducesMotion(element)
+      const offsets = reduced
+        ? null
+        : scrollLinkedRange({
+            top: pageTop(element) - (own ? pageTop(own) + own.clientTop : 0),
+            view: scroller.clientHeight,
+            max: scroller.scrollHeight - scroller.clientHeight,
+            from: rangeFrom,
+            to: rangeTo,
+          })
+      const easing =
+        pace === 'even'
+          ? 'linear'
+          : getComputedStyle(element)
+              .getPropertyValue('--motion-layout-fade-easing')
+              .trim()
+      const key = reduced
+        ? 'reduced'
+        : offsets && easing
+          ? `${offsets.start} ${offsets.end} ${easing}`
+          : 'rest'
+      const timeline = timelines.get(scroller)
+      if (key === placed && (!offsets || animation?.timeline === timeline)) return
+      placed = key
+      animation?.cancel()
+      animation = undefined
+      if (reduced) return
+      if (!offsets || !easing) {
+        // Too little scroll for the move: it rests where it would end.
+        animation = element.animate([{ ...end }], { fill: 'forwards' })
+        return
+      }
+      const keyframes = [{ ...start, easing }, { ...end }]
+      // In scroll px, so content that grows below the element moves nothing.
+      const rangeStart = `${offsets.start}px`
+      const rangeEnd = `${offsets.end}px`
+      animation = element.animate(keyframes, {
+        timeline: timelineOf(scroller),
+        rangeStart,
+        rangeEnd,
+        fill: 'both',
+      })
+    }
+    // At most once a frame, however many changes arrive in it.
+    const schedule = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(place)
+    }
+
+    place()
+    // Where the move starts and ends shifts when anything changes size: the
+    // window, the page or the element.
+    const resizes = new ResizeObserver(schedule)
+    resizes.observe(element)
+    resizes.observe(document.body)
+    // The view's own height changes without the page's size: a phone's
+    // address bar, or a window made shorter.
+    window.addEventListener('resize', schedule)
+    // A feel or a reduced-motion preference can be set on any element above it.
+    const preferences = new MutationObserver(schedule)
+    preferences.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-feel', 'data-motion'],
+      subtree: true,
+    })
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    motion.addEventListener('change', schedule)
+    return () => {
+      resizes.disconnect()
+      window.removeEventListener('resize', schedule)
+      preferences.disconnect()
+      motion.removeEventListener('change', schedule)
+      cancelAnimationFrame(frame)
+      animation?.cancel()
+    }
+  }, [ref, fromKey, toKey, rangeFrom, rangeTo, pace])
+}
+
+/** One scroll timeline per scroller, shared by every move it drives. */
+const timelines = new WeakMap<Element, ScrollTimeline>()
+
+function timelineOf(scroller: Element) {
+  let timeline = timelines.get(scroller)
+  if (!timeline) {
+    timeline = new ScrollTimeline({ source: scroller, axis: 'block' })
+    timelines.set(scroller, timeline)
+  }
+  return timeline
 }
