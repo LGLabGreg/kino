@@ -11,6 +11,8 @@ import {
   CategoryChartFrame,
   type ChartCategory,
   type ChartContextValue,
+  drawingFrame,
+  drawingSize,
   type EntrancePhase,
   forcedSeriesColor,
   forcedSeriesTextColor,
@@ -528,7 +530,8 @@ function LineSeries({
   const steppedFill = { path: steppedFillPath, gradient: steppedFillGradient }
   const litFill = { path: litFillPath, gradient: litFillGradient }
   const dotElements = useRef(new Map<string, HTMLElement>())
-  const { plotSize } = chart
+  const plotSize = drawingSize(chart.plotSize)
+  const frame = drawingFrame(chart.plotSize, 'none')
   // Where a series that arrives on an empty chart starts: flat along zero.
   const start = useMemo(() => {
     const zero = zeroY(chart)
@@ -574,7 +577,7 @@ function LineSeries({
   const window = litWindow(chart, windowAt)
   const bright = brightSpan(windowAt, to.length)
   const pathClass =
-    'fill-none stroke-current [stroke-width:calc(var(--trace-width)*var(--trace-weight,1))] [stroke-linecap:round] [stroke-linejoin:round]'
+    'fill-none stroke-current [stroke-width:calc(var(--trace-width)*var(--trace-weight,1))] [stroke-linecap:round] [stroke-linejoin:round] [vector-effect:non-scaling-stroke]'
   const strokes = (bright: boolean) => (
     <>
       {connectNulls && !bright && (
@@ -597,7 +600,7 @@ function LineSeries({
           lone.current[bright ? 1 : 0] = element
         }}
         d={drawing.lone}
-        className='fill-none stroke-current [stroke-width:calc(var(--trace-width)*3)] [stroke-linecap:round]'
+        className='fill-none stroke-current [stroke-width:calc(var(--trace-width)*3)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]'
       />
       {splitKey && (
         <path
@@ -652,6 +655,7 @@ function LineSeries({
           {fill && (
             <div className='absolute inset-0 [mask-image:linear-gradient(to_right,black_calc(var(--line-window-from)-var(--trace-fade)),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-from),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-to),black_calc(var(--line-window-to)+var(--trace-fade)))]'>
               <svg
+                {...frame}
                 data-dim={stepsBack ? '' : undefined}
                 // A wash steps back in strength as well as colour, or it reads as strong as the lit one.
                 className={cn(
@@ -672,6 +676,7 @@ function LineSeries({
             </div>
           )}
           <svg
+            {...frame}
             ref={progress}
             data-entering={family.phase === 'entering' ? '' : undefined}
             data-dim={stepsBack ? '' : undefined}
@@ -717,7 +722,7 @@ function LineSeries({
               'absolute inset-0 text-(--line-color) [mask-image:linear-gradient(to_right,transparent_calc(var(--line-window-from)-var(--trace-fade)),black_var(--line-window-from),black_var(--line-window-to),transparent_calc(var(--line-window-to)+var(--trace-fade)))] opacity-(--line-window-shown)',
             )}
           >
-            <svg className='absolute inset-0 size-full overflow-visible'>
+            <svg {...frame} className='absolute inset-0 size-full overflow-visible'>
               <g transform={mirror(chart.direction, plotSize.width)}>
                 {fill && (
                   <AreaFill
@@ -982,7 +987,8 @@ function placeholderPoints(filled = false): LinePoint[] {
  * data arrives.
  */
 function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }) {
-  const { plotSize } = useChart()
+  const chart = useChart()
+  const plotSize = drawingSize(chart.plotSize)
   const id = useId().replaceAll(':', '')
   const points = placeholderPoints(fill)
   return (
@@ -1002,7 +1008,10 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
         )}
       >
         {/* The line is already a faint tint, so its fill is drawn stronger under it. */}
-        <svg className='absolute inset-0 size-full overflow-visible [--trace-fill-top:0.6] [--trace-fill-bottom:0.15]'>
+        <svg
+          {...drawingFrame(chart.plotSize, 'none')}
+          className='absolute inset-0 size-full overflow-visible [--trace-fill-top:0.6] [--trace-fill-bottom:0.15]'
+        >
           {fill && (
             <AreaFill
               id={`${id}-fill`}
@@ -1013,7 +1022,7 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
           )}
           <path
             d={pathThrough(points, 'monotone', plotSize.width, plotSize.height)}
-            className='fill-none stroke-current [stroke-width:var(--trace-width)] [stroke-linecap:round]'
+            className='fill-none stroke-current [stroke-width:var(--trace-width)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]'
           />
         </svg>
       </div>

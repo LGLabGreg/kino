@@ -501,12 +501,28 @@ export function labelStep(count: number, length: number, minLength: number): num
 }
 
 /**
- * About how long a category's label is, in px, at the axis's 12px text: 7px
- * a character and room either side. Close enough to thin out a long run of
- * labels without measuring each one.
+ * About how long a category's label is, in px, at the axis's 12px text: each
+ * character at about its width in a sans-serif such as Geist or Inter, and
+ * room either side. Close enough to thin out a long run of labels without
+ * measuring each one, and to lay an axis out as it will look before the font
+ * is known.
  */
 export function labelLength(text: string): number {
-  return text.length * 7 + 12
+  let length = 12
+  for (const character of text) length += characterWidth(character)
+  return length
+}
+
+/** About how wide a character is at 12px, by its kind. */
+function characterWidth(character: string): number {
+  if (/\d/.test(character)) return 7.7
+  if (character === ' ') return 3
+  if (/[A-Z]/.test(character)) return 8.1
+  if (/[a-z]/.test(character)) return 6.2
+  // Han, kana and hangul, a full em each.
+  if (/[\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(character)) return 12
+  if (/\p{L}/u.test(character)) return 6.6
+  return 4
 }
 
 /**
@@ -525,6 +541,40 @@ export function labelBox(centre: number, width: number, length: number): Span {
 /** Whether two names' boxes come closer than `gap` px. */
 export function labelsMeet(a: Span, b: Span, gap = 4): boolean {
   return a[0] < b[1] + gap && b[0] < a[1] + gap
+}
+
+/**
+ * The names a category axis `length` px long shows, as `skipped` indexes, and
+ * the room each has, in px: every few in a long run, each `minLength` px or
+ * more apart, and none that would meet the lit name or the last one shown, as
+ * a name kept inside the axis at either end can. Each name has its centre, a
+ * share of the axis, and its width in px; the lit one shows whole.
+ */
+export function axisNames(
+  names: readonly { centre: number; width: number }[],
+  length: number,
+  { minLength, gap, lit = null }: { minLength: number; gap: number; lit?: number | null },
+): { every: number; room: number; skipped: Set<number> } {
+  const every = labelStep(names.length, length, minLength)
+  const room = names.length === 0 ? 0 : Math.max(0, (length / names.length) * every - gap)
+  const skipped = new Set<number>()
+  const litName = lit === null ? undefined : names[lit]
+  const litBox = litName ? labelBox(litName.centre, litName.width, length) : null
+  let last: Span | null = null
+  names.forEach((name, index) => {
+    if (index === lit) return
+    const box = labelBox(name.centre, Math.min(name.width, room), length)
+    if (
+      index % every !== 0 ||
+      (litBox !== null && labelsMeet(box, litBox)) ||
+      (last !== null && labelsMeet(box, last))
+    ) {
+      skipped.add(index)
+      return
+    }
+    last = box
+  })
+  return { every, room, skipped }
 }
 
 /**

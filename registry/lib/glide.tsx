@@ -9,6 +9,11 @@ import {
   type ScreenBox,
 } from '@/registry/lib/popup'
 import {
+  FOLLOWS_TRANSITION,
+  transitionTiming,
+  withoutTransition,
+} from '@/registry/lib/resize'
+import {
   createContext,
   type CSSProperties,
   type ReactNode,
@@ -29,8 +34,12 @@ import { cn } from '@/lib/utils'
  * The popup paints nothing itself. Its surface reaches far past it, and the
  * surface and the content are clipped to one box, written as CSS variables
  * relative to the popup: the box when open, the strip while opening and
- * closing, and wherever the box was while it slides. One clip, so an open, a
- * slide and a close each turn back from wherever the last one left it.
+ * closing, and the last box's size while it slides to a new one. One clip, so
+ * an open, a slide and a close each turn back from wherever the last one left
+ * it. When Base UI places the popup somewhere else, the whole popup shifts
+ * back to where it showed and glides to its new place on a `translate` of
+ * its own, so the clip keeps its own clock on the way: a tooltip that follows
+ * the pointer finishes opening while it moves.
  */
 
 /**
@@ -62,6 +71,8 @@ export type GlideCue =
       instant: boolean
       /** The popup moved only because the page scrolled, so the clip already follows. */
       scrolled: boolean
+      /** The popup's box changed size, not only its place. */
+      resized: boolean
       /** How a popup that opens soon after its group's last one closed starts, if one did. */
       remembered: 'slide' | 'grow' | null
     }
@@ -71,7 +82,8 @@ export type GlideCue =
 /**
  * What the clip does: snap to the box, grow from the strip, grow from the
  * strip the last popup folded into, slide from where it shows now, slide
- * from where the last popup was, fold, or come to rest.
+ * from where the last popup was, fold, or come to rest. On a `move`, the
+ * popup glides to its new place and the clip carries on as it was.
  */
 export type GlideStep =
   | 'snap'
@@ -79,6 +91,7 @@ export type GlideStep =
   | 'grow-again'
   | 'slide'
   | 'slide-again'
+  | 'move'
   | 'fold'
   | 'rest'
   | 'stay'
@@ -104,6 +117,9 @@ export function glideNext(
   if (cue.instant) return ['rest', 'snap']
   // Opened again before it had gone, it slides on from where the fold got to.
   if (cue.scrolled && phase !== 'close') return [phase, 'stay']
+  // The same box somewhere else: an open keeps growing on its own clock as it
+  // goes, rather than starting over from wherever the pointer left it.
+  if (!cue.resized && phase !== 'close') return [phase, 'move']
   return ['slide', 'slide']
 }
 
@@ -131,9 +147,9 @@ export function insetBox(clip: string, frame: ScreenBox): ScreenBox | null {
 }
 
 /**
- * The translate that keeps content where it is on screen once its popup has
- * moved from `from` to `to`: `current` plus the move of the popup's
- * inline-start corner, which content is laid out from.
+ * The shift that keeps a popup where it is on screen once Base UI has placed
+ * it from `from` to `to`: `current` plus the move of its inline-start corner,
+ * which its content is laid out from.
  */
 export function rideOffset(
   current: readonly [number, number],
@@ -285,6 +301,27 @@ const boxOf = (element: Element): ScreenBox => {
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
 }
 
+/** How far the popup shows from its place, in pixels across and down. */
+type Shift = readonly [number, number]
+
+/** The popup's shift now, mid-glide or not. */
+const shiftOf = (popup: HTMLElement): Shift => {
+  const now = getComputedStyle(popup).translate
+  if (now === 'none') return [0, 0]
+  const [x = '0', y = '0'] = now.split(' ')
+  return [Number.parseFloat(x), Number.parseFloat(y)]
+}
+
+/** `box` moved by `shift`, or back by it with a `sign` of -1. */
+const moved = (box: ScreenBox, [x, y]: Shift, sign: 1 | -1 = 1): ScreenBox => ({
+  ...box,
+  left: box.left + x * sign,
+  top: box.top + y * sign,
+})
+
+/** Where Base UI placed the popup, without the shift it shows at. */
+const placeOf = (popup: HTMLElement, shift: Shift) => moved(boxOf(popup), shift, -1)
+
 /** Whether Base UI asks for no animation; `first` is the popup's first placing. */
 export type GlideInstant = (parts: {
   popup: HTMLElement
@@ -317,8 +354,7 @@ function trackGlide(
 ) {
   const popup = content.parentElement
   const positioner = popup?.parentElement
-  const mover = content.firstElementChild
-  if (!popup || !positioner || !(mover instanceof HTMLElement)) return
+  if (!popup || !positioner) return
   let phase: GlidePhase = 'waiting'
   let last = ''
   let popupBox: ScreenBox | null = null
@@ -330,13 +366,49 @@ function trackGlide(
     popup.dataset.glide = next
   }
 
-  // The content keeps its place on screen as the popup moves under it.
-  const ridden = (from: ScreenBox | null, to: ScreenBox, fromCurrent: boolean) => {
-    const now = getComputedStyle(mover).translate
-    const [x = '0', y = '0'] = now === 'none' || !fromCurrent ? [] : now.split(' ')
-    const current = [Number.parseFloat(x), Number.parseFloat(y)] as const
-    const [dx, dy] = from ? rideOffset(current, from, to, direction()) : current
-    return `${dx}px ${dy}px`
+  // The shift the popup keeps while it folds, set at once.
+  const setHeld = ([x, y]: Shift) =>
+    withoutTransition(
+      popup,
+      () => {
+        popup.style.translate = x === 0 && y === 0 ? '' : `${x}px ${y}px`
+      },
+      { properties: ['translate'] },
+    )
+  const heldOf = (): Shift => {
+    const [x = '0', y = '0'] = popup.style.translate.split(' ')
+    return [Number.parseFloat(x) || 0, Number.parseFloat(y) || 0]
+  }
+
+  // Each move glides home on an animation of its own, added to the ones still
+  // running: a move that comes mid-way keeps the earlier ones' speed, where
+  // a transition turned round would start again from rest.
+  const glideHome = ([x, y]: Shift) => {
+    const [heldX, heldY] = heldOf()
+    if (heldX !== 0 || heldY !== 0) setHeld([0, 0])
+    const from = [x + heldX, y + heldY]
+    if (from[0] === 0 && from[1] === 0) return
+    const timing = transitionTiming(getComputedStyle(popup), 'translate')
+    if (!timing) return
+    const glide = popup.animate(
+      [{ translate: `${from[0]}px ${from[1]}px` }, { translate: '0px 0px' }],
+      {
+        ...timing,
+        composite: 'add',
+        id: FOLLOWS_TRANSITION,
+      },
+    )
+    // Started on this frame's clock: a new animation waits a frame for its start, and
+    // without one it would show the popup at its new place for that frame.
+    glide.startTime = document.timeline.currentTime
+  }
+
+  // A popup placed afresh shows at its place.
+  const settle = () => {
+    for (const animation of popup.getAnimations()) {
+      if (animation.id === FOLLOWS_TRANSITION) animation.cancel()
+    }
+    setHeld([0, 0])
   }
 
   // The strip under the trigger, read from the anchor Base UI placed.
@@ -357,41 +429,27 @@ function trackGlide(
     )
   }
 
-  // Moves the clip from `from` to the box, with the content riding along on a slide.
-  const play = (
-    next: 'open' | 'slide',
-    from: ScreenBox | null,
-    box: ScreenBox,
-    at: string,
-  ) => {
+  // Moves the clip from `from` to the box, both against the popup's place.
+  const play = (next: 'open' | 'slide', from: ScreenBox | null, box: ScreenBox) => {
     enter('rest')
     if (from) writeBox(popup, 'glide', box, from)
-    mover.style.translate = at
     void getComputedStyle(content).clipPath
     enter(next)
     writeBox(popup, 'glide', box, box)
-    mover.style.translate = '0px 0px'
   }
 
   // Base UI can move a closing popup before it has gone, such as to its next
-  // trigger a frame before it opens it again. The clip is relative to the
-  // popup, so the fold would jump with it: write it again against the new
-  // place, so it stays put on screen.
+  // trigger a frame before it opens it again: the shift keeps the fold where
+  // it is on screen.
   const hold = () => {
     if (!popupBox) return
-    const box = boxOf(popup)
+    const shift = shiftOf(popup)
+    const box = placeOf(popup, shift)
     if (box.width === 0 || (box.left === popupBox.left && box.top === popupBox.top)) {
       return
     }
-    const shown = insetBox(getComputedStyle(content).clipPath, popupBox)
-    const strip = readBox(popup, 'strip', popupBox)
-    const at = ridden(popupBox, box, true)
-    enter('rest')
-    if (shown) writeBox(popup, 'glide', box, shown)
-    mover.style.translate = at
-    void getComputedStyle(content).clipPath
-    writeBox(popup, 'strip', box, strip)
-    enter('close')
+    const [x, y] = rideOffset(heldOf(), popupBox, box, direction())
+    setHeld([x, y])
     popupBox = box
   }
 
@@ -401,12 +459,8 @@ function trackGlide(
       // Base UI can take the closing content out of flow: the box keeps its size.
       popup.style.width = `${popupBox.width}px`
       popup.style.height = `${popupBox.height}px`
-      if (step === 'fold') {
-        // The fold starts: aim it at the trigger open now, and stop the
-        // content riding where it is, so nothing jumps.
-        writeBox(popup, 'strip', popupBox, stripOf(popupBox))
-        mover.style.translate = getComputedStyle(mover).translate
-      }
+      // The fold starts: aim it at the trigger open now.
+      if (step === 'fold') writeBox(popup, 'strip', popupBox, stripOf(popupBox))
     }
     hold()
     enter(next)
@@ -434,7 +488,8 @@ function trackGlide(
     }
     popup.style.width = ''
     popup.style.height = ''
-    const box = boxOf(popup)
+    const shift = shiftOf(popup)
+    const box = placeOf(popup, shift)
     if (box.width === 0) return
     const key = `${box.left},${box.top},${box.width},${box.height}`
     if (key === last) return
@@ -445,25 +500,40 @@ function trackGlide(
       kind: 'measured',
       instant: instant({ popup, positioner, first: phase === 'waiting' }),
       scrolled: scroll.followed(popupBox, box),
+      // Under a pixel, the clip's edges simply follow the popup's.
+      resized:
+        popupBox !== null &&
+        (Math.abs(popupBox.width - box.width) >= 1 ||
+          Math.abs(popupBox.height - box.height) >= 1),
       remembered: phase === 'waiting' ? remembered() : null,
     })
     if (step === 'snap') {
       enter(next)
       writeBox(popup, 'glide', box, box)
-      mover.style.translate = '0px 0px'
+      settle()
     } else if (step === 'grow') {
-      play('open', strip, box, '0px 0px')
+      settle()
+      play('open', strip, box)
     } else if (step === 'grow-again' && memory?.strip) {
-      play('open', memory.strip, box, '0px 0px')
+      settle()
+      play('open', memory.strip, box)
     } else if (step === 'slide-again' && memory?.box) {
-      play('slide', memory.box, box, ridden(memory.box, box, false))
-    } else if (step === 'slide') {
-      // Where the box shows now, mid-slide or not, read against the place the
-      // popup had when the clip was written.
-      const shown = popupBox
-        ? insetBox(getComputedStyle(content).clipPath, popupBox)
-        : null
-      play('slide', shown, box, ridden(popupBox, box, true))
+      const from = rideOffset([0, 0], memory.box, box, direction())
+      play('slide', moved(memory.box, from, -1), box)
+      glideHome(from)
+    } else if (step === 'slide' || step === 'move') {
+      const move = popupBox ? rideOffset([0, 0], popupBox, box, direction()) : null
+      if (step === 'slide') {
+        // Where the box shows now, mid-move or not, read against where the
+        // popup shows, then written against its new place, from which the
+        // shift and the move start out.
+        const shown = popupBox
+          ? insetBox(getComputedStyle(content).clipPath, moved(popupBox, shift))
+          : null
+        const start: Shift = move ? [shift[0] + move[0], shift[1] + move[1]] : shift
+        play('slide', shown && moved(shown, start, -1), box)
+      }
+      if (move) glideHome(move)
     }
     popupBox = box
     if (memory) memory.box = box
@@ -518,10 +588,12 @@ function glideClip(offset: string, shrink = '0px') {
 /**
  * The popup's own classes. It fades as it folds, so the strip never lingers
  * as a line, and Base UI, which waits only for the popup's own transitions,
- * keeps it mounted until then. Set `--glide-radius` beside them.
+ * keeps it mounted until then. It glides to a new place on `layout`, also on
+ * Base UI's instant open, which only skips the fade, and not under reduced
+ * motion. Set `--glide-radius` beside them.
  */
 export const glidePopupClassName =
-  'group/popup relative isolate transition-opacity duration-[calc(var(--motion-exit-duration)*0.6)] ease-(--motion-exit-easing) data-ending-style:opacity-0 motion-reduce:data-starting-style:opacity-0 data-instant:transition-none'
+  'group/popup relative isolate [transition:opacity_calc(var(--motion-exit-duration)*0.6)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:[transition-property:opacity,--held] data-ending-style:opacity-0 motion-reduce:data-starting-style:opacity-0 data-instant:[transition-property:--held,translate] motion-reduce:data-instant:transition-none'
 
 /**
  * What the popup's box is painted with, behind its content: `fill`, and with
@@ -589,9 +661,7 @@ export function GlideContent({
       className={cn(glideClipClassName, glideTiming)}
       style={glideClip('0px')}
     >
-      <div className='transition-none group-data-[glide=slide]/popup:transition-[translate] group-data-[glide=slide]/popup:duration-(--motion-layout-duration) group-data-[glide=slide]/popup:ease-(--motion-layout-easing) motion-reduce:transition-none!'>
-        {children}
-      </div>
+      {children}
     </div>
   )
 }

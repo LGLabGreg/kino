@@ -8,6 +8,8 @@ import {
   type ChartCategory,
   type ChartContextValue,
   type ChartPoint,
+  drawingFrame,
+  drawingSize,
   figureProps,
   forcedSeriesColor,
   swatchClassName,
@@ -32,9 +34,11 @@ import {
 } from '@/registry/lib/placeholder'
 import { Swap, SwapText } from '@/registry/lib/swap'
 import {
+  Children,
   type ComponentProps,
   createContext,
   type CSSProperties,
+  isValidElement,
   memo,
   type ReactNode,
   use,
@@ -214,11 +218,18 @@ function DonutChart(props: DonutChartProps) {
   )
   const added = useRegistry<DonutRingKey>()
   const label = valueLabel ?? chart.messages.total
-  const keys: DonutRingKey[] = [
-    { dataKey, label },
-    ...added.values.filter((ring) => ring.dataKey !== dataKey),
-  ]
-  const { width, height } = chart.plotSize
+  // The rings among its own children are known from the first render, as on the server's
+  // first paint; any deeper one joins once it mounts.
+  const declared = Children.toArray(children).flatMap((child) =>
+    isValidElement<DonutRingKey>(child) && child.type === DonutChartRing
+      ? [{ dataKey: child.props.dataKey, label: child.props.label }]
+      : [],
+  )
+  const keys: DonutRingKey[] = [{ dataKey, label }]
+  for (const ring of [...declared, ...added.values]) {
+    if (!keys.some((key) => key.dataKey === ring.dataKey)) keys.push(ring)
+  }
+  const { width, height } = drawingSize(chart.plotSize)
   const scale = useGrowScale(root, grow, width, height)
   const edge = Math.max(0, Math.min(width, height) / 2 - 0.5 - room)
   const outer = edge / scale
@@ -549,8 +560,9 @@ function DonutSlices({ ring: at }: { ring: number }) {
   const { spotlit } = useChartActive()
   const donut = useDonutChart()
   const ring = donut.rings[at]
-  const { width, height } = chart.plotSize
-  if (!ring || chart.status === 'empty' || width === 0 || height === 0) return null
+  // Before the plot is measured, drawn in a square stand-in that the SVG fits to the plot.
+  const { width, height } = drawingSize(chart.plotSize)
+  if (!ring || chart.status === 'empty') return null
   const { inner, outer } = ring.band
   const radius = (inner + outer) / 2
   const circumference = 2 * Math.PI * radius
@@ -578,6 +590,7 @@ function DonutSlices({ ring: at }: { ring: number }) {
       <svg
         className='absolute inset-0 size-full overflow-visible'
         viewBox={`0 0 ${round(width)} ${round(height)}`}
+        {...drawingFrame(chart.plotSize, 'xMidYMid meet')}
       >
         {gaps && (
           <defs>
@@ -868,8 +881,13 @@ function DonutChartLabels({
   const room =
     position === 'outside' ? outsideRoom(width, height, Math.max(0, ...widths)) : 0
   useLayoutEffect(() => (room > 0 ? addRoom(room) : undefined), [addRoom, room])
-  if (chart.status !== 'ready' || width === 0 || height === 0) return null
   const outside = position === 'outside'
+  // Before the plot is measured, labels on their slices sit in the slices' square stand-in;
+  // those past the ring wait, since the room they take is in pixels, not a share of the plot.
+  const measured = width > 0 && height > 0
+  if (chart.status !== 'ready' || (outside && !measured)) return null
+  const drawn = drawingSize(chart.plotSize)
+  const stretch = measured ? null : 1 / Math.min(drawn.width, drawn.height)
   const { inner, outer } = ring.band
   // On a pie, a little past halfway out, where a slice is wider; on a ring, its middle.
   const radius = outside
@@ -897,6 +915,7 @@ function DonutChartLabels({
             key={category.key}
             turn={slice.start + slice.size / 2}
             radius={radius}
+            stretch={stretch}
             edge={outside ? donut.edge : null}
             color={sliceColor(chart, category)}
             shown={at !== -1 && slice.size > 0 && !donut.entering && (shown[at] ?? false)}
@@ -1005,6 +1024,7 @@ function insideLabelFits(
 const DonutLabel = memo(function DonutLabel({
   turn,
   radius,
+  stretch,
   edge,
   color,
   shown,
@@ -1013,6 +1033,8 @@ const DonutLabel = memo(function DonutLabel({
 }: {
   turn: number
   radius: number
+  /** Before the plot is measured, one over the stand-in's shorter side, which `radius` is in; else null. */
+  stretch: number | null
   /** The ring's edge, in px, for a label outside; null for one on its slice. */
   edge: number | null
   /** The slice's colour, which a label on it is written against. */
@@ -1031,7 +1053,10 @@ const DonutLabel = memo(function DonutLabel({
       style={
         {
           '--label-turn': `${round(turn * 360)}deg`,
-          '--label-out': `${-round(radius)}px`,
+          '--label-out':
+            stretch === null
+              ? `${-round(radius)}px`
+              : `calc(min(100cqw, 100cqh) * ${-round(radius * stretch * 100) / 100})`,
         } as CSSProperties
       }
     >
@@ -1217,6 +1242,8 @@ function DonutChartCentre({
     ? (chart.config[category.key]?.label ?? chart.categoryText(category.value))
     : (label ?? donut.valueLabel)
   const format = chart.format
+  const hole = donut.outer * 2 * donut.innerRadius
+  const drawn = drawingSize(chart.plotSize)
   return (
     <div
       data-slot='donut-chart-centre'
@@ -1228,7 +1255,11 @@ function DonutChartCentre({
       )}
       style={
         {
-          '--donut-hole': `${round(donut.outer * 2 * donut.innerRadius)}px`,
+          // Before the plot is measured, the stand-in's hole as a share of the plot's shorter side.
+          '--donut-hole':
+            chart.plotSize.width > 0 && chart.plotSize.height > 0
+              ? `${round(hole)}px`
+              : `calc(min(100cqw, 100cqh) * ${hole / Math.min(drawn.width, drawn.height)})`,
           ...style,
         } as CSSProperties
       }

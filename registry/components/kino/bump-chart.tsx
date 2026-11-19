@@ -732,7 +732,7 @@ function NameSlide({
       ref={ref}
       className={cn(
         slideLine.y,
-        '[translate:0_calc(var(--name-from,var(--name-to))+(var(--name-to)-var(--name-from,var(--name-to)))*var(--bump-name-progress))] transition-none group-data-mounted/chart:transition-[--bump-name-progress,opacity] duration-(--motion-layout-duration) ease-[var(--motion-layout-easing),var(--motion-layout-fade-easing)] data-gone:opacity-0 motion-reduce:group-data-mounted/chart:transition-opacity motion-reduce:group-data-mounted/chart:ease-(--motion-layout-fade-easing)',
+        '[translate:0_calc(var(--name-from,var(--name-to))+(var(--name-to)-var(--name-from,var(--name-to)))*var(--bump-name-progress,1))] transition-none group-data-mounted/chart:transition-[--bump-name-progress,opacity] duration-(--motion-layout-duration) ease-[var(--motion-layout-easing),var(--motion-layout-fade-easing)] data-gone:opacity-0 motion-reduce:group-data-mounted/chart:transition-opacity motion-reduce:group-data-mounted/chart:ease-(--motion-layout-fade-easing)',
         className,
       )}
       style={{ '--name-to': `${at * 100}cqh`, ...style } as CSSProperties}

@@ -42,6 +42,48 @@ export function startSizeRun(element: object, size: Size): () => boolean {
  */
 export const FOLLOWS_TRANSITION = 'follows-transition'
 
+/** A computed CSS list split at its top-level commas: `linear(0, 1), ease` is two items. */
+function cssList(value: string): string[] {
+  const items: string[] = []
+  let depth = 0
+  let start = 0
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index]
+    if (character === '(') depth++
+    else if (character === ')') depth--
+    else if (character === ',' && depth === 0) {
+      items.push(value.slice(start, index).trim())
+      start = index + 1
+    }
+  }
+  items.push(value.slice(start).trim())
+  return items
+}
+
+/**
+ * How `property` moves in an element's computed transition: its duration in
+ * ms and its easing, or null when it doesn't move, because it isn't listed or
+ * has no duration (reduced motion, an instant open). A Web Animation played
+ * on it with this timing follows the feel, as the transition would.
+ */
+export function transitionTiming(
+  style: Pick<
+    CSSStyleDeclaration,
+    'transitionProperty' | 'transitionDuration' | 'transitionTimingFunction'
+  >,
+  property: string,
+): { duration: number; easing: string } | null {
+  const index = cssList(style.transitionProperty).findLastIndex(
+    (name) => name === property || name === 'all',
+  )
+  if (index < 0) return null
+  const at = (list: string[]) => list[index % list.length] ?? ''
+  const time = at(cssList(style.transitionDuration))
+  const duration = Number.parseFloat(time) * (time.endsWith('ms') ? 1 : 1000)
+  if (!(duration > 0)) return null
+  return { duration, easing: at(cssList(style.transitionTimingFunction)) }
+}
+
 /** The CSS transitions running on `element`, or inside it too with `subtree`, of one property or of any. */
 export function runningTransitions(
   element: Element,

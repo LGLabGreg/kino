@@ -23,13 +23,10 @@ import {
   valuePlace,
 } from '@/registry/lib/chart-core'
 import {
+  axisNames,
   type ChartSummary,
   changeSince,
   fractionOf,
-  labelBox,
-  type Span,
-  labelsMeet,
-  labelStep,
   numberOf,
   physicalStart,
   summaryOf,
@@ -47,6 +44,7 @@ import {
   type CSSProperties,
   type ReactNode,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -356,45 +354,23 @@ function CategoryAxis({
     current.length > MANY_CATEGORIES
       ? Math.max(MIN_LABEL, ...current.map(nameLength))
       : MIN_LABEL
-  const every = across ? 1 : labelStep(current.length, length, longest + LABEL_GAP)
   const shown = status === 'loading' ? [] : categories
-  const pitch = current.length === 0 ? 0 : length / current.length
-  const room = Math.max(0, pitch * every - LABEL_GAP)
   const centreOf = (category: ChartCategory) =>
     across
       ? category.band.start + category.band.size / 2
       : physicalStart(category.band, 'inline', direction) + category.band.size / 2
-  // Where the spotlit name lands, whole, so the names it would meet step aside.
-  // Only a name under the pointer or the focus shows whole; a picked one keeps its room, so
-  // its neighbours keep theirs while it stays picked.
-  const lit = active === null ? undefined : current[active]
-  const litBox =
-    across || !lit || length === 0
-      ? null
-      : labelBox(centreOf(lit), nameLength(lit), length)
-  // The names that step aside: those between every few, and any that would meet the lit
-  // name or the last one shown, as a name kept inside the axis at either end can.
-  const skippedKeys = new Set<string>()
-  if (!across && length > 0) {
-    let last: Span | null = null
-    for (const category of current) {
-      if (category.index === active) continue
-      const box = labelBox(
-        centreOf(category),
-        Math.min(nameLength(category), room),
-        length,
-      )
-      if (
-        category.index % every !== 0 ||
-        (litBox !== null && labelsMeet(box, litBox)) ||
-        (last !== null && labelsMeet(box, last))
-      ) {
-        skippedKeys.add(category.key)
-        continue
-      }
-      last = box
-    }
-  }
+  const axisNamed = current.map((category) => ({
+    centre: centreOf(category),
+    width: nameLength(category),
+  }))
+  const spacing = { minLength: longest + LABEL_GAP, gap: LABEL_GAP }
+  // Only a name under the pointer or the focus shows whole, and the names it would land on
+  // step aside; a picked one keeps its room, so its neighbours keep theirs while it stays picked.
+  const { room, skipped } =
+    across || length === 0
+      ? { room: 0, skipped: new Set<number>() }
+      : axisNames(axisNamed, length, { ...spacing, lit: active })
+  const axisId = useId()
 
   // The names, drawn twice: once on the axis, and once in the pill's colours inside the pill,
   // which shows only the part under it, so the name it slides onto reads in its colours.
@@ -403,13 +379,8 @@ function CategoryAxis({
       {shown.map((category) => {
         const centre = centreOf(category)
         const isLit = active === category.index && !category.leaving
-        // A long run shows no names until the axis is measured, so they never pile up first.
-        const skipped =
-          !across &&
-          !isLit &&
-          (length === 0
-            ? current.length > MANY_CATEGORIES
-            : skippedKeys.has(category.key))
+        const isSkipped =
+          !across && !isLit && !category.leaving && skipped.has(category.index)
         return (
           <span
             key={category.key}
@@ -428,6 +399,7 @@ function CategoryAxis({
                   }
             }
             data-leaving={category.leaving ? '' : undefined}
+            data-name={category.index}
             data-active={isLit ? '' : undefined}
             // A date or a name with digits reads in its own order whatever the page's direction.
             dir='auto'
@@ -440,16 +412,21 @@ function CategoryAxis({
                 'transition-[translate,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-mounted/chart:starting:opacity-0 motion-reduce:transition-opacity',
               across ? 'max-w-[calc(100%-0.125rem)]' : 'text-center',
               side === 'bottom' && 'mt-1',
-              skipped && 'opacity-0',
+              isSkipped && 'opacity-0',
             )}
-            style={{
-              // Centred on its category, but kept inside the axis, so a whole name at either
-              // end stays in view and inside the pill. Beside the plot, it sits against it.
-              translate: across
-                ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)`
-                : `clamp(0px, ${centre * 100}cqw - 50%, 100cqw - 100%) 0`,
-              maxWidth: across || isLit ? undefined : `${room}px`,
-            }}
+            style={
+              {
+                // Its place, which `UnmeasuredAxisNames` picks names by.
+                '--axis-name': category.index,
+                // Centred on its category, but kept inside the axis, so a whole name at either
+                // end stays in view and inside the pill. Beside the plot, it sits against it.
+                translate: across
+                  ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)`
+                  : `clamp(0px, ${centre * 100}cqw - 50%, 100cqw - 100%) 0`,
+                // Before the axis is measured, `UnmeasuredAxisNames` gives the room.
+                maxWidth: across || isLit || length === 0 ? undefined : `${room}px`,
+              } as CSSProperties
+            }
           >
             {write(category.value)}
           </span>
@@ -469,6 +446,7 @@ function CategoryAxis({
     >
       <div
         ref={ref}
+        data-axis={axisId}
         className={cn(
           'text-muted-foreground relative min-h-0 min-w-0 flex-1',
           across ? 'grid max-w-[40cqw]' : '[container-type:inline-size]',
@@ -491,6 +469,14 @@ function CategoryAxis({
             ))}
           </span>
         )}
+        {!across && length === 0 && (
+          <UnmeasuredAxisNames
+            id={axisId}
+            names={axisNamed}
+            {...spacing}
+            cut={current.length <= MANY_CATEGORIES}
+          />
+        )}
         {/* One name's height under the plot, before any name is placed. */}
         {!across && <span className='invisible block py-0.5'>&nbsp;</span>}
         {layer(false)}
@@ -508,6 +494,74 @@ function CategoryAxis({
     </AxisFrame>
   )
 }
+
+/**
+ * The names a category axis shows before it is measured, as on the page's
+ * first paint from the server: the same ones, with the same room, that
+ * `axisNames` gives it once measured, worked out at widths `NAMES_SAMPLE` px
+ * apart and picked by container queries on the axis's own width.
+ */
+function UnmeasuredAxisNames({
+  id,
+  names,
+  minLength,
+  gap,
+  cut,
+}: {
+  id: string
+  names: readonly { centre: number; width: number }[]
+  minLength: number
+  gap: number
+  /** Whether a name is cut short to its room, as a few are, rather than shown whole. */
+  cut: boolean
+}) {
+  const scope = `[data-axis='${id}'] [data-name]`
+  const rules: string[] = []
+  let run: { from: number; every: number; held: string } | null = null
+  const close = (to: number | null) => {
+    if (!run) return
+    const query = [
+      run.from > NAMES_SAMPLE_FROM ? `(width >= ${run.from}px)` : '',
+      to === null ? '' : `(width < ${to}px)`,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    // Every few show, by their place in `--axis-name`, but those held back. A long run's
+    // names show whole, as once measured; a few are cut short if they must.
+    const room = cut
+      ? `; max-width: calc(100cqw * ${run.every} / ${names.length} - ${gap}px)`
+      : ''
+    const body = `${scope} { opacity: calc(1 - min(1, mod(var(--axis-name), ${run.every})))${room} }${run.held ? ` ${scope}:is(${run.held}) { opacity: 0 }` : ''}`
+    rules.push(query ? `@container ${query} { ${body} }` : body)
+  }
+  for (
+    let width = NAMES_SAMPLE_FROM;
+    width <= NAMES_SAMPLE_UP_TO;
+    width += NAMES_SAMPLE
+  ) {
+    // Each run of widths is laid out at its middle.
+    const { every, skipped } = axisNames(names, width + NAMES_SAMPLE / 2, {
+      minLength,
+      gap,
+    })
+    // The names on the step that step aside for a neighbour.
+    const held = [...skipped]
+      .filter((index) => index % every === 0)
+      .map((index) => `[data-name='${index}']`)
+      .join(',')
+    if (run && run.every === every && run.held === held) continue
+    close(width)
+    run = { from: width, every, held }
+  }
+  close(null)
+  // oxlint-disable-next-line react/no-danger -- the rules are worked out from the chart's own names
+  return <style dangerouslySetInnerHTML={{ __html: rules.join(' ') }} />
+}
+
+/** How far apart the widths `UnmeasuredAxisNames` works its names out at are, in px, and from and to where. */
+const NAMES_SAMPLE = 4
+const NAMES_SAMPLE_FROM = 120
+const NAMES_SAMPLE_UP_TO = 2560
 
 /** The value a reference line marks: worked out from the data, or the number given. */
 function useReferenceValue(value: number | ChartSummary | undefined) {

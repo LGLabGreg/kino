@@ -592,6 +592,35 @@ const chartFrameClassName =
 const swatchClassName =
   'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)'
 
+/**
+ * The size a chart draws at: its plot's, or before the plot is measured, as
+ * on the page's first paint from the server, a stand-in that its SVGs fit to
+ * the plot with `drawingFrame`, so the marks show from the first frame.
+ */
+function drawingSize(size: { width: number; height: number }) {
+  return size.width > 0 && size.height > 0 ? size : UNMEASURED
+}
+
+/**
+ * An SVG's frame for `drawingSize`: none once the plot is measured, else the
+ * stand-in fitted to the plot, stretched (`none`) for marks whose shape follows
+ * the plot's, such as lines, or kept square (`xMidYMid meet`), such as a ring.
+ */
+function drawingFrame(
+  size: { width: number; height: number },
+  fit: 'none' | 'xMidYMid meet',
+) {
+  return size.width > 0 && size.height > 0
+    ? {}
+    : {
+        viewBox: `0 0 ${UNMEASURED.width} ${UNMEASURED.height}`,
+        preserveAspectRatio: fit,
+      }
+}
+
+/** About a plot's size, so what a chart draws in pixels, such as a ring's gaps, starts out near it. */
+const UNMEASURED = { width: 240, height: 240 }
+
 const plotLayerClassName =
   'pointer-events-none relative min-h-0 min-w-0 [grid-area:plot] [container-type:size]'
 
@@ -1847,6 +1876,8 @@ export {
   formatterOf,
   isForecast,
   patternImage,
+  drawingFrame,
+  drawingSize,
   plotLayerClassName,
   swatchClassName,
   seriesColor,
