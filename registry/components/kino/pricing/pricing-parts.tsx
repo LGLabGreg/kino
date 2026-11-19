@@ -91,13 +91,25 @@ function PricingBillingSwitch({ className }: { className?: string }) {
   )
 }
 
-/** What the plan costs a month, rolling to the new amount when the billing changes. */
-function PlanPrice({ plan, className }: { plan: PricingPlan; className?: string }) {
+/**
+ * What the plan costs a month, rolling to the new amount when the billing
+ * changes: large on its card, smaller and centred in the comparison's header.
+ */
+function PlanPrice({
+  plan,
+  size = 'default',
+  className,
+}: {
+  plan: PricingPlan
+  size?: 'default' | 'sm'
+  className?: string
+}) {
   const { billing, locale, currency } = usePricing()
   const amount = plan.price[billing]
   const free = plan.price.monthly === 0
   const total = yearlyTotal(plan)
   const money = numberFormatter(locale, moneyFormat(currency, total)).format(total)
+  const small = size === 'sm'
   // As text, so the line rolls when it changes.
   const billed =
     plan.note ??
@@ -109,23 +121,42 @@ function PlanPrice({ plan, className }: { plan: PricingPlan; className?: string 
           ? `${money} per ${plan.per}, billed yearly`
           : `${money} billed yearly`)
   return (
-    <div className={cn('flex min-w-0 flex-col gap-1', className)}>
-      <p className='flex min-w-0 flex-wrap items-baseline gap-x-1.5'>
+    <div
+      className={cn(
+        'flex min-w-0 flex-col',
+        small ? 'items-center gap-0.5 text-center' : 'gap-1',
+        className,
+      )}
+    >
+      <p
+        className={cn(
+          'flex min-w-0 flex-wrap items-baseline gap-x-1.5',
+          small && 'justify-center',
+        )}
+      >
         <AnimatedNumber
           value={amount}
           locale={locale}
           format={moneyFormat(currency, amount)}
-          className='text-foreground text-4xl font-semibold tracking-tight'
+          className={cn(
+            'text-foreground font-semibold tracking-tight',
+            small ? 'text-2xl' : 'text-4xl',
+          )}
         />
         {free ? null : (
-          <span className='text-muted-foreground text-sm'>
+          <span className={cn('text-muted-foreground', small ? 'text-xs' : 'text-sm')}>
             {plan.per ? `per ${plan.per} a month` : 'a month'}
           </span>
         )}
       </p>
-      <p className='text-muted-foreground flex min-w-0 text-sm'>
+      <p
+        className={cn(
+          'text-muted-foreground flex max-w-full min-w-0',
+          small ? 'justify-center text-xs' : 'text-sm',
+        )}
+      >
         {/* Its words keep their own direction, so `$96 per member` reads the same way round right to left. */}
-        <Swap roll align='start'>
+        <Swap roll align={small ? 'center' : 'start'}>
           <bdi>{billed}</bdi>
         </Swap>
       </p>
@@ -137,17 +168,19 @@ function PlanPrice({ plan, className }: { plan: PricingPlan; className?: string 
 function PlanAction({
   plan,
   emphasis,
+  size = 'default',
   className,
 }: {
   plan: PricingPlan
   /** The plan you recommend, in the primary colour; the rest are outlined. */
   emphasis: boolean
+  size?: 'default' | 'sm'
   className?: string
 }) {
   const { billing, current, onChoose } = usePricing()
   if (current === plan.value) {
     return (
-      <Button variant='outline' disabled className={cn('w-full', className)}>
+      <Button variant='outline' size={size} disabled className={cn('w-full', className)}>
         Current plan
       </Button>
     )
@@ -158,7 +191,7 @@ function PlanAction({
       href={plan.action.href}
       onClick={(event) => onChoose?.({ plan: plan.value, billing }, event)}
       className={cn(
-        buttonVariants({ variant: emphasis ? 'default' : 'outline' }),
+        buttonVariants({ variant: emphasis ? 'default' : 'outline', size }),
         'w-full',
         className,
       )}
@@ -209,12 +242,12 @@ function FeatureValue({ value }: { value: boolean | string | undefined }) {
       </span>
     )
   return value ? (
-    <span className='inline-flex'>
+    <span className='inline-flex align-middle'>
       <CheckMark className='size-4' />
       <span className='sr-only'>Included</span>
     </span>
   ) : (
-    <span className='text-muted-foreground inline-flex'>
+    <span className='text-muted-foreground inline-flex align-middle'>
       <IconPlaceholder
         lucide='MinusIcon'
         tabler='IconMinus'

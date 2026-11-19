@@ -133,7 +133,7 @@ function Pricing({
         data-slot='pricing'
         aria-labelledby={titleId}
         className={cn(
-          '@container flex min-h-full w-full min-w-0 flex-col gap-10 px-(--surface-padding) py-12 @3xl:py-16',
+          '@container flex min-h-full w-full min-w-0 flex-col gap-10 bg-background px-(--surface-padding) py-12 @3xl:py-16',
           className,
         )}
         {...props}
@@ -160,7 +160,7 @@ function Pricing({
         {footer}
 
         {features ? (
-          <div className='flex min-w-0 flex-col gap-4'>
+          <div className='flex min-w-0 flex-col gap-4 bg-inherit'>
             <Subheading
               id={featuresId}
               className='text-xl font-semibold tracking-tight @2xl:text-center'

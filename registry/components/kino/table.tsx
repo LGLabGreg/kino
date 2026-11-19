@@ -248,6 +248,7 @@ function Table({
   containerClassName,
   variant = 'default',
   loading = false,
+  scroll = true,
   ref,
   id,
   ...props
@@ -261,6 +262,11 @@ function Table({
      * 300ms. Before the first rows arrive, show a `TableSkeleton` in the body.
      */
     loading?: boolean
+    /**
+     * `false` for a table that never outgrows its width: it doesn't scroll in
+     * a box of its own, so its header sticks to the page as the page scrolls.
+     */
+    scroll?: boolean
   }) {
   const busy = useSpinner(loading)
   // The line mounts the first time the table loads, and stays to fade out.
@@ -320,7 +326,13 @@ function Table({
         data-slot='table-scroller'
         {...region}
         // Its padding keeps what Tab scrolls to clear of the sticky header.
-        className='group/table-scroller scrollbar-thin min-h-0 flex-auto overflow-auto overscroll-x-contain bg-inherit scroll-pt-[calc(var(--control-height)+5px)] [mask-image:linear-gradient(to_right,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] rtl:[mask-image:linear-gradient(to_left,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] has-[[data-sticky=start]]:[--table-fade-start-on:0] has-[[data-sticky=end]]:[--table-fade-end-on:0] focus-visible:outline-hidden'
+        className={cn(
+          'group/table-scroller min-h-0 flex-auto bg-inherit scroll-pt-[calc(var(--control-height)+5px)] [mask-image:linear-gradient(to_right,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] rtl:[mask-image:linear-gradient(to_left,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] has-[[data-sticky=start]]:[--table-fade-start-on:0] has-[[data-sticky=end]]:[--table-fade-end-on:0] focus-visible:outline-hidden',
+          // Clipped, not scrolled, so the page is what the header sticks to.
+          scroll
+            ? 'scrollbar-thin overflow-auto overscroll-x-contain'
+            : 'overflow-x-clip',
+        )}
       >
         {/* As wide as the table, so the highlight scrolls with its rows; its
             rows sit 4px inside the box, so their corners show. It clips
@@ -910,7 +922,9 @@ function TableExpand({
   /** Names the row it opens, such as “Show the items of KN-1090”. */
   'aria-label': string
 }) {
-  const indent = { marginInlineStart: `calc(var(--table-indent, 1.25rem) * ${depth})` }
+  const indent = {
+    marginInlineStart: `calc(var(--table-indent, 1.25rem) * ${depth})`,
+  }
   if (!expandable) {
     return (
       <span
