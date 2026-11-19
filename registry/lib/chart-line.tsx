@@ -35,6 +35,7 @@ import {
   litSpan,
   lonePointsThrough,
   pathThrough,
+  type PathCurve,
   pointsAt,
 } from '@/registry/lib/line-path'
 import { placeholderBreatheClassName } from '@/registry/lib/placeholder'
@@ -67,7 +68,7 @@ import { cn } from '@/lib/utils'
 
 /*
  * What the charts drawn as lines share, on the chart core: the Line chart's
- * lines and the Area chart's areas. Each series is a line drawn by d3-shape
+ * lines, the Area chart's areas and the Bump chart's ranks. Each series is a line drawn by d3-shape
  * from its points, with a fill under it for an area, and its points move on
  * one CSS transition of a number, `--line-progress`, so the feel, reduced
  * motion and a slowed playback time it as they time everything else. A frame
@@ -76,6 +77,8 @@ import { cn } from '@/lib/utils'
  *
  * When a category is lit, every series steps back but for a window around
  * it, which glides with the axis's pill, and a dot on each series marks it.
+ * A series brought forward, from the legend or the Bump chart's pointer,
+ * stays bright end to end while every other one steps back whole.
  *
  * Each chart names the variables a buyer tunes after itself
  * (`--line-chart-width`, `--area-chart-width`): the root of each series reads
@@ -83,7 +86,7 @@ import { cn } from '@/lib/utils'
  */
 
 /** Which chart a series belongs to, which names the variables it reads. */
-type LineFamilyName = 'line-chart' | 'area-chart'
+type LineFamilyName = 'line-chart' | 'area-chart' | 'bump-chart'
 
 interface LineFamilyValue {
   name: LineFamilyName
@@ -178,9 +181,9 @@ function LineFamilyFrame({
         description={description}
         empty={empty}
         // The columns beside the plot keep room for a dot on the first or the last point, half of
-        // which reaches past the plot, even with no axis there.
+        // which reaches past the plot, even with no axis there; the pointer finds it there too.
         className={cn(
-          'grid-cols-[minmax(0.375rem,auto)_minmax(0,1fr)_minmax(0.375rem,auto)]',
+          'grid-cols-[minmax(0.375rem,auto)_minmax(0,1fr)_minmax(0.375rem,auto)] **:data-[slot=chart-columns]:before:absolute **:data-[slot=chart-columns]:before:inset-y-0 **:data-[slot=chart-columns]:before:-inset-x-1.5',
           className,
         )}
         placeholder={placeholder && <LinePlaceholder name={family.name} fill={fill} />}
@@ -267,7 +270,7 @@ interface LineDrawing {
 
 function drawingOf(
   points: readonly LinePoint[],
-  curve: LineCurve,
+  curve: PathCurve,
   size: { width: number; height: number },
   splitKey: string | null,
   fill: boolean,
@@ -359,7 +362,7 @@ function moving(element: Element) {
 function useLineMove(
   elements: LineElements,
   to: readonly LinePoint[],
-  curve: LineCurve,
+  curve: PathCurve,
   size: { width: number; height: number },
   splitKey: string | null,
   fill: boolean,
@@ -473,7 +476,9 @@ function LineSeries({
   className,
   style,
   ...props
-}: LineSeriesProps & {
+}: Omit<LineSeriesProps, 'curve'> & {
+  /** How the line runs between its points, a bump chart's S among them. */
+  curve?: PathCurve
   /** Fills the area under the line, down to its baseline. */
   fill?: boolean
 }) {
@@ -560,14 +565,16 @@ function LineSeries({
   )
   if (!drawn) return null
   const slot = chart.series.indexOf(dataKey)
-  const otherEmphasised = chart.emphasis !== null && chart.emphasis !== dataKey
+  const emphasised = chart.emphasis === dataKey
+  const otherEmphasised = chart.emphasis !== null && !emphasised
   // The series steps back while a category is lit, all but its bright copy, or whole while
-  // the legend brings another series forward.
-  const stepsBack = spotlit !== null || otherEmphasised
-  const window = litWindow(chart, spotlit)
-  const bright = brightSpan(spotlit, to.length)
+  // another series is brought forward. Brought forward itself, it stays bright end to end.
+  const windowAt = emphasised ? null : spotlit
+  const stepsBack = windowAt !== null || otherEmphasised
+  const window = litWindow(chart, windowAt)
+  const bright = brightSpan(windowAt, to.length)
   const pathClass =
-    'fill-none stroke-current [stroke-width:var(--trace-width)] [stroke-linecap:round] [stroke-linejoin:round]'
+    'fill-none stroke-current [stroke-width:calc(var(--trace-width)*var(--trace-weight,1))] [stroke-linecap:round] [stroke-linejoin:round]'
   const strokes = (bright: boolean) => (
     <>
       {connectNulls && !bright && (
@@ -669,7 +676,7 @@ function LineSeries({
             data-entering={family.phase === 'entering' ? '' : undefined}
             data-dim={stepsBack ? '' : undefined}
             className={cn(
-              'absolute inset-0 size-full overflow-visible text-(--line-color) [--line-progress:1] transition-[color,--line-progress] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
+              'absolute inset-0 size-full overflow-visible text-(--line-color) [--line-progress:1] transition-[color,--line-progress] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] forced-colors:data-dim:[--trace-weight:0.5] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
               forcedSeriesTextColor(slot),
             )}
           >
@@ -733,6 +740,7 @@ function LineSeries({
             dots={dotElements}
             last={dots === 'last'}
             slot={slot}
+            dimmed={otherEmphasised}
             brightFrom={bright?.[0] ?? null}
             brightTo={bright?.[1] ?? null}
           />
@@ -800,6 +808,7 @@ const LineDots = memo(function LineDots({
   dots,
   last,
   slot,
+  dimmed,
   brightFrom,
   brightTo,
 }: {
@@ -808,6 +817,8 @@ const LineDots = memo(function LineDots({
   dots: RefObject<Map<string, HTMLElement>>
   last: boolean
   slot: number
+  /** Every dot steps back, while another series is brought forward. */
+  dimmed: boolean
   /** The first and last points that stay bright while the rest step back, by place; null when none step back. */
   brightFrom: number | null
   brightTo: number | null
@@ -829,9 +840,10 @@ const LineDots = memo(function LineDots({
               }
             }}
             data-dim={
-              brightFrom !== null &&
-              brightTo !== null &&
-              (at < brightFrom || at > brightTo)
+              dimmed ||
+              (brightFrom !== null &&
+                brightTo !== null &&
+                (at < brightFrom || at > brightTo))
                 ? ''
                 : undefined
             }
@@ -890,6 +902,7 @@ function LineLitMarks() {
         plotLayerClassName,
         'z-20 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-hidden:opacity-0 data-hidden:duration-(--motion-exit-duration) data-hidden:ease-(--motion-exit-easing)',
       )}
+      style={traceVariables(family.name)}
     >
       {/* Across the plot, the dots move on a property, as the window does, so the two retarget
           alike when a glide changes course. */}
@@ -927,9 +940,13 @@ function LineLitMarks() {
                   } as CSSProperties
                 }
               >
+                {/* A series that steps back while another is brought forward takes its dot with it. */}
                 <span
+                  data-dim={
+                    chart.emphasis !== null && chart.emphasis !== key ? '' : undefined
+                  }
                   className={cn(
-                    'bg-(--line-color) ring-background absolute -top-1 -left-1 size-2 rounded-full ring-2',
+                    'bg-(--line-color) ring-background absolute -top-1 -left-1 size-2 rounded-full ring-2 transition-[background-color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:bg-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)]',
                     forcedSeriesColor(chart.series.indexOf(key)),
                   )}
                 />
@@ -1012,5 +1029,6 @@ export {
   LineSeries,
   type LineSeriesProps,
   pointBand,
+  useLineFamily,
   zeroY,
 }

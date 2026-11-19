@@ -1,4 +1,10 @@
-import { curveLinear, curveMonotoneX, curveStep, line as linePath } from 'd3-shape'
+import {
+  curveBumpX,
+  curveLinear,
+  curveMonotoneX,
+  curveStep,
+  line as linePath,
+} from 'd3-shape'
 
 /*
  * The geometry of a line through a series' points: the path d3-shape draws,
@@ -7,12 +13,19 @@ import { curveLinear, curveMonotoneX, curveStep, line as linePath } from 'd3-sha
  * points that leave fold into the new one, so a new range reads as the same
  * line stretching rather than a new one. A point may carry a baseline too,
  * which moves with it, for a fill under the line. Every function here is
- * pure: the Line chart, the Area chart and the Sparkline only draw what it
- * returns.
+ * pure: the Line chart, the Area chart, the Bump chart and the Sparkline
+ * only draw what it returns.
  */
 
 /** How a line runs between its points: a smooth curve that never overshoots them, straight, or in steps. */
 type LineCurve = 'monotone' | 'linear' | 'step'
+
+/**
+ * Every way a line can run between its points: a line's own `LineCurve`, or
+ * `bump`, an S that leaves each point level and meets the next level, as a
+ * bump chart draws a rank changing from one period to the next.
+ */
+type PathCurve = LineCurve | 'bump'
 
 /** A point of a line: where it sits, as fractions of the plot from its reading start and its top. */
 interface LinePoint {
@@ -94,10 +107,11 @@ function heightBetween(
   slopes: readonly [number, number],
   width: number,
   share: number,
-  curve: LineCurve,
+  curve: PathCurve,
 ) {
   if (curve === 'step') return share < 0.5 ? low : high
   if (curve === 'linear') return low + (high - low) * share
+  if (curve === 'bump') return bumpHeight(low, high, share)
   const third = width / 3
   const b = low + third * slopes[0]
   const c = high - third * slopes[1]
@@ -111,13 +125,32 @@ function heightBetween(
 }
 
 /**
+ * The height `share` of the way across from `low` to `high` on the S d3's
+ * bump curve draws: a cubic whose two middle points sit halfway across, at
+ * the heights of its ends. Its x doesn't run evenly, so the cubic's own
+ * place for `share` is found first, by Newton's method: x grows at a rate
+ * of at least 0.75 everywhere, so a few steps land on it.
+ */
+function bumpHeight(low: number, high: number, share: number) {
+  // Across the cubic, x is 1.5t - 1.5t² + t³ for its place t.
+  let t = Math.min(1, Math.max(0, share))
+  for (let step = 0; step < 6; step += 1) {
+    const x = 1.5 * t - 1.5 * t * t + t * t * t
+    t -= (x - share) / (1.5 - 3 * t + 3 * t * t)
+    t = Math.min(1, Math.max(0, t))
+  }
+  const u = 1 - t
+  return low * u * u * (1 + 2 * t) + high * t * t * (3 - 2 * t)
+}
+
+/**
  * Looks up any point along `points` as `curve` draws them, by its place in
  * their order: 2.5 is halfway along the curve between the third and the
  * fourth point. A point sampled on the curve stays on it, so a line drawn
  * through samples looks like the line through `points`. Its baseline, if
  * the points have one, is sampled on its own curve the same way.
  */
-function sampleLine(points: readonly LinePoint[], curve: LineCurve): LineSampler {
+function sampleLine(points: readonly LinePoint[], curve: PathCurve): LineSampler {
   const slopes = curve === 'monotone' ? monotoneSlopes(points) : []
   const based = points.some((point) => point.base !== undefined)
   const baseOf = (point: LinePoint) => point.base ?? 1
@@ -200,7 +233,7 @@ function pairStretch(
 function alignLines(
   from: readonly LinePoint[],
   to: readonly LinePoint[],
-  curve: LineCurve,
+  curve: PathCurve,
 ): AlignedPoint[] {
   if (to.length === 0) return []
   if (from.length === 0)
@@ -258,12 +291,13 @@ const curves = {
   monotone: curveMonotoneX,
   linear: curveLinear,
   step: curveStep,
+  bump: curveBumpX,
 } as const
 
 /** A line through `points` in px for a plot `width` by `height`, with a gap at each missing value. */
 function pathThrough(
   points: readonly LinePoint[],
-  curve: LineCurve,
+  curve: PathCurve,
   width: number,
   height: number,
 ): string {
@@ -312,6 +346,30 @@ function lonePointsThrough(points: readonly LinePoint[], width: number, height: 
     .join('')
 }
 
+/**
+ * How high the line through `points` is where it crosses `x`, both as
+ * fractions of the plot, as `curve` draws it; null where it isn't drawn.
+ * Across a gap, the point on the nearer side counts, if it has a value, so
+ * a line's last point can be found past it as its dot can.
+ */
+function heightAt(
+  points: readonly LinePoint[],
+  curve: PathCurve,
+  x: number,
+): number | null {
+  const after = points.findIndex((point) => point.x >= x)
+  if (after === -1 || after === 0) {
+    const end = after === 0 ? points[0] : points.at(-1)
+    return end?.defined ? end.y : null
+  }
+  const low = points[after - 1]!
+  const high = points[after]!
+  const share = high.x === low.x ? 1 : (x - low.x) / (high.x - low.x)
+  if (low.defined && high.defined) return sampleLine(points, curve)(after - 1 + share).y
+  const nearer = share < 0.5 ? low : high
+  return nearer.defined ? nearer.y : null
+}
+
 /** The stretch the lit category keeps bright, from its neighbour before to its neighbour after, as fractions from the reading start; null for none. */
 function litSpan(
   centres: readonly number[],
@@ -334,6 +392,7 @@ export {
   brightSpan,
   bridgesThrough,
   curves,
+  heightAt,
   type LineCurve,
   type LinePoint,
   type LineSampler,
@@ -341,6 +400,7 @@ export {
   lonePointsThrough,
   monotoneSlopes,
   pathThrough,
+  type PathCurve,
   pointsAt,
   sampleLine,
 }

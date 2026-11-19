@@ -10,6 +10,7 @@ import {
   ChartLegendToggles,
   ChangeText,
   forcedSeriesColor,
+  swatchClassName,
   formatterOf,
   isForecast,
   plotLayerClassName,
@@ -838,6 +839,11 @@ function ChartTooltip({
   const chart = useChart()
   const { tooltip, columnId, status, stack, orientation, plot, current } = chart
   const open = active !== null && status === 'ready'
+  // A series the pointer brought forward goes back with the category it lit.
+  const release = () => {
+    setActive(null)
+    if (chart.seriesAt) chart.setEmphasis(null)
+  }
   return (
     <GlideGroupMemory>
       <TooltipPrimitive.Root
@@ -850,7 +856,7 @@ function ChartTooltip({
           // a press away from the chart close it here. A press on the chart, or on another
           // chart in its group, leaves the values showing.
           if (details.reason === 'escape-key') {
-            setActive(null)
+            release()
             return
           }
           if (details.reason !== 'outside-press') return
@@ -861,7 +867,7 @@ function ChartTooltip({
             (figure?.contains(target) || target.closest("[data-slot='chart-columns']"))
           )
             return
-          setActive(null)
+          release()
         }}
         disableHoverablePopup
       >
@@ -978,10 +984,7 @@ function ChartTooltipContent({
           <div key={key} className='flex items-center gap-2'>
             <span
               aria-hidden
-              className={cn(
-                'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)',
-                forcedSeriesColor(series.indexOf(key)),
-              )}
+              className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
               style={swatchStyle(key, patternOf(key))}
             />
             <span className='text-background/75 min-w-0 flex-1 truncate forced-colors:text-[CanvasText]'>

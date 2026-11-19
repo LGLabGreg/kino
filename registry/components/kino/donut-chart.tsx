@@ -10,6 +10,7 @@ import {
   type ChartPoint,
   figureProps,
   forcedSeriesColor,
+  swatchClassName,
   forcedSeriesTextColor,
   plotLayerClassName,
   swatchStyle,
@@ -281,12 +282,12 @@ function DonutChart(props: DonutChartProps) {
     describe: (at) => {
       const category = chart.current[at]
       if (!category) return ''
-      const picked = chart.selected === at ? `, ${chart.messages.selected}` : ''
-      const parts = rings.map(
-        (ring) =>
-          `${ring.label} ${valueText(ring, category)}, ${percent.format(shareOf(ring, at))}`,
-      )
-      return `${nameOf(category)}${picked}: ${parts.join('; ')}`
+      return rings
+        .map(
+          (ring) =>
+            `${ring.label} ${valueText(ring, category)}, ${percent.format(shareOf(ring, at))}`,
+        )
+        .join('; ')
     },
     table: several
       ? {
@@ -1139,7 +1140,7 @@ function DonutTooltipContent({
     <span
       aria-hidden
       className={cn(
-        'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)',
+        swatchClassName,
         forcedSeriesColor(slot === -1 ? category.index : slot),
       )}
       style={swatchStyle(

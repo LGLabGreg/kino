@@ -195,7 +195,23 @@ interface ChartContextValue {
    * whose categories don't run along an axis, such as a donut's slices.
    */
   pickAt?: (point: { x: number; y: number }, box: DOMRect) => number | null
-  /** What the category at `index` says to a screen reader, in place of each series' value. */
+  /**
+   * The series under a point of the plot, as fractions of it from its
+   * reading start and its top, for a chart whose series are pointed at one
+   * by one, such as a bump chart's lines. The pointer brings it forward.
+   */
+  seriesAt?: (point: { x: number; y: number }) => string | null
+  /**
+   * The series the Up or Down arrow brings forward from `from` on the
+   * category at `index`: `step` -1 for the one above, 1 for the one below.
+   * With this, those arrows move between series and only the arrows along
+   * the categories step through them.
+   */
+  stepSeries?: (index: number, from: string | null, step: -1 | 1) => string | null
+  /**
+   * What the category at `index` holds, for a screen reader, in place of
+   * each series' value: the words after its name and whether it is picked.
+   */
   describe?: (index: number) => string
   /** The data table's columns after the category, and each category's cells, in place of one per series. */
   table?: ChartTable
@@ -569,9 +585,13 @@ const forcedSwatchColors = [
  * plot's layers share one.
  */
 const chartFrameClassName =
-  'group/chart relative isolate grid h-72 [container-type:inline-size] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] [grid-template-areas:"top_top_top"_"._top-axis_."_"start-axis_plot_end-axis"_"._bottom-axis_."_"bottom_bottom_bottom"] text-xs'
+  'group/chart @container/chart relative isolate grid h-72 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] [grid-template-areas:"top_top_top"_"._top-axis_."_"start-axis_plot_end-axis"_"._bottom-axis_."_"bottom_bottom_bottom"] text-xs'
 
 /** A layer of the plot: the size of the plot, and the box its insets are measured in. */
+/** A series' colour beside its name in a tooltip, on its `--swatch` (`swatchStyle`). */
+const swatchClassName =
+  'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)'
+
 const plotLayerClassName =
   'pointer-events-none relative min-h-0 min-w-0 [grid-area:plot] [container-type:size]'
 
@@ -857,7 +877,9 @@ function ChartGroup({ children }: { children: ReactNode }) {
 function columnLabel(chart: ChartContextValue, index: number) {
   const category = chart.current[index]
   if (!category) return ''
-  if (chart.describe) return chart.describe(index)
+  const picked = chart.selected === index ? `, ${chart.messages.selected}` : ''
+  const name = `${chart.categoryText(category.value)}${picked}`
+  if (chart.describe) return `${name}: ${chart.describe(index)}`
   const before = chart.ordered ? chart.current[index - 1] : undefined
   const values = chart.series
     .filter((key) => !chart.hidden.includes(key))
@@ -874,8 +896,7 @@ function columnLabel(chart: ChartContextValue, index: number) {
         : ''
       return `${typeof name === 'string' ? name : key} ${chart.datumText(value)}${projected}${said}`
     })
-  const picked = chart.selected === index ? `, ${chart.messages.selected}` : ''
-  return `${chart.categoryText(category.value)}${picked}: ${values.join(', ')}`
+  return `${name}: ${values.join(', ')}`
 }
 
 function percent(locale: Intl.LocalesArgument) {
@@ -889,10 +910,13 @@ function percent(locale: Intl.LocalesArgument) {
 function ChangeText({
   change,
   locale,
+  format,
   className,
 }: {
   change: number | null
   locale: Intl.LocalesArgument
+  /** Writes the size of the change; a share by default, such as `12%`. */
+  format?: (size: number) => string
   className?: string
 }) {
   if (change === null) return null
@@ -900,7 +924,7 @@ function ChangeText({
     // Sign and number read left to right in either direction, as a number does.
     <span dir='ltr' className={cn('text-[0.625rem] tabular-nums', className)}>
       {change > 0 ? '▲ ' : change < 0 ? '▼ ' : ''}
-      {percent(locale).format(Math.abs(change))}
+      {format ? format(Math.abs(change)) : percent(locale).format(Math.abs(change))}
     </span>
   )
 }
@@ -928,6 +952,9 @@ function ChartColumns() {
     plot,
     selectable,
     toggleSelected,
+    seriesAt,
+    stepSeries,
+    setEmphasis,
   } = chart
   const { active, setActive } = useChartActive()
   // Where the keys start from when focus comes back: the last category they reached.
@@ -960,6 +987,20 @@ function ChartColumns() {
     const index = pick(event)
     setActive(index)
     if (index !== null) setLastIndex(index)
+    if (seriesAt) {
+      const box = event.currentTarget.getBoundingClientRect()
+      setEmphasis(
+        seriesAt({
+          x: alongCategories(
+            { x: event.clientX, y: event.clientY },
+            box,
+            'vertical',
+            direction,
+          ),
+          y: box.height === 0 ? 0 : (event.clientY - box.top) / box.height,
+        }),
+      )
+    }
   }
 
   const className = cn(
@@ -996,7 +1037,9 @@ function ChartColumns() {
       onPointerMove={point}
       onPointerDown={point}
       onPointerLeave={(event) => {
-        if (event.pointerType === 'mouse') setActive(null)
+        if (event.pointerType !== 'mouse') return
+        setActive(null)
+        if (seriesAt) setEmphasis(null)
       }}
       onClick={(event) => {
         if (!ready || !selectable) return
@@ -1006,7 +1049,10 @@ function ChartColumns() {
       onFocus={(event) => {
         if (ready && event.currentTarget.matches(':focus-visible')) setActive(resting)
       }}
-      onBlur={() => setActive(null)}
+      onBlur={() => {
+        setActive(null)
+        if (seriesAt) setEmphasis(null)
+      }}
       onKeyDown={(event) => {
         if (!ready) return
         if (event.key === 'Escape' && active !== null) {
@@ -1014,6 +1060,16 @@ function ChartColumns() {
           event.preventDefault()
           event.stopPropagation()
           setActive(null)
+          if (seriesAt) setEmphasis(null)
+          return
+        }
+        if (stepSeries && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+          event.preventDefault()
+          setEmphasis(
+            stepSeries(reached, chart.emphasis, event.key === 'ArrowUp' ? -1 : 1),
+          )
+          setLastIndex(reached)
+          setActive(reached)
           return
         }
         if (selectable && (event.key === 'Enter' || event.key === ' ')) {
@@ -1792,6 +1848,7 @@ export {
   isForecast,
   patternImage,
   plotLayerClassName,
+  swatchClassName,
   seriesColor,
   slideLine,
   slideTo,

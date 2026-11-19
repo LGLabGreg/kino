@@ -9,6 +9,7 @@ import {
   ChartLegendToggles,
   ChartStyle,
   forcedSeriesColor,
+  swatchClassName,
   formatterOf,
   seriesColor,
   swatchStyle,
@@ -955,7 +956,7 @@ function WaterfallTooltip({
                   <span
                     aria-hidden
                     className={cn(
-                      'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)',
+                      swatchClassName,
                       forcedSeriesColor(kinds.indexOf(span.kind)),
                     )}
                     style={swatchStyle(span.kind, 'solid')}

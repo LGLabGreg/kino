@@ -1,4 +1,4 @@
-import { curves, type LineCurve, type LinePoint } from '@/registry/lib/line-path'
+import { curves, type LinePoint, type PathCurve } from '@/registry/lib/line-path'
 import { area as areaPath } from 'd3-shape'
 import type { ComponentProps, RefObject } from 'react'
 
@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils'
 /** The shape between `points` and their baselines in px, for a plot `width` by `height`, broken at each missing value. */
 function areaPathThrough(
   points: readonly LinePoint[],
-  curve: LineCurve,
+  curve: PathCurve,
   width: number,
   height: number,
 ): string {
