@@ -206,6 +206,12 @@ export interface ValueScaleOptions {
   domain?: readonly [DomainEnd, DomainEnd]
   /** About how many ticks to mark. */
   tickCount?: number
+  /**
+   * About how many ticks the ends round out to, when it differs from
+   * `tickCount`: the count asked for, so an axis that marks fewer ticks
+   * once it is measured narrow keeps the range it showed before.
+   */
+  domainTickCount?: number
   /** Round the ends left to fit the data out to the next tick. */
   nice?: boolean
   /** Ticks between whole numbers, such as 0.5; off for counts. */
@@ -226,6 +232,7 @@ export function valueScale(
   {
     domain = ['auto', 'auto'],
     tickCount = 5,
+    domainTickCount = tickCount,
     nice: rounded = true,
     allowDecimals = true,
     tickValues,
@@ -239,7 +246,7 @@ export function valueScale(
     else low = high - 1
   }
   if (rounded && !tickValues?.length) {
-    const [niceLow, niceHigh] = nice(low, high, tickCount)
+    const [niceLow, niceHigh] = nice(low, high, domainTickCount)
     if (domain[0] === 'auto') low = niceLow
     if (domain[1] === 'auto') high = niceHigh
     if (!allowDecimals) {
@@ -255,7 +262,10 @@ export function valueScale(
         .toSorted((a, b) => a - b),
     }
   }
-  return { domain: [low, high], ticks: wholeTicks(low, high, tickCount, allowDecimals) }
+  return {
+    domain: [low, high],
+    ticks: wholeTicks(low, high, tickCount, allowDecimals),
+  }
 }
 
 /**
@@ -596,4 +606,107 @@ export function cascadeAt(
     return middle === 0 ? 0 : Math.abs(index - middle) / middle
   }
   return index / (count - 1)
+}
+
+/** A point of a chart whose x is a value too, such as a scatter's: its two values. */
+export interface XYValue {
+  x: number
+  y: number
+}
+
+/**
+ * The point nearest `at` among `points`, each placed as fractions of a plot
+ * `size` px across from its physical left and its top, and measured in px,
+ * so a wide plot doesn't favour points above and below. A missing point is
+ * skipped; null with none.
+ */
+export function nearestPoint(
+  points: readonly (XYValue | null)[],
+  at: XYValue,
+  size: { width: number; height: number },
+): number | null {
+  let nearest: number | null = null
+  let distance = Infinity
+  points.forEach((point, index) => {
+    if (!point) return
+    const dx = (point.x - at.x) * size.width
+    const dy = (point.y - at.y) * size.height
+    const squared = dx * dx + dy * dy
+    if (squared < distance) {
+      nearest = index
+      distance = squared
+    }
+  })
+  return nearest
+}
+
+/**
+ * Where a key goes from the point at `from`, among points placed by two
+ * values, or null for a key that isn't the chart's. The arrows along the x
+ * axis step to the next point by x, the one pointing along reading order to
+ * a higher one, and Up and Down to the next by y; Page Up and Page Down move
+ * a tenth of the way by x, and Home and End go to the lowest and highest x.
+ * Points that tie take their y, then their place in the data, so every
+ * point is reached.
+ */
+export function stepPoint(
+  points: readonly XYValue[],
+  from: number,
+  key: string,
+  direction: ReadingDirection,
+): number | null {
+  if (points.length === 0) return null
+  const forward = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'
+  const back = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft'
+  const order = pointOrder(points, keyAxis(key))
+  const at = Math.max(0, order.indexOf(from))
+  const page = Math.max(1, Math.round(points.length / 10))
+  const next =
+    key === forward || key === 'ArrowUp'
+      ? at + 1
+      : key === back || key === 'ArrowDown'
+        ? at - 1
+        : key === 'PageUp'
+          ? at + page
+          : key === 'PageDown'
+            ? at - page
+            : key === 'Home'
+              ? 0
+              : key === 'End'
+                ? order.length - 1
+                : null
+  if (next === null) return null
+  return order[Math.min(order.length - 1, Math.max(0, next))] ?? null
+}
+
+/** The axis a key steps along among points placed by two values: Up and Down step by y, every other key by x. */
+export function keyAxis(key: string): 'x' | 'y' {
+  return key === 'ArrowUp' || key === 'ArrowDown' ? 'y' : 'x'
+}
+
+/** The points' indexes from the lowest `along` value up, ties taking the other value, then their place in the data. */
+function pointOrder(points: readonly XYValue[], along: 'x' | 'y'): number[] {
+  const other = along === 'x' ? 'y' : 'x'
+  return points
+    .map((point, index) => ({ point, index }))
+    .toSorted(
+      (a, b) =>
+        a.point[along] - b.point[along] ||
+        a.point[other] - b.point[other] ||
+        a.index - b.index,
+    )
+    .map(({ index }) => index)
+}
+
+/**
+ * The place of the point at `index` among `points` along `along`, from 1,
+ * in the order the arrows on that axis step through: a slider's value over
+ * them, so the key that steps to a higher point raises it.
+ */
+export function pointRank(
+  points: readonly XYValue[],
+  index: number,
+  along: 'x' | 'y' = 'x',
+): number {
+  return Math.max(0, pointOrder(points, along).indexOf(index)) + 1
 }

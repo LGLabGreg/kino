@@ -211,7 +211,7 @@ function DonutChart(props: DonutChartProps) {
       entrance: entrance !== 'none',
       moveProperty: 'stroke-dasharray',
       nice: false,
-      hideCategories: true,
+      seriesOfRow: (row) => String(row[props.index]),
       bandOf: (at, count) => categoryBand(at, count),
       measure: () => ({ extent: [0, 1] as const }),
     },

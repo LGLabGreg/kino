@@ -4,6 +4,8 @@ import { TooltipPopup } from '@/registry/components/kino/tooltip'
 import {
   axisLayerClassName,
   axisSlide,
+  plotOffset,
+  type ChartAxis,
   type ChartCategory,
   type ChartFormat,
   ChartGroup,
@@ -14,6 +16,7 @@ import {
   formatterOf,
   isForecast,
   plotLayerClassName,
+  scalesOf,
   slideLine,
   swatchStyle,
   tickMove,
@@ -43,6 +46,7 @@ import {
   type ComponentProps,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
   useEffect,
   useId,
   useLayoutEffect,
@@ -61,40 +65,65 @@ import { cn } from '@/lib/utils'
 
 /**
  * The lines across the plot at the value axis's ticks, all alike, except
- * the one on the category axis's edge, which the names stand in for. They
- * slide to their new place when the range changes, and new ones fade in
- * from where they would have been.
+ * the one on the category axis's edge, which the names stand in for. On a
+ * chart whose x is a value too, such as a scatter, lines along the plot at
+ * the x axis's ticks as well. They slide to their new place when the range
+ * changes, and new ones fade in from where they would have been.
  */
 function ChartGrid({ className, ...props }: Omit<ComponentProps<'div'>, 'children'>) {
-  const { scale, previousScale, orientation, direction, status } = useChart()
-  const layer = useRef<HTMLDivElement>(null)
-  const ticks = useTicks(layer)
-  const axis = orientation === 'vertical' ? 'y' : 'x'
+  const chart = useChart()
+  const valueLayer = useRef<HTMLDivElement>(null)
+  const xLayer = useRef<HTMLDivElement>(null)
   return (
     <div
-      ref={layer}
       data-slot='chart-grid'
       aria-hidden
       className={cn(plotLayerClassName, 'z-0 overflow-visible', className)}
       {...props}
     >
-      {status === 'ready' &&
+      <GridLines
+        layer={valueLayer}
+        axis='value'
+        line={chart.orientation === 'vertical' ? 'y' : 'x'}
+      />
+      {chart.xy && <GridLines layer={xLayer} axis='x' line='x' />}
+    </div>
+  )
+}
+
+/** The grid's lines at one axis's ticks: across the plot (`y`), or along it (`x`). */
+function GridLines({
+  layer,
+  axis,
+  line,
+}: {
+  layer: RefObject<HTMLDivElement | null>
+  axis: ChartAxis
+  line: 'x' | 'y'
+}) {
+  const chart = useChart()
+  const { scale, previousScale } = scalesOf(chart, axis)
+  const ticks = useTicks(layer, axis)
+  return (
+    <div ref={layer} className='absolute inset-0 [container-type:size]'>
+      {chart.status === 'ready' &&
         ticks.map(({ value: tick, leaving }) => (
           <div
             key={tick}
             data-leaving={leaving ? '' : undefined}
-            data-edge={tick === scale.domain[0] ? '' : undefined}
+            // The line at the axis's start sits on the plot's edge, unless the chart keeps an inset.
+            data-edge={tick === scale.domain[0] && !chart.inset ? '' : undefined}
             className={cn(
               'border-border border-dashed data-edge:opacity-0 forced-colors:border-[GrayText]',
               tickMove,
-              slideLine[axis],
-              axis === 'y' ? 'border-t' : 'border-l',
+              slideLine[line],
+              line === 'y' ? 'border-t' : 'border-l',
             )}
             style={axisSlide(
-              axis,
+              line,
               valuePlace(tick, scale),
               valuePlace(tick, previousScale),
-              direction,
+              chart.direction,
             )}
           />
         ))}
@@ -123,17 +152,18 @@ function ChartYAxis({
   categoryFormat,
   ...props
 }: AxisProps & { side?: 'start' | 'end' }) {
-  const { orientation } = useChart()
+  const { orientation, xy } = useChart()
   return orientation === 'vertical' ? (
-    <ValueAxis side={side} format={format} {...props} />
+    <ValueAxis side={side} format={format} label={xy?.labels?.y} {...props} />
   ) : (
     <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
   )
 }
 
 /**
- * The axis under the plot: the categories of upright bars, or the values of
- * lying ones. With `side='top'`, above it.
+ * The axis under the plot: the categories of upright bars, the values of
+ * lying ones, or on a chart whose x is a value too, such as a scatter, its
+ * x values. With `side='top'`, above it.
  */
 function ChartXAxis({
   side = 'bottom',
@@ -141,7 +171,12 @@ function ChartXAxis({
   categoryFormat,
   ...props
 }: AxisProps & { side?: 'top' | 'bottom' }) {
-  const { orientation } = useChart()
+  const { orientation, xy } = useChart()
+  // On a chart whose x is a value, each axis is titled with what it measures unless given a label.
+  if (xy)
+    return (
+      <ValueAxis side={side} format={format} axis='x' label={xy.labels?.x} {...props} />
+    )
   return orientation === 'vertical' ? (
     <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
   ) : (
@@ -164,13 +199,21 @@ function AxisFrame({
   className,
   children,
   ...props
-}: ComponentProps<'div'> & { side: AxisSide; label?: ReactNode; slot: string }) {
+}: ComponentProps<'div'> & {
+  side: AxisSide
+  label?: ReactNode
+  slot: string
+}) {
   const across = side === 'start' || side === 'end'
   const title = label && (
     <span
       className={cn(
         'text-muted-foreground shrink-0 truncate font-medium',
-        across ? 'self-center [writing-mode:vertical-rl] rotate-180' : 'self-center',
+        // Reads upwards with no rotation where the browser can, so it renders as sharply as the
+        // ticks; a turned title is drawn softer, on Windows above all.
+        across
+          ? 'self-center [writing-mode:vertical-rl] rotate-180 supports-[writing-mode:sideways-lr]:[writing-mode:sideways-lr] supports-[writing-mode:sideways-lr]:rotate-none'
+          : 'self-center',
       )}
     >
       {label}
@@ -197,23 +240,27 @@ function AxisFrame({
 function ValueAxis({
   side,
   format,
+  axis = 'value',
   label,
   className,
   ...props
-}: AxisProps & { side: AxisSide }) {
+}: AxisProps & { side: AxisSide; axis?: ChartAxis }) {
   const chart = useChart()
-  const { scale, previousScale, stack, locale, status, direction } = chart
+  const { stack, locale, status, direction } = chart
+  const { scale, previousScale } = scalesOf(chart, axis)
+  // The chart's own format, shortened; an XY frame's x axis follows the format it was given.
+  const own = axis === 'x' ? (chart.xy?.format ?? chart.format) : chart.format
   const write = formatterOf(
     locale,
     format ??
-      (stack === 'expand'
+      (stack === 'expand' && axis === 'value'
         ? { style: 'percent' }
-        : typeof chart.format === 'function'
-          ? chart.format
-          : { maximumFractionDigits: 1, ...chart.format, notation: 'compact' }),
+        : typeof own === 'function'
+          ? own
+          : { maximumFractionDigits: 1, ...own, notation: 'compact' }),
   )
   const layer = useRef<HTMLSpanElement>(null)
-  const all = useTicks(layer)
+  const all = useTicks(layer, axis)
   const ticks = status === 'ready' ? all : []
   const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [write(tick.value)]))
   const across = side === 'start' || side === 'end'
@@ -263,15 +310,16 @@ function ValueAxis({
                   side === 'start' && 'end-2 top-0 -translate-y-1/2',
                   side === 'end' && 'start-2 top-0 -translate-y-1/2',
                   // Under or over the plot, centred on the slide's physical left edge, but the
-                  // last value ends at the plot's edge, so it stays inside the chart.
+                  // last value goes no further than the plot's edge, so it stays inside the chart:
+                  // it centres too when a chart's inset leaves it the room.
                   side === 'bottom' && 'top-0 left-0',
                   side === 'top' && 'bottom-0 left-0',
                   !across &&
                     (tick !== scale.domain[1]
                       ? '-translate-x-1/2'
                       : direction === 'rtl'
-                        ? 'translate-x-0'
-                        : '-translate-x-full'),
+                        ? 'translate-x-[max(-50%,calc(-1*var(--chart-inset,0px)))]'
+                        : 'translate-x-[min(-50%,calc(var(--chart-inset,0px)-100%))]'),
                 )}
               >
                 {write(tick)}
@@ -564,12 +612,14 @@ const NAMES_SAMPLE_FROM = 120
 const NAMES_SAMPLE_UP_TO = 2560
 
 /** The value a reference line marks: worked out from the data, or the number given. */
-function useReferenceValue(value: number | ChartSummary | undefined) {
-  const { current, series, hidden, stack } = useChart()
+function useReferenceValue(value: number | ChartSummary | undefined, axis: ChartAxis) {
+  const { current, series, hidden, stack, xy } = useChart()
   if (value === undefined || typeof value === 'number') return value ?? null
   const shown = series.filter((key) => !hidden.includes(key))
-  const values =
-    stack === 'none'
+  // An XY frame's points each have a value on either axis.
+  const values = xy
+    ? xy.points.map((point) => (axis === 'x' ? point.x : point.y))
+    : stack === 'none'
       ? current.flatMap((category) => shown.map((key) => category.datum[key]))
       : current.map((category) =>
           shown.reduce((sum, key) => sum + (numberOf(category.datum[key]) ?? 0), 0),
@@ -618,11 +668,14 @@ function ReferenceLabel({
  * out from the shown data (`'average'`, `'median'`, `'min'`, `'max'`), named
  * by `label` at the axis's end or start. The value axis reaches far enough to
  * show it, and it slides when the range changes. With `category` in place of
- * `value`, it marks that category instead, such as the day of a launch.
+ * `value`, it marks that category instead, such as the day of a launch. With
+ * `axis='x'`, on a chart whose x is a value too, such as a scatter, it marks
+ * a value on the x axis.
  */
 function ChartReferenceLine({
   value,
   category,
+  axis = 'value',
   label,
   labelPosition = 'end',
   className,
@@ -631,25 +684,35 @@ function ChartReferenceLine({
   value?: number | ChartSummary
   /** The key of the category to mark, in place of a value. */
   category?: string
+  /** The axis `value` is on: the value axis, or the x axis of a chart whose x is a value too. */
+  axis?: ChartAxis
   label?: ReactNode | ((value: number) => ReactNode)
   labelPosition?: 'start' | 'end'
 }) {
   const chart = useChart()
-  const { scale, previousScale, orientation, direction, status, addReference, current } =
-    chart
-  const marked = useReferenceValue(value)
+  const { orientation, direction, status, current } = chart
+  const onX = axis === 'x' && chart.xy !== undefined
+  const { scale, previousScale } = scalesOf(chart, onX ? 'x' : 'value')
+  const addReference = onX && chart.xy ? chart.xy.addReference : chart.addReference
+  const marked = useReferenceValue(value, onX ? 'x' : 'value')
   useLayoutEffect(
     () =>
       marked === null || typeof value !== 'number' ? undefined : addReference(marked),
     [addReference, marked, value],
   )
+  // Which way the line runs: a value on an x axis, or a category along one, makes a line
+  // down the plot, whose label sits above it.
+  const along =
+    category !== undefined
+      ? orientation === 'vertical'
+        ? 'x'
+        : 'y'
+      : onX || orientation === 'horizontal'
+        ? 'x'
+        : 'y'
   // The room stays while the chart loads or fails, so the plot keeps its size.
   const room =
-    label !== undefined &&
-    labelPosition === 'end' &&
-    (category !== undefined) === (orientation === 'vertical') ? (
-      <LabelRoom />
-    ) : null
+    label !== undefined && labelPosition === 'end' && along === 'x' ? <LabelRoom /> : null
   if (status !== 'ready') return room
   const named = typeof label === 'function' ? marked !== null && label(marked) : label
 
@@ -657,11 +720,11 @@ function ChartReferenceLine({
     const at = current.find((c) => c.key === category)
     if (!at) return room
     // Across the value axis, at the category's centre.
-    const axis = orientation === 'vertical' ? 'x' : 'y'
+    const line = along
     const centre =
       physicalStart(at.band, orientation === 'vertical' ? 'inline' : 'block', direction) +
       at.band.size / 2
-    const place = axis === 'x' ? (direction === 'rtl' ? 1 - centre : centre) : 1 - centre
+    const place = line === 'x' ? (direction === 'rtl' ? 1 - centre : centre) : 1 - centre
     return (
       <>
         {room}
@@ -671,24 +734,24 @@ function ChartReferenceLine({
           {...props}
         >
           <div
-            className={cn(tickMove, slideLine[axis])}
+            className={cn(tickMove, slideLine[line])}
             style={
               {
-                ...axisSlide(axis, place, place, direction),
-                '--line-x': `${place * 100}cqw`,
+                ...axisSlide(line, place, place, direction),
+                '--line-x': plotOffset(place, 'cqw'),
               } as CSSProperties
             }
           >
             <div
               className={cn(
                 'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
-                axis === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+                line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
               )}
             />
             {named && (
               <ReferenceLabel
                 className={
-                  axis === 'x'
+                  line === 'x'
                     ? cn(
                         lineLabelAcross,
                         labelPosition === 'end' ? labelAbove : 'bottom-0',
@@ -709,7 +772,7 @@ function ChartReferenceLine({
   }
 
   if (marked === null) return room
-  const axis = orientation === 'vertical' ? 'y' : 'x'
+  const line = along
   return (
     <>
       {room}
@@ -719,29 +782,34 @@ function ChartReferenceLine({
         {...props}
       >
         <div
-          className={cn(tickMove, slideLine[axis])}
+          className={cn(tickMove, slideLine[line])}
           style={
             {
               ...axisSlide(
-                axis,
+                line,
                 valuePlace(marked, scale),
                 valuePlace(marked, previousScale),
                 direction,
               ),
-              '--line-x': `${(direction === 'rtl' ? 1 - valuePlace(marked, scale) : valuePlace(marked, scale)) * 100}cqw`,
+              '--line-x': plotOffset(
+                direction === 'rtl'
+                  ? 1 - valuePlace(marked, scale)
+                  : valuePlace(marked, scale),
+                'cqw',
+              ),
             } as CSSProperties
           }
         >
           <div
             className={cn(
               'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
-              axis === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+              line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
             )}
           />
           {named && (
             <ReferenceLabel
               className={
-                axis === 'y'
+                line === 'y'
                   ? cn(
                       'top-0 -translate-y-1/2',
                       labelPosition === 'end' ? 'end-0' : 'start-0',
@@ -761,20 +829,31 @@ function ChartReferenceLine({
 /**
  * A band across the plot from `from` to `to` on the value axis, such as a
  * goal range or what is normal, named by `label`. The value axis reaches far
- * enough to show it, and it moves with the range.
+ * enough to show it, and it moves with the range. With `axis='x'`, on a
+ * chart whose x is a value too, such as a scatter, a band down the plot
+ * between two x values.
  */
 function ChartReferenceArea({
   from,
   to,
+  axis = 'value',
   label,
   className,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & {
   from: number
   to: number
+  /** The axis `from` and `to` are on: the value axis, or the x axis of a chart whose x is a value too. */
+  axis?: ChartAxis
   label?: ReactNode
 }) {
-  const { scale, orientation, direction, status, addReference } = useChart()
+  const chart = useChart()
+  const { direction, status } = chart
+  const onX = axis === 'x' && chart.xy !== undefined
+  const { scale } = scalesOf(chart, onX ? 'x' : 'value')
+  const addReference = onX && chart.xy ? chart.xy.addReference : chart.addReference
+  // A band on an x axis runs down the plot, as a lying bar chart's values do.
+  const orientation = onX ? 'horizontal' : chart.orientation
   useLayoutEffect(() => {
     const letFrom = addReference(from)
     const letTo = addReference(to)
@@ -786,13 +865,15 @@ function ChartReferenceArea({
   if (status !== 'ready') return null
   const low = fractionOf(Math.min(from, to), scale.domain)
   const high = fractionOf(Math.max(from, to), scale.domain)
-  const pct = (fraction: number) => `${Math.round(fraction * 10_000) / 100}`
+  // Its edges as the plot's own places from the top, the left and the right.
+  const top = plotOffset(1 - high, 'cqh')
+  const bottom = `calc(100cqh - ${plotOffset(1 - low, 'cqh')})`
+  const left = plotOffset(direction === 'rtl' ? 1 - high : low, 'cqw')
+  const right = `calc(100cqw - ${plotOffset(direction === 'rtl' ? 1 - low : high, 'cqw')})`
   const clip =
     orientation === 'vertical'
-      ? `inset(${pct(1 - high)}cqh 0 ${pct(low)}cqh 0)`
-      : direction === 'rtl'
-        ? `inset(0 ${pct(low)}cqw 0 ${pct(1 - high)}cqw)`
-        : `inset(0 ${pct(1 - high)}cqw 0 ${pct(low)}cqw)`
+      ? `inset(${top} 0 ${bottom} 0)`
+      : `inset(0 ${right} 0 ${left})`
   return (
     <div
       data-slot='chart-reference-area'
@@ -809,7 +890,13 @@ function ChartReferenceArea({
           className='text-muted-foreground absolute end-1 top-1 font-medium whitespace-nowrap [translate:var(--area-label)] duration-(--motion-layout-duration) ease-(--motion-layout-easing) transition-none group-data-mounted/chart:transition-[translate] motion-reduce:group-data-mounted/chart:transition-none'
           style={
             {
-              '--area-label': `0 ${orientation === 'vertical' ? pct(1 - high) : 0}cqh`,
+              // At the band's far end: its top, or the end of a band down the plot.
+              '--area-label':
+                orientation === 'vertical'
+                  ? `0 ${top}`
+                  : direction === 'rtl'
+                    ? `${left} 0`
+                    : `calc(-1 * ${right}) 0`,
             } as CSSProperties
           }
         >
@@ -831,8 +918,16 @@ function ChartLegend({
   className,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & { position?: 'top' | 'bottom' }) {
-  const { series, config, hidden, setHidden, setEmphasis, patternOf, messages } =
-    useChart()
+  const {
+    series,
+    config,
+    hidden,
+    setHidden,
+    setEmphasis,
+    patternOf,
+    markerOf,
+    messages,
+  } = useChart()
   return (
     <div
       data-slot='chart-legend'
@@ -849,6 +944,7 @@ function ChartLegend({
         series={series}
         labelOf={(key) => config[key]?.label ?? key}
         patternOf={patternOf}
+        markerOf={markerOf}
         hidden={hidden}
         onHiddenChange={setHidden}
         onEmphasisChange={setEmphasis}
@@ -1007,7 +1103,11 @@ function ChartTooltipContent({
   className,
   children,
   ...props
-}: ComponentProps<'div'> & { index: number; total?: boolean; hideLabel?: boolean }) {
+}: ComponentProps<'div'> & {
+  index: number
+  total?: boolean
+  hideLabel?: boolean
+}) {
   const chart = useChart()
   const {
     id,

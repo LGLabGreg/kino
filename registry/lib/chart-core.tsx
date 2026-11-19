@@ -21,15 +21,20 @@ import {
   fractionOf,
   indexAt,
   labelLength,
+  nearestPoint,
   numberOf,
+  keyAxis,
+  pointRank,
   rangeOf,
   type ReadingDirection,
   sliderValue,
   type Span,
   stepIndex,
+  stepPoint,
   tickCountFor,
   valueScale,
   type ValueScale,
+  type XYValue,
 } from '@/registry/lib/chart-math'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
@@ -136,6 +141,30 @@ const defaultMessages: ChartMessages = {
 /** How values are written: Intl's number options, or a function of your own. */
 type ChartFormat = Intl.NumberFormatOptions | ((value: number) => string)
 
+/**
+ * The XY frame: what a chart whose x is a value too, such as a scatter, has
+ * beside its value scale. Each category is a point placed by its two
+ * values; the x axis, the grid and reference lines read this scale, and the
+ * pointer and the keys find points in two dimensions.
+ */
+interface ChartXY {
+  /** The scale along the x axis. */
+  scale: ValueScale
+  /** The x scale before the last change, so what arrives starts where it would have been. */
+  previousScale: ValueScale
+  /** How the x axis writes its values when it is given no `format`; the chart's `format` by default. */
+  format?: ChartFormat
+  /** Each point's two values, by its place among the categories. */
+  points: readonly XYValue[]
+  /** Takes a value into the x axis's range, such as a reference line's; returns how to let it go. */
+  addReference: (value: number) => () => void
+  /** What each axis measures, which titles the axes unless they are given a `label`. */
+  labels?: { x: string; y: string }
+}
+
+/** The x scale of a chart with categories, which has none: never drawn. */
+const NO_SCALE: ValueScale = { domain: [0, 1], ticks: [] }
+
 interface ChartContextValue {
   id: string
   label: string
@@ -157,6 +186,10 @@ interface ChartContextValue {
   scale: ValueScale
   /** The scale before the last change, so what arrives starts where it would have been. */
   previousScale: ValueScale
+  /** The x scale and its points, for a chart whose x is a value too; none for a chart with categories. */
+  xy?: ChartXY
+  /** The px kept clear inside each edge of the plot, as `--chart-inset`, for marks drawn round a point. */
+  inset: number
   /** A value as the chart's `format` writes it. */
   valueText: (value: number) => string
   /** Anything under a series' key as the chart writes it: a number, a `[from, to]` range, or no value. */
@@ -217,6 +250,12 @@ interface ChartContextValue {
   table?: ChartTable
   /** What the tooltip shows for the category at `index`, in place of each series' value. */
   tooltipContent?: (index: number) => ReactNode
+  /**
+   * The shape a series' marks take, such as a scatter's points, as an SVG
+   * path centred on 0 0 that fills a box 2 across, which its legend swatch
+   * takes too; none for a plain swatch.
+   */
+  markerOf?: (key: string) => string | undefined
   locale: Intl.LocalesArgument
   /** The categories run in order, such as days, so a change since the one before means something. */
   ordered: boolean
@@ -478,6 +517,7 @@ function ChartLegendToggle({
   slot,
   shown,
   pattern,
+  marker,
   onShownChange,
   onEmphasisChange,
   children,
@@ -487,6 +527,8 @@ function ChartLegendToggle({
   slot: number
   shown: boolean
   pattern: ChartPattern
+  /** The shape its marks take, as `markerOf` gives it, which the swatch takes in place of a square. */
+  marker?: string
   onShownChange: (shown: boolean) => void
   /** Whether the series is pointed at or focused, so it can come forward. */
   onEmphasisChange: (emphasised: boolean) => void
@@ -509,14 +551,28 @@ function ChartLegendToggle({
             'group/legend text-muted-foreground data-pressed:text-foreground gap-1.5 font-medium',
           )}
         >
-          <span
-            aria-hidden
-            className={cn(
-              'size-2.5 shrink-0 rounded-[calc(var(--control-radius-xs)/2.5)] border-2 border-(--swatch) bg-transparent transition-[background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) group-data-pressed/legend:bg-(--swatch)',
-              forcedSwatchColors[slot % forcedSwatchColors.length],
-            )}
-            style={swatchStyle(series, shown ? pattern : 'solid')}
-          />
+          {marker ? (
+            <svg
+              aria-hidden
+              viewBox='-1.2 -1.2 2.4 2.4'
+              className={cn(
+                'size-3 shrink-0 overflow-visible fill-transparent stroke-(--swatch) [stroke-width:1.5] transition-[fill] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) [vector-effect:non-scaling-stroke] group-data-pressed/legend:fill-(--swatch)',
+                forcedMarkerColors[slot % forcedMarkerColors.length],
+              )}
+              style={{ '--swatch': seriesColor(series) } as CSSProperties}
+            >
+              <path d={marker} vectorEffect='non-scaling-stroke' />
+            </svg>
+          ) : (
+            <span
+              aria-hidden
+              className={cn(
+                'size-2.5 shrink-0 rounded-[calc(var(--control-radius-xs)/2.5)] border-2 border-(--swatch) bg-transparent transition-[background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) group-data-pressed/legend:bg-(--swatch)',
+                forcedSwatchColors[slot % forcedSwatchColors.length],
+              )}
+              style={swatchStyle(series, shown ? pattern : 'solid')}
+            />
+          )}
           <span data-cut className='truncate'>
             {children}
           </span>
@@ -535,6 +591,7 @@ function ChartLegendToggles({
   series,
   labelOf,
   patternOf,
+  markerOf,
   hidden,
   onHiddenChange,
   onEmphasisChange,
@@ -542,6 +599,7 @@ function ChartLegendToggles({
   series: readonly string[]
   labelOf: (key: string) => ReactNode
   patternOf: (key: string) => ChartPattern
+  markerOf?: (key: string) => string | undefined
   hidden: readonly string[]
   onHiddenChange: (hidden: string[]) => void
   /** The series brought forward, or null for none. */
@@ -556,6 +614,7 @@ function ChartLegendToggles({
         slot={slot}
         shown={shown}
         pattern={patternOf(key)}
+        marker={markerOf?.(key)}
         onShownChange={(pressed) => {
           onHiddenChange(pressed ? hidden.filter((k) => k !== key) : [...hidden, key])
           onEmphasisChange(pressed ? key : null)
@@ -577,6 +636,15 @@ const forcedSwatchColors = [
   'forced-colors:border-[LinkText] forced-colors:group-data-pressed/legend:bg-[LinkText]',
   'forced-colors:border-[GrayText] forced-colors:group-data-pressed/legend:bg-[GrayText]',
   'forced-colors:border-[VisitedText] forced-colors:group-data-pressed/legend:bg-[VisitedText]',
+] as const
+
+/** The same for a swatch drawn as a marker's shape, which an SVG strokes and fills. */
+const forcedMarkerColors = [
+  'forced-colors:stroke-[CanvasText] forced-colors:group-data-pressed/legend:fill-[CanvasText]',
+  'forced-colors:stroke-[Highlight] forced-colors:group-data-pressed/legend:fill-[Highlight]',
+  'forced-colors:stroke-[LinkText] forced-colors:group-data-pressed/legend:fill-[LinkText]',
+  'forced-colors:stroke-[GrayText] forced-colors:group-data-pressed/legend:fill-[GrayText]',
+  'forced-colors:stroke-[VisitedText] forced-colors:group-data-pressed/legend:fill-[VisitedText]',
 ] as const
 
 /**
@@ -746,9 +814,10 @@ function useCategories(
   bandOf: (index: number, count: number) => Band,
   root: RefObject<HTMLElement | null>,
   leaveProperty: string,
+  keyOf: (row: ChartDatum) => string = (row) => String(row[indexKey]),
 ) {
   const current: ChartCategory[] = data.map((datum, index) => ({
-    key: String(datum[indexKey]),
+    key: keyOf(datum),
     value: datum[indexKey],
     datum,
     index,
@@ -827,8 +896,35 @@ function axisSlide(
 /** The `translate` that puts a line at `place` along the value axis. */
 function slideTo(axis: 'x' | 'y', place: number, direction: ReadingDirection) {
   return axis === 'x'
-    ? `${(direction === 'rtl' ? 1 - place : place) * 100}cqw 0`
-    : `0 ${(1 - place) * 100}cqh`
+    ? `${plotOffset(direction === 'rtl' ? 1 - place : place, 'cqw')} 0`
+    : `0 ${plotOffset(1 - place, 'cqh')}`
+}
+
+/**
+ * Where `place`, a fraction of the plot from its physical left or top, sits
+ * along it in CSS, with `unit` the plot's width (`cqw`) or height (`cqh`).
+ * A chart with an `inset`, such as a scatter, keeps that many px clear
+ * inside each edge, as `--chart-inset`, so a point at either end of an axis
+ * is drawn whole; on any other chart it is the place itself.
+ */
+function plotOffset(place: number, unit: 'cqw' | 'cqh') {
+  const share = Math.round(place * 1e6) / 1e6
+  return `calc(var(--chart-inset, 0px) + ${share} * (100${unit} - 2 * var(--chart-inset, 0px)))`
+}
+
+/**
+ * The same place as a fraction of the plot's whole `length` in px, for what
+ * JavaScript places, such as a tooltip; and with `toPlace`, back from one.
+ */
+function plotFraction(place: number, length: number, inset: number) {
+  if (length <= 0) return place
+  return (inset + place * Math.max(0, length - inset * 2)) / length
+}
+
+function placeFromFraction(fraction: number, length: number, inset: number) {
+  const inner = length - inset * 2
+  if (inner <= 0) return 0.5
+  return (fraction * length - inset) / inner
 }
 
 /** Where a value sits along the value axis, from the reading start, or from the bottom. */
@@ -844,8 +940,8 @@ function valuePlace(value: number, scale: ValueScale) {
  * value order, so no tick's element moves in the page, which would make it
  * jump.
  */
-function useTicks(layer: RefObject<HTMLElement | null>) {
-  const { scale } = useChart()
+function useTicks(layer: RefObject<HTMLElement | null>, axis: ChartAxis = 'value') {
+  const { scale } = scalesOf(useChart(), axis)
   const key = scale.ticks.join()
   const [drawn, setDrawn] = useState({
     key,
@@ -874,6 +970,24 @@ function useTicks(layer: RefObject<HTMLElement | null>) {
       leaving: true,
     })),
   ].toSorted((a, b) => a.value - b.value)
+}
+
+/**
+ * Which of a chart's scales a part reads: the value axis's, or an XY
+ * frame's x axis's.
+ */
+type ChartAxis = 'value' | 'x'
+
+/** The scale of `axis`, and the one before its last change; none on a chart without it. */
+function scalesOf(
+  chart: Pick<ChartContextValue, 'scale' | 'previousScale' | 'xy'>,
+  axis: ChartAxis,
+) {
+  if (axis === 'value') return { scale: chart.scale, previousScale: chart.previousScale }
+  return {
+    scale: chart.xy?.scale ?? NO_SCALE,
+    previousScale: chart.xy?.previousScale ?? NO_SCALE,
+  }
 }
 
 /** The formatter of `format`: a function of yours, or Intl's options, once per locale. */
@@ -988,6 +1102,9 @@ function ChartColumns() {
   const { active, setActive } = useChartActive()
   // Where the keys start from when focus comes back: the last category they reached.
   const [lastIndex, setLastIndex] = useState<number | null>(null)
+  // Among points placed by two values, the axis the last arrow stepped along, which the
+  // slider's value counts on, so Up raises it as much as Right does.
+  const [along, setAlong] = useState<'x' | 'y'>('x')
   const ready = status === 'ready'
   const count = current.length
   const resting = Math.min(lastIndex ?? chart.selected ?? 0, Math.max(0, count - 1))
@@ -1059,7 +1176,11 @@ function ChartColumns() {
       aria-orientation={orientation === 'vertical' ? 'horizontal' : 'vertical'}
       aria-valuemin={1}
       aria-valuemax={Math.max(1, count)}
-      aria-valuenow={sliderValue(reached, Math.max(1, count), orientation)}
+      aria-valuenow={
+        chart.xy
+          ? pointRank(chart.xy.points, reached, along)
+          : sliderValue(reached, Math.max(1, count), orientation)
+      }
       aria-valuetext={columnLabel(chart, reached)}
       data-slot='chart-columns'
       className={className}
@@ -1092,7 +1213,11 @@ function ChartColumns() {
           if (seriesAt) setEmphasis(null)
           return
         }
-        if (stepSeries && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        if (
+          stepSeries &&
+          !chart.xy &&
+          (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+        ) {
           event.preventDefault()
           setEmphasis(
             stepSeries(reached, chart.emphasis, event.key === 'ArrowUp' ? -1 : 1),
@@ -1107,9 +1232,13 @@ function ChartColumns() {
           setActive(reached)
           return
         }
-        const next = stepIndex(event.key, reached, count, orientation, direction)
+        // Points placed by two values step by x along it, and by y up and down.
+        const next = chart.xy
+          ? stepPoint(chart.xy.points, reached, event.key, direction)
+          : stepIndex(event.key, reached, count, orientation, direction)
         if (next === null) return
         event.preventDefault()
+        if (chart.xy) setAlong(keyAxis(event.key))
         setLastIndex(next)
         setActive(next)
       }}
@@ -1404,18 +1533,46 @@ interface CategoryChartOptions<Shapes> {
   /** The property the marks move on, which the chart waits on before letting a leaving category go. */
   moveProperty: string
   bandOf: (index: number, count: number) => Band
-  /** The chart's own shapes from the rows and the shown series, and the values they reach. */
+  /**
+   * The chart's own shapes from the rows and the shown series, and the
+   * values they reach; on an XY frame, each row's point too, in order, and
+   * the x values they reach.
+   */
   measure: (
     rows: readonly ChartDatum[],
     shown: readonly string[],
-  ) => Shapes & { extent: Span }
+  ) => Shapes & {
+    extent: Span
+    xy?: { extent: Span; points: readonly XYValue[] }
+  }
   /** Round the value axis's ends out to a tick; off for shares that fill the axis. */
   nice: boolean
   /**
-   * The config's keys are the categories, not series, as a donut's slices
-   * are: hiding one takes its category out, so it leaves as a removed one does.
+   * The series each row is of, for a chart whose rows each belong to one,
+   * such as a donut's slices, keyed by their category, or a scatter's
+   * points: hiding a series takes its rows out, so they leave as a removed
+   * category does.
    */
-  hideCategories?: boolean
+  seriesOfRow?: (row: ChartDatum) => string
+  /**
+   * What tells each row's category apart from the rest, its `index` value by
+   * default: a scatter's rows in series of their own may share a name, as
+   * the same month for each team does.
+   */
+  keyOf?: (row: ChartDatum) => string
+  /**
+   * The px kept clear inside the plot's edges, on both axes, for marks drawn
+   * around a point, such as a scatter's bubbles; none by default.
+   */
+  inset?: number
+  /** The x axis of an XY frame, whose points `measure` gives: its range, ticks and how it writes values. */
+  x?: {
+    domain?: readonly [DomainEnd, DomainEnd]
+    tickCount?: number
+    allowDecimals: boolean
+    format?: ChartFormat
+    labels?: { x: string; y: string }
+  }
 }
 
 /**
@@ -1467,6 +1624,7 @@ function useCategoryChart<Shapes>(
   const references = useRegistry<number>()
   const rooms = useRegistry<number>()
   const forecasts = useRegistry<ChartForecast>()
+  const xReferences = useRegistry<number>()
   const [hidden, setHidden] = useControllable(
     hiddenSeries,
     defaultHiddenSeries,
@@ -1482,13 +1640,14 @@ function useCategoryChart<Shapes>(
   const placeholder = useSpinner(loading) || firstLoad
   const failed = Boolean(error) && !loading
   const rows = placeholder || failed ? [] : data
-  const drawn = options.hideCategories ? rowsShown(rows, index, hidden) : rows
+  const drawn = options.seriesOfRow ? rowsShown(rows, options.seriesOfRow, hidden) : rows
   const { categories, current } = useCategories(
     drawn,
     index,
     options.bandOf,
     root,
     options.moveProperty,
+    options.keyOf,
   )
   const shown = series.filter((key) => !hidden.includes(key))
   const shapes = options.measure(drawn, shown)
@@ -1512,6 +1671,25 @@ function useCategoryChart<Shapes>(
     },
   )
   const previousScale = usePrevious(scale, `${scale.domain.join()}|${scale.ticks.join()}`)
+  const xy = options.x && shapes.xy
+  const xScale = xy
+    ? valueScale(extentWith(xy.extent, xReferences.values), {
+        domain: options.x?.domain,
+        // The ends round to the ticks asked for, whatever the plot's width, so the first paint,
+        // before the plot is measured, shows the same range; a narrow plot marks fewer of them.
+        domainTickCount: options.x?.tickCount ?? 5,
+        tickCount: tickCountFor(
+          options.x?.tickCount ?? 5,
+          plotSize.width,
+          TICK_SPACING.across,
+        ),
+        allowDecimals: options.x?.allowDecimals,
+      })
+    : NO_SCALE
+  const previousXScale = usePrevious(
+    xScale,
+    `${xScale.domain.join()}|${xScale.ticks.join()}`,
+  )
 
   const status: ChartStatus =
     placeholder || (loading && rows.length === 0)
@@ -1581,6 +1759,17 @@ function useCategoryChart<Shapes>(
     stack: options.stack,
     scale,
     previousScale,
+    inset: options.inset ?? 0,
+    xy: xy
+      ? {
+          scale: xScale,
+          previousScale: previousXScale,
+          format: options.x?.format,
+          points: xy.points,
+          addReference: xReferences.add,
+          labels: options.x?.labels,
+        }
+      : undefined,
     valueText,
     datumText: (value) => {
       const range = rangeOf(value)
@@ -1631,28 +1820,68 @@ function useCategoryChart<Shapes>(
   }
 }
 
-/** The rows whose category isn't hidden, for a chart whose config's keys are its categories. */
+/** The rows whose series isn't hidden, for a chart whose rows each belong to one. */
 function rowsShown(
   rows: readonly ChartDatum[],
-  index: string,
+  seriesOf: (row: ChartDatum) => string,
   hidden: readonly string[],
 ) {
-  return rows.filter((row) => !hidden.includes(String(row[index])))
+  return rows.filter((row) => !hidden.includes(seriesOf(row)))
 }
 
 /**
  * The category under `at` in a plot whose box is `box`: by the chart's own
- * `pickAt` where it has one, or else the nearest along the category axis.
+ * `pickAt` where it has one; on an XY frame, the point nearest it in both
+ * directions; or else the nearest along the category axis.
  */
 function pickIndex(
-  chart: Pick<ChartContextValue, 'pickAt' | 'orientation' | 'direction'>,
+  chart: Pick<
+    ChartContextValue,
+    'pickAt' | 'orientation' | 'direction' | 'xy' | 'scale' | 'inset'
+  >,
   at: { x: number; y: number },
   box: DOMRect,
   centres: readonly number[],
 ) {
-  return chart.pickAt
-    ? chart.pickAt(at, box)
-    : indexAt(alongCategories(at, box, chart.orientation, chart.direction), centres)
+  if (chart.pickAt) return chart.pickAt(at, box)
+  if (chart.xy) {
+    return nearestPoint(
+      chart.xy.points.map((point) => xyPlace(chart, point)),
+      {
+        x: placeFromFraction(
+          box.width === 0 ? 0 : (at.x - box.left) / box.width,
+          box.width,
+          chart.inset,
+        ),
+        y: placeFromFraction(
+          box.height === 0 ? 0 : (at.y - box.top) / box.height,
+          box.height,
+          chart.inset,
+        ),
+      },
+      {
+        width: Math.max(0, box.width - chart.inset * 2),
+        height: Math.max(0, box.height - chart.inset * 2),
+      },
+    )
+  }
+  return indexAt(alongCategories(at, box, chart.orientation, chart.direction), centres)
+}
+
+/**
+ * Where a point placed by two values sits on an XY frame's plot, as
+ * fractions of it from its physical left and its top: x runs from the
+ * reading start, and y up from the bottom.
+ */
+function xyPlace(
+  chart: Pick<ChartContextValue, 'xy' | 'scale' | 'direction'>,
+  point: XYValue,
+): XYValue {
+  const along = chart.xy ? fractionOf(point.x, chart.xy.scale.domain) : 0
+  return {
+    x: chart.direction === 'rtl' ? 1 - along : along,
+    y: 1 - fractionOf(point.y, chart.scale.domain),
+  }
 }
 
 /** Values that parts of the chart add while they show, such as the values reference lines need the axis to reach. */
@@ -1778,6 +2007,11 @@ function CategoryChartFrame({
           aria-describedby={description ? descriptionId : undefined}
           className={cn(chartFrameClassName, className)}
           {...props}
+          style={
+            chart.inset
+              ? ({ '--chart-inset': `${chart.inset}px`, ...props.style } as CSSProperties)
+              : props.style
+          }
         >
           <ChartStyle id={chart.id} config={chart.config} series={chart.series} />
           {description && (
@@ -1865,6 +2099,10 @@ export {
   columnLabel,
   pickIndex,
   rowsShown,
+  type ChartAxis,
+  type ChartXY,
+  scalesOf,
+  xyPlace,
   type EntrancePhase,
   ChangeText,
   chartFrameClassName,
@@ -1883,6 +2121,8 @@ export {
   seriesColor,
   slideLine,
   slideTo,
+  plotOffset,
+  plotFraction,
   swatchStyle,
   tickMove,
   useCategoryChart,
