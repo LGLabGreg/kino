@@ -79,6 +79,12 @@ interface BarChartProps extends CategoryChartProps {
   categoryGap?: number
   /** The space between bars side by side, as a share of one bar's slot. */
   barGap?: number
+  /**
+   * What each category holds, for a screen reader and the data table, in
+   * place of each series' value: a day's state in a strip of days, whose
+   * series are only its colours. `name` heads the data table's column.
+   */
+  describe?: { name: string; text: (datum: ChartDatum) => string }
 }
 
 interface BarContextValue {
@@ -112,6 +118,7 @@ const barChartKeys = [
   'cascadeFrom',
   'categoryGap',
   'barGap',
+  'describe',
 ]
 
 /**
@@ -127,6 +134,7 @@ function BarChart(props: BarChartProps) {
     cascadeFrom = 'start',
     categoryGap,
     barGap = 0.12,
+    describe,
     description,
     empty,
     className,
@@ -170,6 +178,16 @@ function BarChart(props: BarChartProps) {
   )
   const full: ChartContextValue = {
     ...chart,
+    ...(describe && {
+      describe: (at: number) => {
+        const category = chart.current[at]
+        return category ? describe.text(category.datum) : ''
+      },
+      table: {
+        columns: [describe.name],
+        cells: (category: ChartCategory) => [describe.text(category.datum)],
+      },
+    }),
     // The tooltip sits on the far end of the category's bars: the tallest, or the stack's top.
     pointOf: (at) => {
       const category = chart.current[at]

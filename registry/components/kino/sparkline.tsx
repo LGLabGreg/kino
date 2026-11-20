@@ -44,6 +44,24 @@ interface SparklineProps extends Omit<
   /** Marks the last value of each line with a dot, where the value beside it reads. */
   endDot?: boolean
   /**
+   * Series drawn as a dashed line with no fill, behind the rest: the period
+   * before, to compare with. Bars draw no dashes, so a bar sparkline draws them as bars.
+   */
+  dashed?: readonly string[]
+  /**
+   * The key of the first category whose values are still coming in, such as
+   * the minute now running: a line is dashed from the one before it on, and
+   * the tooltip says so. Areas and bars draw it as the rest.
+   */
+  forecastFrom?: string
+  /**
+   * Fits an area's range to its data, as a line's is, with room below, in
+   * place of starting at zero: for a trend whose shape matters more than its
+   * size, such as a KPI's, whose number says the size. Values that never go
+   * below zero are never grounded below it. Lines and bars keep their range.
+   */
+  fit?: boolean
+  /**
    * How it arrives the first time it comes into view: drawn along from the
    * reading start, bars one after another, or simply there, the default,
    * since a page that loads doesn't animate into place.
@@ -62,18 +80,34 @@ const sparklineMessages = {
  * left `'auto'` where the data reaches, never rounded out to a tick. A
  * line's runs from its lowest value to its highest, so its shape fills the
  * room, and an area's or bars' from zero, since their size is their value.
+ * A `fit` area runs from below its lowest value, by half its rise and fall,
+ * so its shape fills the room above a band of fill.
  */
 function sparklineDomain(
   data: readonly ChartDatum[],
   keys: readonly string[],
   variant: SparklineVariant,
   given: readonly [DomainEnd, DomainEnd] = ['auto', 'auto'],
+  fit = false,
 ): readonly [DomainEnd, DomainEnd] {
-  const fitted = fittedDomain(data, keys, variant)
-  return [
-    given[0] === 'auto' ? fitted[0] : given[0],
-    given[1] === 'auto' ? fitted[1] : given[1],
-  ]
+  const fits = fit && variant === 'area'
+  const [low, high] = fittedDomain(data, keys, fits ? 'line' : variant)
+  // The floor comes from the data's own lowest value, before a flat line's room is added.
+  const [floor] = fits ? fittedDomain(data, keys, 'area') : [low]
+  const lowest =
+    typeof floor === 'number'
+      ? floor
+      : typeof low === 'number' && typeof high === 'number'
+        ? (low + high) / 2
+        : low
+  const ground =
+    fits && typeof low === 'number' && typeof high === 'number'
+      ? Math.max(
+          typeof lowest === 'number' && lowest >= 0 ? 0 : -Infinity,
+          low - (high - low) / 2,
+        )
+      : low
+  return [given[0] === 'auto' ? ground : given[0], given[1] === 'auto' ? high : given[1]]
 }
 
 /** Where the data reaches: a line with one value sits in the middle; with no values, it is left to fit. */
@@ -131,6 +165,9 @@ function Sparkline({
   variant = 'line',
   curve = 'monotone',
   endDot = false,
+  dashed = [],
+  forecastFrom,
+  fit = false,
   entrance = 'none',
   domain,
   messages,
@@ -141,10 +178,10 @@ function Sparkline({
 }: SparklineProps) {
   const keys = Object.keys(props.config)
   const shared = {
-    ...props,
-    domain: sparklineDomain(props.data, keys, variant, domain),
-    messages: { ...sparklineMessages, ...messages },
     'data-slot': 'sparkline',
+    ...props,
+    domain: sparklineDomain(props.data, keys, variant, domain, fit),
+    messages: { ...sparklineMessages, ...messages },
     'data-variant': variant,
     // Every variant keeps room beside the plot for an end dot, so sparklines in a column line
     // up, and the status's words and button sit in one row, in the room a sparkline has.
@@ -165,10 +202,16 @@ function Sparkline({
     )
   }
   const dots = endDot ? 'last' : false
+  const solid = keys.filter((key) => !dashed.includes(key))
+  // Drawn first, so the series compared with them sit over them.
+  const behind = keys
+    .filter((key) => dashed.includes(key))
+    .map((key) => <Line key={key} dataKey={key} curve={curve} dashed />)
   if (variant === 'area') {
     return (
       <AreaChart {...shared} entrance={entrance}>
-        {keys.map((key) => (
+        {behind}
+        {solid.map((key) => (
           <Area key={key} dataKey={key} curve={curve} dots={dots} />
         ))}
         {children}
@@ -177,8 +220,15 @@ function Sparkline({
   }
   return (
     <LineChart {...shared} zero={false} entrance={entrance}>
-      {keys.map((key) => (
-        <Line key={key} dataKey={key} curve={curve} dots={dots} />
+      {behind}
+      {solid.map((key) => (
+        <Line
+          key={key}
+          dataKey={key}
+          curve={curve}
+          dots={dots}
+          forecastFrom={forecastFrom}
+        />
       ))}
       {children}
     </LineChart>

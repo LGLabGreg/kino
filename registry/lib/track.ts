@@ -73,3 +73,12 @@ export function slidingFillStyle(percent: number): CSSProperties {
     translate: `calc(var(--track-dir) * ${percent - 100}%) 0`,
   }
 }
+
+/**
+ * A mark that glides along a track to its place, such as a target's notch or
+ * a score's marker: a layer as wide as the track, placed with
+ * `slidingFillStyle` so its end is at the value, with the mark at that end.
+ * It moves on the `layout` role, since a mark changes place rather than draws.
+ */
+export const slidingMarkClassName =
+  'pointer-events-none absolute inset-0 flex justify-end transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none'
