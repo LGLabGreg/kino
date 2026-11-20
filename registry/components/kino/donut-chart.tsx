@@ -1,6 +1,6 @@
 'use client'
 
-import { AnimatedNumber } from '@/registry/components/kino/animated-number'
+import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
   CategoryChartFrame,
   ChartSvgPattern,
@@ -42,7 +42,6 @@ import {
   placeholderBreatheClassName,
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
-import { Swap, SwapText } from '@/registry/lib/swap'
 import {
   Children,
   type ComponentProps,
@@ -876,7 +875,6 @@ function DonutChartCentre({
   const caption = category
     ? (chart.config[category.key]?.label ?? chart.categoryText(category.value))
     : (label ?? donut.valueLabel)
-  const format = chart.format
   const hole = donut.outer * 2 * donut.innerRadius
   const drawn = drawingSize(chart.plotSize)
   return (
@@ -891,7 +889,7 @@ function DonutChartCentre({
       style={
         {
           // Before the plot is measured, the stand-in's hole as a share of the plot's shorter side.
-          '--donut-hole':
+          '--centre-hole':
             chart.plotSize.width > 0 && chart.plotSize.height > 0
               ? `${round(hole)}px`
               : `calc(min(100cqw, 100cqh) * ${hole / Math.min(drawn.width, drawn.height)})`,
@@ -900,29 +898,12 @@ function DonutChartCentre({
       }
       {...props}
     >
-      {/* As wide as most of the hole, so the text never reaches the ring. */}
-      <div className='flex w-[calc(var(--donut-hole)*0.78)] min-w-0 flex-col items-center gap-0.5 text-center'>
-        {typeof format === 'function' ? (
-          <span className='text-[clamp(1rem,calc(var(--donut-hole)*0.2),1.875rem)] font-semibold tracking-tight tabular-nums'>
-            <Swap roll>{format(value)}</Swap>
-          </span>
-        ) : (
-          <AnimatedNumber
-            value={value}
-            locale={chart.locale}
-            format={format}
-            // Sized to the hole, between the body text and the size of a page's figure.
-            className='max-w-full text-[clamp(1rem,calc(var(--donut-hole)*0.2),1.875rem)] font-semibold tracking-tight'
-          />
-        )}
-        <span className='text-muted-foreground flex max-w-full min-w-0 justify-center text-xs'>
-          {typeof caption === 'string' ? (
-            <SwapText text={caption} />
-          ) : (
-            <Swap>{caption}</Swap>
-          )}
-        </span>
-      </div>
+      <ChartCentreText
+        value={value}
+        caption={caption}
+        format={chart.format}
+        locale={chart.locale}
+      />
     </div>
   )
 }

@@ -97,6 +97,28 @@ function foldPoint(slices: readonly Slice[], at: number) {
 }
 
 /**
+ * The ring a point `distance` px from the centre is on, or nearest to while
+ * it is close, by its place among `rings`, outermost first; null past them
+ * or in the hole.
+ */
+function nearestRing(distance: number, rings: readonly RingBand[]): number | null {
+  const outermost = rings[0]
+  const innermost = rings.at(-1)
+  if (!outermost || !innermost || outermost.outer <= 0) return null
+  if (distance > outermost.outer + PICK_SLACK) return null
+  if (innermost.inner > 0 && distance < innermost.inner - PICK_SLACK) return null
+  const away = (band: RingBand) =>
+    Math.max(0, band.inner - distance, distance - band.outer)
+  // A ring with no room, such as one leaving, is never found.
+  let near: number | null = null
+  rings.forEach((band, at) => {
+    if (band.outer <= band.inner) return
+    if (near === null || away(band) < away(rings[near]!)) near = at
+  })
+  return near
+}
+
+/**
  * The slice under a point `x` across and `y` down from the centre, in px, by
  * its place in the data: the ring the point is on, or nearest to while it is
  * close, then the slice its angle falls in.
@@ -106,20 +128,161 @@ function sliceAt(
   y: number,
   rings: readonly (RingBand & { slices: readonly Slice[] })[],
 ): number | null {
-  const distance = Math.hypot(x, y)
-  const outermost = rings[0]
-  const innermost = rings.at(-1)
-  if (!outermost || !innermost || outermost.outer <= 0) return null
-  if (distance > outermost.outer + PICK_SLACK) return null
-  if (innermost.inner > 0 && distance < innermost.inner - PICK_SLACK) return null
-  const away = (band: RingBand) =>
-    Math.max(0, band.inner - distance, distance - band.outer)
-  const ring = rings.reduce((near, next) => (away(next) < away(near) ? next : near))
+  const near = nearestRing(Math.hypot(x, y), rings)
+  if (near === null) return null
   const turn = turnOf(x, y)
-  const at = ring.slices.findIndex(
+  const at = rings[near]!.slices.findIndex(
     (slice) => slice.size > 0 && turn >= slice.start && turn < slice.start + slice.size,
   )
   return at === -1 ? null : at
+}
+
+/**
+ * Where an arc runs: from `start`, `size` round, clockwise, as fractions of
+ * a turn from the top. A whole circle has a size of 1.
+ */
+interface Sweep {
+  start: number
+  size: number
+}
+
+/**
+ * The arc from `startAngle` to `endAngle`, in degrees clockwise from the
+ * top. One that runs backwards, or further than a turn, is held to none or
+ * one.
+ */
+function sweepOf(startAngle: number, endAngle: number): Sweep {
+  const size = Math.min(1, Math.max(0, (endAngle - startAngle) / 360))
+  return { start: (((startAngle / 360) % 1) + 1) % 1, size }
+}
+
+/** How far round `turn` is from the sweep's start, clockwise, from 0 to under 1. */
+function turnIntoSweep(turn: number, sweep: Sweep) {
+  return (((turn - sweep.start) % 1) + 1) % 1
+}
+
+/** Whether `turn` lies on the arc. */
+function withinSweep(turn: number, sweep: Sweep) {
+  return sweep.size >= 1 || turnIntoSweep(turn, sweep) <= sweep.size + 1e-9
+}
+
+/**
+ * The ring under a point `x` across and `y` down from the centre, in px, by
+ * its place among `rings`: the one it is on or nearest, wherever along the
+ * arc, value or track, so a ring with little value is as easy to point at.
+ */
+function ringAt(
+  x: number,
+  y: number,
+  rings: readonly RingBand[],
+  sweep: Sweep,
+): number | null {
+  if (!withinSweep(turnOf(x, y), sweep)) return null
+  return nearestRing(Math.hypot(x, y), rings)
+}
+
+/**
+ * What a round chart has to fit in its plot: a point at `x` across and `y`
+ * down from the centre, as fractions of the radius, and the px it needs
+ * round it, such as a line of text below.
+ */
+interface RoundMark {
+  x: number
+  y: number
+  left?: number
+  right?: number
+  up?: number
+  down?: number
+}
+
+/**
+ * The marks that hold an arc `sweep` with a hole of `inner`, as a share of
+ * the radius: its ends, inside and out, each side of the circle it passes,
+ * and the centre, where its centre's words sit.
+ */
+function sweepMarks(sweep: Sweep, inner: number): RoundMark[] {
+  const at = (turn: number, radius: number): RoundMark => ({
+    x: radius * Math.sin(turn * Math.PI * 2),
+    y: -radius * Math.cos(turn * Math.PI * 2),
+  })
+  const marks: RoundMark[] = [{ x: 0, y: 0 }]
+  for (const side of [0, 0.25, 0.5, 0.75]) {
+    if (withinSweep(side, sweep)) marks.push(at(side, 1))
+  }
+  const end = sweep.start + sweep.size
+  for (const turn of [sweep.start, end]) marks.push(at(turn, 1), at(turn, inner))
+  return marks
+}
+
+/** How far a set of marks reaches along one axis, in px, at a radius of `radius` px. */
+function reachOf(
+  marks: readonly RoundMark[],
+  radius: number,
+  axis: 'x' | 'y',
+): { low: number; high: number } {
+  let low = Infinity
+  let high = -Infinity
+  for (const mark of marks) {
+    const place = mark[axis] * radius
+    low = Math.min(low, place - ((axis === 'x' ? mark.left : mark.up) ?? 0))
+    high = Math.max(high, place + ((axis === 'x' ? mark.right : mark.down) ?? 0))
+  }
+  return { low, high }
+}
+
+/**
+ * The largest radius at which `marks` fit a plot `width` by `height` px, in
+ * whole px, and where the centre sits, in px from the plot's top left, so
+ * that what they reach is centred in the plot both ways.
+ */
+function fitRound(
+  width: number,
+  height: number,
+  marks: readonly RoundMark[],
+): { radius: number; x: number; y: number } {
+  const fits = (radius: number) => {
+    const across = reachOf(marks, radius, 'x')
+    const down = reachOf(marks, radius, 'y')
+    return across.high - across.low <= width && down.high - down.low <= height
+  }
+  let low = 0
+  let high = Math.max(width, height)
+  if (marks.length === 0 || !fits(0)) high = 0
+  // What the marks reach grows steadily with the radius, so halving finds the largest that fits.
+  for (let step = 0; step < 40 && high - low > 0.01; step++) {
+    const middle = (low + high) / 2
+    if (fits(middle)) low = middle
+    else high = middle
+  }
+  const radius = Math.max(0, Math.floor(low * 2) / 2 - 0.5)
+  const across = reachOf(marks, radius, 'x')
+  const down = reachOf(marks, radius, 'y')
+  return {
+    radius,
+    x: (width - (across.high - across.low)) / 2 - across.low,
+    y: (height - (down.high - down.low)) / 2 - down.low,
+  }
+}
+
+/**
+ * The rings' bands, outermost first, as `ringBands` shares them among the
+ * rings `present`; a ring that isn't present, such as one leaving, takes no
+ * room where it sits, at the edge between its neighbours, so it thins to
+ * nothing there while the rest take its room.
+ */
+function ringBandsOf(
+  outer: number,
+  inner: number,
+  present: readonly boolean[],
+  gap: number,
+): RingBand[] {
+  const shared = ringBands(outer, inner, present.filter(Boolean).length, gap)
+  let next = 0
+  return present.map((here) => {
+    if (here) return shared[next++]!
+    const edge = shared[next - 1]?.inner ?? shared[next]?.outer ?? outer
+    return { inner: edge, outer: edge }
+  })
 }
 
 /** How far round a point is from the top, clockwise, as a fraction of a turn. */
@@ -131,17 +294,18 @@ function turnOf(x: number, y: number) {
 /**
  * The point `radius` px out from the centre, `turn` round from the top, as
  * fractions of a plot `width` by `height` px, and the side a tooltip there
- * opens on.
+ * opens on. The centre is the plot's, unless it is given in px.
  */
 function outerPoint(
   turn: number,
   width: number,
   height: number,
   radius = Math.min(width, height) / 2,
+  centre = { x: width / 2, y: height / 2 },
 ): ChartPoint {
   const angle = turn * Math.PI * 2
-  const x = (width / 2 + radius * Math.sin(angle)) / width
-  const y = (height / 2 - radius * Math.cos(angle)) / height
+  const x = (centre.x + radius * Math.sin(angle)) / width
+  const y = (centre.y - radius * Math.cos(angle)) / height
   return { x, y, side: tooltipSide(turn) }
 }
 
@@ -411,6 +575,15 @@ const RadialLabel = memo(function RadialLabel({
 
 export {
   edgeRoom,
+  fitRound,
+  ringAt,
+  ringBandsOf,
+  type RoundMark,
+  type Sweep,
+  sweepMarks,
+  sweepOf,
+  turnIntoSweep,
+  withinSweep,
   type EdgeLabel,
   foldPoint,
   insideLabelFits,

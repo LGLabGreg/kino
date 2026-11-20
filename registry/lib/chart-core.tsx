@@ -100,6 +100,8 @@ interface ChartMessages {
   /** The name of the layer that steps through the categories by keyboard. */
   browse: string
   noValue: string
+  /** A value's column of the data table, when the chart has no name for its values. */
+  value: string
   total: string
   /** A value's share of the whole, as a column of the data table. */
   share: string
@@ -127,6 +129,7 @@ const defaultMessages: ChartMessages = {
   category: 'Category',
   browse: 'Values',
   noValue: 'No value',
+  value: 'Value',
   total: 'Total',
   share: 'Share',
   series: 'Series',
