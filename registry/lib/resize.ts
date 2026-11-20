@@ -326,6 +326,28 @@ export function followHeight(
 }
 
 /**
+ * A copy of `element` no one can reach or read: no ids, hidden from screen
+ * readers, inert, out of the flow and taking no pointer, with `style` on
+ * top. For a copy that leaves in an item's place (`leaveAsCopies` in the
+ * flow lib), or one that shows where a layout will land before it does.
+ */
+export function inertCopy(
+  element: HTMLElement,
+  style?: Partial<CSSStyleDeclaration>,
+): HTMLElement {
+  const copy = element.cloneNode(true) as HTMLElement
+  for (const node of [copy, ...copy.querySelectorAll('[id]')]) node.removeAttribute('id')
+  copy.setAttribute('aria-hidden', 'true')
+  copy.inert = true
+  Object.assign(
+    copy.style,
+    { position: 'absolute', margin: '0', pointerEvents: 'none' },
+    style,
+  )
+  return copy
+}
+
+/**
  * A ref that marks `element` `data-resizing` for two frames each time it changes
  * size, so what it places in `cqw` or `cqh`, which turn into pixels, moves at
  * once instead of gliding to the new size: a Slider's thumbs, a colour area's.

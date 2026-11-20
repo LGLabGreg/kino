@@ -16,6 +16,7 @@ import {
 } from '@/registry/components/kino/segmented-control'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { numberFormatter } from '@/registry/lib/number-format'
+import type { SectionHeadingLevel } from '@/registry/lib/section-heading'
 import { Swap } from '@/registry/lib/swap'
 import { createContext, type MouseEvent, use } from 'react'
 
@@ -27,7 +28,7 @@ import { cn } from '@/lib/utils'
  * and a value in the comparison.
  */
 
-type PricingHeading = 'h1' | 'h2' | 'h3'
+type PricingHeading = SectionHeadingLevel
 
 interface PricingChoice {
   plan: string
@@ -57,9 +58,6 @@ function usePricing() {
   if (!context) throw new Error('A Pricing part must be inside Pricing.')
   return context
 }
-
-/** The heading a level below each: a plan's name under the block's title. */
-const HEADING_BELOW = { h1: 'h2', h2: 'h3', h3: 'h4' } as const
 
 /** Monthly or yearly, with what the year saves on the yearly side. */
 function PricingBillingSwitch({ className }: { className?: string }) {
@@ -264,7 +262,6 @@ function FeatureValue({ value }: { value: boolean | string | undefined }) {
 
 export {
   FeatureValue,
-  HEADING_BELOW,
   PlanAction,
   PlanFeatures,
   PlanPrice,

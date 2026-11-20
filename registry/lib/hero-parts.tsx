@@ -72,6 +72,28 @@ function heroEnter(part: HeroPart) {
   )
 }
 
+/**
+ * An arrow that points on along the line, and nudges that way while the link
+ * around it, marked `group/nudge`, is hovered: the Hero's announcement and a
+ * feature's link. Its size comes from `className`.
+ */
+function NudgeArrow({ className }: { className?: string }) {
+  return (
+    <IconPlaceholder
+      lucide='ArrowRightIcon'
+      tabler='IconArrowRight'
+      hugeicons='ArrowRight01Icon'
+      phosphor='ArrowRightIcon'
+      remixicon='RiArrowRightLine'
+      aria-hidden
+      className={cn(
+        'shrink-0 transition-transform duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/nudge:translate-x-0.5 motion-reduce:transition-none rtl:-scale-x-100 rtl:group-hover/nudge:-translate-x-0.5',
+        className,
+      )}
+    />
+  )
+}
+
 /** A link to what's new, above the title: a badge, a line and an arrow that nudges on hover. */
 function HeroAnnouncement({
   badge,
@@ -88,7 +110,7 @@ function HeroAnnouncement({
         <a
           data-slot='hero-announcement'
           className={cn(
-            'group/announcement bg-background text-foreground hover:bg-muted inline-flex max-w-full min-w-0 items-center gap-2 rounded-(--control-radius) border py-1 ps-1 pe-3 text-sm shadow-xs transition-[background-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden',
+            'group/nudge bg-background text-foreground hover:bg-muted inline-flex max-w-full min-w-0 items-center gap-2 rounded-(--control-radius) border py-1 ps-1 pe-3 text-sm shadow-xs transition-[background-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden',
             // Without a badge the line needs its own room at the start.
             !badge && 'ps-3',
             className,
@@ -103,15 +125,7 @@ function HeroAnnouncement({
           <bdi data-cut className='min-w-0 truncate'>
             {children}
           </bdi>
-          <IconPlaceholder
-            lucide='ArrowRightIcon'
-            tabler='IconArrowRight'
-            hugeicons='ArrowRight01Icon'
-            phosphor='ArrowRightIcon'
-            remixicon='RiArrowRightLine'
-            aria-hidden
-            className='text-muted-foreground size-3.5 shrink-0 transition-transform duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/announcement:translate-x-0.5 motion-reduce:transition-none rtl:-scale-x-100 rtl:group-hover/announcement:-translate-x-0.5'
-          />
+          <NudgeArrow className='text-muted-foreground size-3.5' />
         </a>
       }
     />
@@ -233,22 +247,34 @@ const heroDescriptionClassName =
 /**
  * The frame the product shot sits in: a window on a soft bezel. The shot is
  * a picture of the product, so it is one image to a screen reader, named by
- * `label`, and nothing in it takes focus or a click.
+ * `label`, and nothing in it takes focus or a click. A `decorative` one,
+ * whose words beside it say what it shows, is hidden from screen readers.
  */
 function HeroShot({
   label,
+  decorative,
   className,
   children,
   ...props
-}: Omit<ComponentProps<'div'>, 'role' | 'aria-label'> & {
-  /** What the shot shows, as the image's alternative text. */
-  label: string
-}) {
+}: Omit<ComponentProps<'div'>, 'role' | 'aria-label'> &
+  (
+    | {
+        /** What the shot shows, as the image's alternative text. */
+        label: string
+        decorative?: never
+      }
+    | {
+        /** The words beside it say what it shows: it is hidden from screen readers. */
+        decorative: true
+        label?: never
+      }
+  )) {
   return (
     <div
       data-slot='hero-shot'
-      role='img'
+      role={decorative ? undefined : 'img'}
       aria-label={label}
+      aria-hidden={decorative}
       className={cn(
         // A bezel as wide as its padding, so the window's corner nests inside its own.
         'bg-foreground/[0.03] ring-foreground/8 relative rounded-[calc(var(--surface-radius)+--spacing(1.5))] p-1.5 ring-1 dark:bg-white/[0.04]',
@@ -273,10 +299,11 @@ export {
   HeroAnnouncement,
   HeroBackdrop,
   heroColumnClassName,
-  heroSectionClassName,
-  type HeroProps,
   heroDescriptionClassName,
   heroEnter,
+  type HeroProps,
+  heroSectionClassName,
   HeroShot,
   HeroWords,
+  NudgeArrow,
 }

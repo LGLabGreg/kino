@@ -16,7 +16,6 @@ import type {
   PricingPlan,
 } from '@/registry/components/kino/pricing/pricing-model'
 import {
-  HEADING_BELOW,
   PlanAction,
   PlanFeatures,
   PlanPrice,
@@ -29,6 +28,7 @@ import {
 } from '@/registry/components/kino/pricing/pricing-parts'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
+import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
 import { type ComponentProps, type MouseEvent, type ReactNode, useId } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -107,7 +107,6 @@ function Pricing({
   const { announce, region } = useAnnouncer()
   const titleId = useId()
   const featuresId = useId()
-  const Title = heading
   const Subheading = HEADING_BELOW[heading]
 
   const context: PricingContextValue = {
@@ -138,22 +137,14 @@ function Pricing({
         )}
         {...props}
       >
-        <header className='flex flex-col items-center gap-3 text-center'>
-          <div className='flex flex-col items-center gap-2'>
-            <Title
-              id={titleId}
-              className='text-3xl font-semibold tracking-tight text-balance @3xl:text-4xl'
-            >
-              {title}
-            </Title>
-            {description ? (
-              <p className='text-muted-foreground max-w-prose text-pretty'>
-                <bdi>{description}</bdi>
-              </p>
-            ) : null}
-          </div>
+        <SectionHeading
+          id={titleId}
+          title={title}
+          description={description}
+          heading={heading}
+        >
           <PricingBillingSwitch className='mt-3' />
-        </header>
+        </SectionHeading>
 
         <PlanCards recommended={recommended} heading={Subheading} />
 

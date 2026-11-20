@@ -22,6 +22,7 @@ import { translateOf } from '@/registry/lib/highlight'
 import {
   columnWidths,
   followHeight,
+  inertCopy,
   runningTransitions,
   spanWidths,
   startRun,
@@ -284,19 +285,7 @@ export function leaveAsCopy(item: HTMLElement, options: Omit<Leaving, 'item'>) {
  * a long list cut back to a few, cost one style rather than one each.
  */
 export function leaveAsCopies(leaving: readonly Leaving[]): HTMLElement[] {
-  const copies = leaving.map(({ item, style }) => {
-    const copy = item.cloneNode(true) as HTMLElement
-    for (const node of [copy, ...copy.querySelectorAll('[id]')])
-      node.removeAttribute('id')
-    copy.setAttribute('aria-hidden', 'true')
-    copy.inert = true
-    Object.assign(
-      copy.style,
-      { position: 'absolute', margin: '0', pointerEvents: 'none' },
-      style,
-    )
-    return copy
-  })
+  const copies = leaving.map(({ item, style }) => inertCopy(item, style))
   // An entrance's starting style, on the copy or on anything in it (a
   // timeline's marker scaling in, its line drawing), would play it again
   // first: nothing in the copy transitions until it has been styled once.

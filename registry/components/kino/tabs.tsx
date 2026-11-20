@@ -1,6 +1,11 @@
 'use client'
 
-import { followPointer, highlightClassName, itemMatching } from '@/registry/lib/highlight'
+import {
+  followPointer,
+  highlightClassName,
+  itemMatching,
+  rowTintClassName,
+} from '@/registry/lib/highlight'
 import {
   pillBackdropClassName,
   pillClassName,
@@ -9,7 +14,7 @@ import {
   pillRowClassName,
   pillTrackClassName,
 } from '@/registry/lib/pill'
-import { markResizing } from '@/registry/lib/resize'
+import { inertCopy, markResizing, transitionsQuiet } from '@/registry/lib/resize'
 import { revealInRow } from '@/registry/lib/scroll'
 import { Tabs as TabsPrimitive } from '@base-ui/react/tabs'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -38,6 +43,7 @@ const tabsListVariants = cva('group/tabs-track max-w-full min-w-0 shrink-0', {
     variant: {
       default: cn(pillTrackClassName, 'self-start'),
       line: 'self-stretch',
+      rows: '',
     },
   },
   defaultVariants: {
@@ -88,6 +94,9 @@ const tabsIndicatorBase =
 /** True inside the pill's copy of the list, where a trigger is only its label. */
 const TabsCopyContext = createContext(false)
 
+/** True inside a list of rows, where each trigger draws its own content. */
+const TabsRowsContext = createContext(false)
+
 function TabsList({
   className,
   variant = 'default',
@@ -108,12 +117,48 @@ function TabsList({
       focus: true,
     })
     // A list that stretches moves its tabs when it resizes: the indicator goes with them at once.
-    const stopMarking = markResizing(list)
+    // Rows grow as they're picked, so their list aims its tint itself.
+    const stopMarking = variant === 'rows' ? aimAtPickedRow(list) : markResizing(list)
     return () => {
       stopFollowing()
       stopMarking?.()
     }
-  }, [])
+  }, [variant])
+
+  if (variant === 'rows') {
+    return (
+      <TabsRowsContext value={true}>
+        <TabsPrimitive.List
+          data-slot='tabs-list'
+          data-variant={variant}
+          className={cn(
+            'group/tabs-list relative isolate flex flex-col gap-1',
+            className,
+          )}
+          {...props}
+        >
+          {children}
+          <span
+            ref={backdropRef}
+            data-slot='tabs-backdrop'
+            aria-hidden
+            className={cn(highlightClassName, rowTintClassName, '-z-20')}
+          />
+          {/*
+           * The picked row's tint: as large as the list, and only its window moves. It aims
+           * at where the picked row ends up and moves on `layout`, as the rows grow, so the
+           * two land together. A row's height can't overshoot, so nor does the tint: it eases
+           * on the role's fade curve. Base UI places it until the list has aimed it.
+           */}
+          <TabsPrimitive.Indicator
+            data-slot='tabs-indicator'
+            renderBeforeHydration
+            className='bg-muted dark:bg-muted/60 pointer-events-none absolute inset-0 -z-10 transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) [clip-path:inset(var(--tabs-row-top,var(--active-tab-top))_0_var(--tabs-row-bottom,var(--active-tab-bottom))_0_round_var(--surface-radius))] group-data-resizing/tabs-list:transition-none motion-reduce:transition-none forced-colors:hidden'
+          />
+        </TabsPrimitive.List>
+      </TabsRowsContext>
+    )
+  }
 
   return (
     <div
@@ -185,6 +230,19 @@ function TabsTrigger({
   ...props
 }: Omit<TabsPrimitive.Tab.Props, 'className'> & { className?: string }) {
   const copy = use(TabsCopyContext)
+  const rows = use(TabsRowsContext)
+  if (rows) {
+    return (
+      <TabsPrimitive.Tab
+        data-slot='tabs-trigger'
+        className={className}
+        style={style}
+        {...props}
+      >
+        {children}
+      </TabsPrimitive.Tab>
+    )
+  }
   if (copy) {
     return (
       <span
@@ -230,4 +288,99 @@ function TabsContent({
   )
 }
 
-export { Tabs, TabsContent, TabsList, TabsTrigger }
+/**
+ * Aims a list of rows' tint at where the picked row ends up, as `--tabs-row-top`
+ * and `--tabs-row-bottom`. Rows grow and shrink as they're picked, so where
+ * the picked one is now isn't where it lands: a copy of the list, styled at
+ * once with nothing moving, shows where. A change of size while nothing moves
+ * places it at once, as `markResizing` does for the other lists. Kept outside
+ * the component: the React Compiler drops the forced reads written inside one.
+ */
+function aimAtPickedRow(list: HTMLElement) {
+  let width = list.getBoundingClientRect().width
+  let frame = 0
+  let picking = 0
+
+  const aim = (at: 'glide' | 'once') => {
+    const insets = picking ? landingInsets(list) : pickedInsets(list)
+    if (!insets) return
+    const top = `${insets.top}px`
+    const bottom = `${insets.bottom}px`
+    if (
+      list.style.getPropertyValue('--tabs-row-top') === top &&
+      list.style.getPropertyValue('--tabs-row-bottom') === bottom
+    )
+      return
+    if (at === 'once') {
+      list.dataset.resizing = ''
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => delete list.dataset.resizing)
+      })
+    }
+    list.style.setProperty('--tabs-row-top', top)
+    list.style.setProperty('--tabs-row-bottom', bottom)
+  }
+
+  // A pick, or rows that come and go or change places.
+  const picks = new MutationObserver(() => {
+    const run = ++picking
+    aim('glide')
+    // While the rows grow, the list's height changes every frame: nothing to aim again until they settle.
+    void transitionsQuiet(list, { subtree: true }).then(() => {
+      if (run !== picking) return
+      picking = 0
+      // Something else may have changed size meanwhile, such as a font arriving.
+      aim('once')
+    })
+  })
+  picks.observe(list, {
+    childList: true,
+    subtree: true,
+    attributeFilter: ['data-active'],
+  })
+
+  const sizes = new ResizeObserver(() => {
+    const next = list.getBoundingClientRect().width
+    const widthChanged = Math.abs(next - width) >= 0.5
+    width = next
+    if (widthChanged || picking === 0) aim('once')
+  })
+  sizes.observe(list)
+
+  return () => {
+    picks.disconnect()
+    sizes.disconnect()
+    cancelAnimationFrame(frame)
+  }
+}
+
+/** The picked row's place now, while nothing moves. */
+function pickedInsets(list: HTMLElement) {
+  const row = list.querySelector('[role="tab"][data-active]')
+  return row ? rowInsets(list.getBoundingClientRect(), row.getBoundingClientRect()) : null
+}
+
+/** The picked row's place once the rows have settled, measured on a copy of the list styled with nothing moving. */
+function landingInsets(list: HTMLElement) {
+  const copy = inertCopy(list, {
+    insetBlockStart: '0',
+    insetInlineStart: '0',
+    width: `${list.getBoundingClientRect().width}px`,
+    visibility: 'hidden',
+  })
+  list.after(copy)
+  const insets = pickedInsets(copy)
+  copy.remove()
+  return insets
+}
+
+/** How far a row sits from its list's top and bottom edges, in px. */
+function rowInsets(
+  list: { top: number; bottom: number },
+  row: { top: number; bottom: number },
+) {
+  return { top: row.top - list.top, bottom: list.bottom - row.bottom }
+}
+
+export { Tabs, TabsContent, TabsList, TabsTrigger, rowInsets }
