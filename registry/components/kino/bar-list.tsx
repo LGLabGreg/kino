@@ -5,6 +5,7 @@ import { Button } from '@/registry/components/kino/button'
 import {
   CategoryChartFrame,
   type CategoryChartProps,
+  ChartNumber,
   type ChartCategory,
   type ChartFormat,
   type ChartMessages,
@@ -31,7 +32,6 @@ import {
 } from '@/registry/lib/placeholder'
 import { mergeRefs } from '@/registry/lib/refs'
 import { sameOrder } from '@/registry/lib/sort'
-import { Swap } from '@/registry/lib/swap'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
 import {
@@ -173,7 +173,11 @@ function BarList(props: BarListProps) {
   const dataKey = Object.keys(config)[0] ?? ''
   const { showMore, showLess, ...chartMessages } = messages ?? {}
   const { chart, root, placeholder, fromPlaceholder, phase } = useCategoryChart(
-    { ...props, color: undefined, messages: { empty: 'No data yet', ...chartMessages } },
+    {
+      ...props,
+      color: undefined,
+      messages: { empty: 'No data yet', ...chartMessages },
+    },
     {
       orientation: 'horizontal',
       stack: 'none',
@@ -523,7 +527,7 @@ const BarListRow = memo(function BarListRow({
         {value === null ? (
           <span className='text-muted-foreground'>{noValue}</span>
         ) : (
-          <BarListNumber value={value} format={format} locale={locale} />
+          <ChartNumber value={value} format={format} locale={locale} />
         )}
         {/* A value written its own way says what it is; a missing one has nothing to name. */}
         {valueLabel && value !== null && typeof format !== 'function' && (
@@ -616,26 +620,6 @@ function BarListLink({
 
 /** A row's name, the one label in it that can be cut short: its value and share never are. */
 const NAME = '[data-slot=bar-list-name]'
-
-/** A value, rolling to each new one: digit by digit for Intl's options, crossfading for a format of your own. */
-function BarListNumber({
-  value,
-  format,
-  locale,
-}: {
-  value: number
-  format: ChartFormat | undefined
-  locale: Intl.LocalesArgument
-}) {
-  if (typeof format === 'function') {
-    return (
-      <Swap align='end'>
-        <span>{format(value)}</span>
-      </Swap>
-    )
-  }
-  return <AnimatedNumber value={value} locale={locale} format={format} />
-}
 
 /** What waits in the rows' place while the data loads: bars of a typical ranking, breathing. */
 function BarListPlaceholder({ count }: { count: number }) {

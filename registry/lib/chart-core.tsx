@@ -1,5 +1,6 @@
 'use client'
 
+import { AnimatedNumber } from '@/registry/components/kino/animated-number'
 import { Button, buttonVariants } from '@/registry/components/kino/button'
 import { useSpinner } from '@/registry/components/kino/spinner'
 import { useAnnouncer } from '@/registry/lib/announce'
@@ -44,6 +45,7 @@ import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { runningTransitions, transitionsQuiet } from '@/registry/lib/resize'
 import { revealBehavior, revealBy } from '@/registry/lib/scroll'
+import { Swap } from '@/registry/lib/swap'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
@@ -127,6 +129,12 @@ interface ChartMessages {
   zoomPath: (label: string) => string
   /** Said once a chart that zooms shows another part of it, with the part's name. */
   zoomedTo: (name: string) => string
+  /** A funnel step's share of the first step, as a row of its tooltip and a column of the data table. */
+  ofFirst: string
+  /** A funnel step's share of the step before. */
+  ofPrevious: string
+  /** How many a funnel lost since the step before. */
+  droppedOff: string
   loading: string
   /** Said when the data arrives, with the chart's `label`. */
   loaded: (label: string) => string
@@ -158,6 +166,9 @@ const defaultMessages: ChartMessages = {
   flow: (from, to) => `${from} to ${to}`,
   zoomPath: (label) => `Zoom path for ${label}`,
   zoomedTo: (name) => `Showing ${name}`,
+  ofFirst: 'Of the first step',
+  ofPrevious: 'Of the step before',
+  droppedOff: 'Dropped off',
   loading: 'Loading chart',
   loaded: (label) => `${label} loaded`,
   empty: 'No data for this range',
@@ -1119,6 +1130,30 @@ function scalesOf(
     scale: chart.xy?.scale ?? NO_SCALE,
     previousScale: chart.xy?.previousScale ?? NO_SCALE,
   }
+}
+
+/**
+ * A value that rolls to each new one: digit by digit for Intl's options,
+ * crossfading for a format of your own, such as a bar list's values or a
+ * funnel's rates.
+ */
+function ChartNumber({
+  value,
+  format,
+  locale,
+}: {
+  value: number
+  format: ChartFormat | undefined
+  locale: Intl.LocalesArgument
+}) {
+  if (typeof format === 'function') {
+    return (
+      <Swap align='end'>
+        <span>{format(value)}</span>
+      </Swap>
+    )
+  }
+  return <AnimatedNumber value={value} locale={locale} format={format} />
 }
 
 /** The formatter of `format`: a function of yours, or Intl's options, once per locale. */
@@ -2642,6 +2677,7 @@ export {
   xyPlace,
   type EntrancePhase,
   ChangeText,
+  ChartNumber,
   chartFrameClassName,
   defaultMessages,
   figureProps,
