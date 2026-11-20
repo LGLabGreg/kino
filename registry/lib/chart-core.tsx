@@ -118,6 +118,11 @@ interface ChartMessages {
   group: string
   /** The whole of a chart that zooms, such as a treemap's first crumb. */
   whole: string
+  /** The data table's columns for where a flow starts and where it ends, such as a Sankey's. */
+  from: string
+  to: string
+  /** A flow from one node to another, with their names. */
+  flow: (from: string, to: string) => string
   /** The way back out of a chart that zooms, with the chart's `label`, so each chart's is its own. */
   zoomPath: (label: string) => string
   /** Said once a chart that zooms shows another part of it, with the part's name. */
@@ -148,6 +153,9 @@ const defaultMessages: ChartMessages = {
   outOf: (value, most) => `${value} of ${most}`,
   group: 'Group',
   whole: 'All',
+  from: 'From',
+  to: 'To',
+  flow: (from, to) => `${from} to ${to}`,
   zoomPath: (label) => `Zoom path for ${label}`,
   zoomedTo: (name) => `Showing ${name}`,
   loading: 'Loading chart',
@@ -317,6 +325,20 @@ interface ChartContextValue {
    */
   describe?: (index: number) => string
   /**
+   * The keys' own way between the categories, for marks that aren't a row or
+   * a grid, such as a Sankey's nodes: the category a key goes to from
+   * `index`, or null for a key the chart doesn't take. The keys reach only
+   * the first `stops` categories, which the slider counts, each at its
+   * `rank` among them from 1, in the order they are drawn.
+   */
+  keys?: {
+    stops: number
+    /** Where the keys start, the first stop, when nothing is reached or picked yet. */
+    start: number
+    step: (index: number, key: string) => number | null
+    rank: (index: number) => number
+  }
+  /**
    * What a press at `point` on the plot opens, such as a treemap zooming
    * into the group there, or none; a press that opens something doesn't
    * pick.
@@ -367,6 +389,15 @@ interface ChartTable {
   cells: (category: ChartCategory) => readonly string[]
   /** A last row under `messages.total`, such as the whole the shares are of. */
   footer?: readonly string[]
+  /**
+   * The table's own rows, in place of one for each category, for a chart
+   * whose data isn't its categories, such as a Sankey's flows: each row's
+   * name and its cells, under `header`, the first column's title.
+   */
+  rows?: {
+    header: string
+    cells: readonly { key: string; name: string; cells: readonly string[] }[]
+  }
 }
 
 /** A series whose values from the category keyed `from` on are projected. */
@@ -875,7 +906,7 @@ function useSize(ref: RefObject<HTMLElement | null>) {
  */
 function useWhenQuiet(
   root: RefObject<HTMLElement | null>,
-  property: string,
+  property: string | readonly string[],
   waiting: boolean,
   done: () => void,
   key: unknown,
@@ -900,7 +931,7 @@ function useWhenQuiet(
 /**
  * The categories to draw: those in the data, in its order, and those just
  * taken out, kept where they were until `root` has finished moving
- * `leaveProperty`, which is how the chart's marks leave.
+ * `leaveProperty`, which is how the chart's marks leave, and fading them out.
  */
 function useCategories(
   data: readonly ChartDatum[],
@@ -931,7 +962,9 @@ function useCategories(
     ])
     setPrevious(current)
   }
-  useWhenQuiet(root, leaveProperty, leaving.length > 0, () => setLeaving([]), leaving)
+  // Its fade too, which is all that is left of leaving under reduced motion.
+  const leaveOn = useMemo(() => [leaveProperty, 'opacity'], [leaveProperty])
+  useWhenQuiet(root, leaveOn, leaving.length > 0, () => setLeaving([]), leaving)
   // Drawn in one fixed order, whatever the data's: an element moved in the page starts
   // again with no transition, so a sort would jump instead of sliding.
   const categories = [...current, ...leaving].toSorted((a, b) =>
@@ -1227,7 +1260,10 @@ function ChartColumns() {
   const count = current.length
   // A chart that scrolls opens at its end, so the keys start there too.
   const resting = Math.min(
-    lastIndex ?? chart.selected ?? (chart.leastPlotWidth === undefined ? 0 : count - 1),
+    lastIndex ??
+      chart.selected ??
+      chart.keys?.start ??
+      (chart.leastPlotWidth === undefined ? 0 : count - 1),
     Math.max(0, count - 1),
   )
   const reached = active ?? resting
@@ -1333,13 +1369,15 @@ function ChartColumns() {
       aria-label={messages.browse}
       aria-orientation={orientation === 'vertical' ? 'horizontal' : 'vertical'}
       aria-valuemin={1}
-      aria-valuemax={Math.max(1, count)}
+      aria-valuemax={Math.max(1, chart.keys?.stops ?? count)}
       aria-valuenow={
         chart.xy
           ? pointRank(chart.xy.points, reached, along)
-          : chart.grid
-            ? reached + 1
-            : sliderValue(reached, Math.max(1, count), orientation)
+          : chart.keys
+            ? chart.keys.rank(reached)
+            : chart.grid
+              ? reached + 1
+              : sliderValue(reached, Math.max(1, count), orientation)
       }
       aria-valuetext={columnLabel(chart, reached)}
       data-slot='chart-columns'
@@ -1400,6 +1438,14 @@ function ChartColumns() {
             setActive(0)
             return
           }
+        }
+        if (chart.keys) {
+          const next = chart.keys.step(reached, event.key)
+          if (next === null) return
+          event.preventDefault()
+          setLastIndex(next)
+          setActive(next)
+          return
         }
         if (
           stepSeries &&
@@ -1516,6 +1562,35 @@ function ChartDataTable() {
   const shown = series.filter((key) => !hidden.includes(key))
   const { table } = chart
   // The table sits in a hidden box: a table grows to fit its cells past `sr-only`'s 1px.
+  if (table?.rows) {
+    return (
+      <div className='sr-only'>
+        <table aria-label={messages.table}>
+          <thead>
+            <tr>
+              <th scope='col'>{table.rows.header}</th>
+              {table.columns.map((column) => (
+                <th key={column} scope='col'>
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.cells.map((row) => (
+              <tr key={row.key}>
+                <th scope='row'>{row.name}</th>
+                {row.cells.map((cell, at) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- the columns are fixed
+                  <td key={at}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
   if (table) {
     return (
       <div className='sr-only'>
@@ -1761,6 +1836,15 @@ interface CategoryChartOptions<Shapes> {
    */
   seriesOfRow?: (row: ChartDatum) => string
   /**
+   * The rows still drawn with `hidden` hidden, for a chart whose rows hide
+   * in a way of their own, such as a sankey's flows, which go with either
+   * end. When hiding leaves none, the chart says every series is hidden.
+   */
+  rowsShown?: (
+    rows: readonly ChartDatum[],
+    hidden: readonly string[],
+  ) => readonly ChartDatum[]
+  /**
    * What tells each row's category apart from the rest, its `index` value by
    * default: a scatter's rows in series of their own may share a name, as
    * the same month for each team does.
@@ -1846,7 +1930,11 @@ function useCategoryChart<Shapes>(
   const placeholder = useSpinner(loading) || firstLoad
   const failed = Boolean(error) && !loading
   const rows = placeholder || failed ? [] : data
-  const drawn = options.seriesOfRow ? rowsShown(rows, options.seriesOfRow, hidden) : rows
+  const drawn = options.rowsShown
+    ? options.rowsShown(rows, hidden)
+    : options.seriesOfRow
+      ? rowsShown(rows, options.seriesOfRow, hidden)
+      : rows
   const { categories, current } = useCategories(
     drawn,
     index,
@@ -1904,7 +1992,7 @@ function useCategoryChart<Shapes>(
         ? 'error'
         : rows.length === 0
           ? 'empty'
-          : shown.length === 0
+          : shown.length === 0 || drawn.length === 0
             ? 'hidden'
             : 'ready'
 
@@ -2204,10 +2292,22 @@ function ChartActive({ children }: { children: ReactNode }) {
   const groupIndex = grouped ? current.findIndex((c) => c.key === group.active) : -1
   const now = grouped ? (groupIndex === -1 ? null : groupIndex) : own
   const active = now !== null && now < current.length ? now : null
+  // The key of the category reached, so new data that moves it keeps it reached.
+  const held = useRef<string | null>(null)
   const set = (next: number | null) => {
-    if (grouped) group.setActive(next === null ? null : (current[next]?.key ?? null))
+    held.current = next === null ? null : (current[next]?.key ?? null)
+    if (grouped) group.setActive(held.current)
     if (!grouped || onActiveIndexChange) setOwn(next)
   }
+  const activeKey = active === null ? null : (current[active]?.key ?? null)
+  useLayoutEffect(() => {
+    // Yours to keep, when you pass it; the group's is held by key already.
+    if (activeIndex !== undefined || grouped) return
+    if (held.current === null || held.current === activeKey) return
+    const moved = current.findIndex((category) => category.key === held.current)
+    held.current = moved === -1 ? null : held.current
+    setOwn(moved === -1 ? null : moved)
+  }, [activeIndex, grouped, activeKey, current, setOwn])
   // One function for the chart's life, so parts that take it, such as the
   // Bar list's rows, redraw only when what they show changes, without the
   // React Compiler.

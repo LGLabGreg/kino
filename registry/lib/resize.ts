@@ -84,17 +84,21 @@ export function transitionTiming(
   return { duration, easing: at(cssList(style.transitionTimingFunction)) }
 }
 
-/** The CSS transitions running on `element`, or inside it too with `subtree`, of one property or of any. */
+/** The CSS transitions running on `element`, or inside it too with `subtree`, of one property, of several, or of any. */
 export function runningTransitions(
   element: Element,
-  { property, subtree = false }: { property?: string; subtree?: boolean } = {},
+  {
+    property,
+    subtree = false,
+  }: { property?: string | readonly string[]; subtree?: boolean } = {},
 ): CSSTransition[] {
+  const properties = typeof property === 'string' ? [property] : property
   return element
     .getAnimations({ subtree })
     .filter(
       (animation): animation is CSSTransition =>
         animation instanceof CSSTransition &&
-        (property === undefined || animation.transitionProperty === property),
+        (properties === undefined || properties.includes(animation.transitionProperty)),
     )
 }
 
@@ -105,7 +109,7 @@ export function runningTransitions(
  */
 export function transitionsSettled(
   element: Element,
-  options?: { property?: string; subtree?: boolean },
+  options?: { property?: string | readonly string[]; subtree?: boolean },
 ): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -124,7 +128,7 @@ export function transitionsSettled(
  */
 export async function transitionsQuiet(
   element: Element,
-  options?: { property?: string; subtree?: boolean },
+  options?: { property?: string | readonly string[]; subtree?: boolean },
 ): Promise<void> {
   await transitionsSettled(element, options)
   while (runningTransitions(element, options).length > 0) {
