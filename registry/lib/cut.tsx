@@ -40,6 +40,16 @@ function isCut(label: {
   return overflows(label)
 }
 
+/**
+ * Whether a part inside a label is cut short across. An inline part, such as
+ * a `<bdi>` around a name, has no box of its own: Firefox gives it its text's
+ * width to scroll and none to show, which would read as cut.
+ */
+function cutsAcross(part: { scrollWidth: number; clientWidth: number }, display: string) {
+  if (display === 'inline' || display === 'contents') return false
+  return part.scrollWidth - part.clientWidth > 1
+}
+
 /** The text of each label marked `data-cut` in or on `owner`, while any of them is cut; otherwise none. */
 function cutLines(owner: HTMLElement, selector = cutLabels): readonly string[] {
   // A count beside a label, such as a Badge's, isn't part of what it names.
@@ -53,7 +63,7 @@ function cutLines(owner: HTMLElement, selector = cutLabels): readonly string[] {
     isCut(label) ||
     (!label.matches(said) &&
       [...label.querySelectorAll<HTMLElement>('*')].some(
-        (part) => !part.closest(said) && part.scrollWidth - part.clientWidth > 1,
+        (part) => !part.closest(said) && cutsAcross(part, getComputedStyle(part).display),
       ))
   if (!labels.some(cut)) return []
   return labels.map((label) => label.textContent?.trim() ?? '').filter(Boolean)
@@ -156,4 +166,4 @@ function CutTooltip({
   )
 }
 
-export { CutLines, CutTooltip, cutLines, isCut, useCut }
+export { CutLines, CutTooltip, cutLines, cutsAcross, isCut, useCut }

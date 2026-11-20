@@ -180,7 +180,8 @@ export function animateSize(
 }
 
 /**
- * Makes `change` land at once: `element`'s transitions are off while it
+ * Makes `change` land at once: `element`'s transitions (or each one's, for
+ * several) are off while it
  * runs, its style is read so the change is styled with none, and then its
  * inline `transition-property` is put back; its durations, delays and easings
  * are never touched. With `properties`, only those stop and the rest keep
@@ -191,16 +192,17 @@ export function animateSize(
  * change animates.
  */
 export function withoutTransition(
-  element: HTMLElement | SVGElement,
+  element: HTMLElement | SVGElement | readonly (HTMLElement | SVGElement)[],
   change: () => void,
   {
     properties,
     subtree = false,
   }: { properties?: readonly string[]; subtree?: boolean } = {},
 ) {
-  const parts = subtree
-    ? [element, ...element.querySelectorAll<HTMLElement | SVGElement>('*')]
-    : [element]
+  const elements = isList(element) ? element : [element]
+  const parts = elements.flatMap((one) =>
+    subtree ? [one, ...one.querySelectorAll<HTMLElement | SVGElement>('*')] : [one],
+  )
   const held = parts.map((part) => {
     const before = part.style.transitionProperty
     if (!properties) {
@@ -218,8 +220,14 @@ export function withoutTransition(
     }
   })
   change()
-  void getComputedStyle(element).transitionProperty
+  // Reading one style styles the whole document, so every part, inside
+  // too, takes the change, and drops a starting style, with none.
+  for (const one of elements) void getComputedStyle(one).transitionProperty
   for (const release of held) release()
+}
+
+function isList<T>(value: T | readonly T[]): value is readonly T[] {
+  return Array.isArray(value)
 }
 
 /**

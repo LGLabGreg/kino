@@ -256,6 +256,15 @@ export function returnFromCopy(item: HTMLElement, copy: HTMLElement) {
   for (const [part, property] of taken) part.style.removeProperty(property)
 }
 
+/** One item to leave as a copy: see `leaveAsCopy`. */
+interface Leaving {
+  item: HTMLElement
+  parent: HTMLElement
+  next?: Node | null
+  style: Partial<CSSStyleDeclaration>
+  from: (copy: HTMLElement) => readonly Taken[]
+}
+
 /**
  * Leaves a copy of `item` in `parent`, before `next`: Base UI unmounts what
  * goes the moment it goes, so the copy plays its leaving styles in its
@@ -265,58 +274,72 @@ export function returnFromCopy(item: HTMLElement, copy: HTMLElement) {
  * style with no transition, then is marked `data-leaving` and transitions
  * from there, and goes once those transitions have played.
  */
-export function leaveAsCopy(
-  item: HTMLElement,
-  {
-    parent,
-    next = null,
-    style,
-    from,
-  }: {
-    parent: HTMLElement
-    next?: Node | null
-    style: Partial<CSSStyleDeclaration>
-    from: (copy: HTMLElement) => readonly Taken[]
-  },
-) {
-  const copy = item.cloneNode(true) as HTMLElement
-  for (const node of [copy, ...copy.querySelectorAll('[id]')]) node.removeAttribute('id')
-  copy.setAttribute('aria-hidden', 'true')
-  copy.inert = true
-  Object.assign(
-    copy.style,
-    { position: 'absolute', margin: '0', pointerEvents: 'none' },
-    style,
-  )
+export function leaveAsCopy(item: HTMLElement, options: Omit<Leaving, 'item'>) {
+  return leaveAsCopies([{ item, ...options }])[0]!
+}
+
+/**
+ * Leaves a copy of each item at once, as `leaveAsCopy` does one: every copy
+ * goes in and is styled in one pass, so many rows leaving together, such as
+ * a long list cut back to a few, cost one style rather than one each.
+ */
+export function leaveAsCopies(leaving: readonly Leaving[]): HTMLElement[] {
+  const copies = leaving.map(({ item, style }) => {
+    const copy = item.cloneNode(true) as HTMLElement
+    for (const node of [copy, ...copy.querySelectorAll('[id]')])
+      node.removeAttribute('id')
+    copy.setAttribute('aria-hidden', 'true')
+    copy.inert = true
+    Object.assign(
+      copy.style,
+      { position: 'absolute', margin: '0', pointerEvents: 'none' },
+      style,
+    )
+    return copy
+  })
   // An entrance's starting style, on the copy or on anything in it (a
   // timeline's marker scaling in, its line drawing), would play it again
   // first: nothing in the copy transitions until it has been styled once.
-  let taken: readonly Taken[] = []
+  const taken: Taken[] = []
   withoutTransition(
-    copy,
+    copies,
     () => {
-      parent.insertBefore(copy, next)
-      taken = from(copy)
+      leaving.forEach(({ parent, next = null }, at) =>
+        parent.insertBefore(copies[at]!, next),
+      )
+      leaving.forEach(({ from }, at) => taken.push(...from(copies[at]!)))
     },
     { subtree: true },
   )
   for (const [part, property] of taken) part.style.removeProperty(property)
-  // Marked only now, with its transition back, so its leaving styles
-  // transition from where it was seen rather than apply at once.
-  copy.dataset.leaving = ''
-  void transitionsSettled(copy).then(() => copy.remove())
-  return copy
+  for (const copy of copies) {
+    // Marked only now, with its transition back, so its leaving styles
+    // transition from where it was seen rather than apply at once.
+    copy.dataset.leaving = ''
+    void transitionsSettled(copy).then(() => copy.remove())
+  }
+  return copies
 }
 
-/** A copy of an item that fades where it was, back in `row` before `next`, then goes. */
-function leave(
+/**
+ * What a copy of an item needs to fade where it was, back in `row` before
+ * `next`, then go. Everything it reads from the row is read now, before any
+ * copy goes in, so copies made together lay the row out once.
+ */
+function leaving(
   item: HTMLElement,
   spot: Placed,
   running: readonly Running[],
   row: HTMLElement,
   next: Node | null,
-) {
-  leaveAsCopy(item, {
+): Leaving {
+  const table = row.closest('table')
+  // A row taken out of the table's layout has no columns: its cells take
+  // the widths the columns have now.
+  const columns =
+    table && item instanceof HTMLTableRowElement ? columnWidths(table) : null
+  return {
+    item,
     parent: row,
     next,
     style: {
@@ -329,13 +352,10 @@ function leave(
       height: `${spot.height}px`,
     },
     from: (copy) => {
-      const table = row.closest('table')
-      if (table && copy instanceof HTMLTableRowElement) {
-        // A row taken out of the table's layout has no columns: its cells take
-        // the widths the columns have now.
+      if (columns && copy instanceof HTMLTableRowElement) {
         const cells = [...copy.cells]
         const widths = spanWidths(
-          columnWidths(table),
+          columns,
           cells.map((cell) => cell.colSpan),
         )
         // Laid out as a table of its own, so its cells keep their vertical
@@ -354,7 +374,7 @@ function leave(
       }
       return takeOver(copy, running)
     },
-  })
+  }
 }
 
 /**
@@ -513,6 +533,19 @@ export function followFlow(
       readStarted()
     }
     const moved: Taken[] = []
+    const gone: Leaving[] = []
+    let box: DOMRect | undefined
+    const inView = (spot: Placed) => {
+      box ??= row.getBoundingClientRect()
+      const top = box.top + spot.top + spot.rowTop - row.offsetTop
+      const left = box.left + spot.left + spot.rowLeft - row.offsetLeft
+      return (
+        top < innerHeight &&
+        top + spot.height > 0 &&
+        left < innerWidth &&
+        left + spot.width > 0
+      )
+    }
     for (const record of records) {
       for (const node of record.addedNodes) {
         const was = node instanceof HTMLElement ? seen.get(node) : undefined
@@ -528,7 +561,12 @@ export function followFlow(
                 ({ transition }) => transition.transitionProperty !== 'translate',
               )
             : was.running
-          withoutTransition(node, () => moved.push(...takeOver(node, running)))
+          // Its parts too: a part with an entrance of its own, such as a bar
+          // that grows, would play its starting style again once the node
+          // is back.
+          withoutTransition(node, () => moved.push(...takeOver(node, running)), {
+            subtree: true,
+          })
         } else if (
           node instanceof HTMLElement &&
           key &&
@@ -550,10 +588,15 @@ export function followFlow(
         // One moved to another place in the row (a list that reorders) is still there.
         if (!(node instanceof HTMLElement) || !was || node.parentNode === row) continue
         resizes.unobserve(node)
+        // A copy no one could see isn't made: many rows going at once, such
+        // as a long list cut back to a few, would each be styled and laid
+        // out for nothing.
+        if (!inView(was.spot)) continue
         const next = record.nextSibling?.parentNode === row ? record.nextSibling : null
-        leave(node, was.spot, was.running, row, next)
+        gone.push(leaving(node, was.spot, was.running, row, next))
       }
     }
+    if (gone.length > 0) leaveAsCopies(gone)
     glide()
     // Handed back to their transitions, from where they were.
     for (const [part, property] of moved) part.style.removeProperty(property)

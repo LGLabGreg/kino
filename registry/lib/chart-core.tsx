@@ -1276,6 +1276,7 @@ function ChartColumns() {
         ref={plot as Ref<HTMLDivElement>}
         tabIndex={-1}
         data-slot='chart-columns'
+        data-chart-plot=''
         className={className}
       />
     )
@@ -1299,6 +1300,7 @@ function ChartColumns() {
       }
       aria-valuetext={columnLabel(chart, reached)}
       data-slot='chart-columns'
+      data-chart-plot=''
       className={className}
       onPointerMove={point}
       onPointerDown={point}
@@ -1536,13 +1538,11 @@ function ChartStatusOverlay({ empty }: { empty?: ReactNode }) {
   })
   const focusPlot = (run: () => void) => {
     // The button goes once the chart shows or loads again, so focus moves to the legend, or
-    // to the plot, which keeps it while the chart loads.
+    // to the plot (`data-chart-plot`), which keeps it while the chart loads.
     const figure = overlay.current?.closest('figure')
     flushSync(run)
     figure
-      ?.querySelector<HTMLElement>(
-        '[data-slot=chart-legend] button, [data-slot=chart-columns]',
-      )
+      ?.querySelector<HTMLElement>('[data-slot=chart-legend] button, [data-chart-plot]')
       ?.focus()
   }
   return (
@@ -2134,11 +2134,23 @@ function ChartActive({ children }: { children: ReactNode }) {
   const groupIndex = grouped ? current.findIndex((c) => c.key === group.active) : -1
   const now = grouped ? (groupIndex === -1 ? null : groupIndex) : own
   const active = now !== null && now < current.length ? now : null
-  const setActive = (next: number | null) => {
+  const set = (next: number | null) => {
     if (grouped) group.setActive(next === null ? null : (current[next]?.key ?? null))
     if (!grouped || onActiveIndexChange) setOwn(next)
   }
-  const value = { active, setActive, spotlit: active ?? selected }
+  // One function for the chart's life, so parts that take it, such as the
+  // Bar list's rows, redraw only when what they show changes, without the
+  // React Compiler.
+  const latest = useRef(set)
+  useLayoutEffect(() => {
+    latest.current = set
+  })
+  const setActive = useCallback((next: number | null) => latest.current(next), [])
+  const spotlit = active ?? selected
+  const value = useMemo(
+    () => ({ active, setActive, spotlit }),
+    [active, setActive, spotlit],
+  )
   return <ChartActiveContext value={value}>{children}</ChartActiveContext>
 }
 
@@ -2154,6 +2166,7 @@ function CategoryChartFrame({
   description,
   placeholder,
   empty,
+  browse = true,
   className,
   children,
   ref,
@@ -2165,6 +2178,14 @@ function CategoryChartFrame({
   description?: string
   placeholder: ReactNode
   empty?: ReactNode
+  /**
+   * Whether the plot is one stop that the pointer and the keys step through,
+   * read as a data table, as on most charts. Off for a chart whose marks are
+   * read and reached as they are, such as a bar list's rows, each a link or
+   * a button of its own: the chart then gives `plot` to the element that
+   * holds them.
+   */
+  browse?: boolean
   ref?: Ref<HTMLElement>
 }) {
   const figureRef = useMemo(() => mergeRefs(root, ref, markMounted), [root, ref])
@@ -2233,10 +2254,10 @@ function CategoryChartFrame({
           )}
           {children}
           {placeholder}
-          <ChartColumns />
+          {browse && <ChartColumns />}
           {scroller && <ScrollCorners direction={chart.direction} />}
           <ChartStatusOverlay empty={empty} />
-          <ChartDataTable />
+          {browse && <ChartDataTable />}
         </figure>
       </ChartActive>
     </ChartContext>
