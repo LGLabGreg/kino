@@ -114,6 +114,14 @@ interface ChartMessages {
   change: (change: number, size: string) => string
   /** A value against the most it could be, such as "86 of 120". */
   outOf: (value: string, most: string) => string
+  /** The column of the data table naming the group a value is in, such as a treemap tile's. */
+  group: string
+  /** The whole of a chart that zooms, such as a treemap's first crumb. */
+  whole: string
+  /** The way back out of a chart that zooms, with the chart's `label`, so each chart's is its own. */
+  zoomPath: (label: string) => string
+  /** Said once a chart that zooms shows another part of it, with the part's name. */
+  zoomedTo: (name: string) => string
   loading: string
   /** Said when the data arrives, with the chart's `label`. */
   loaded: (label: string) => string
@@ -138,6 +146,10 @@ const defaultMessages: ChartMessages = {
   change: (change, size) =>
     change > 0 ? `up ${size}` : change < 0 ? `down ${size}` : 'no change',
   outOf: (value, most) => `${value} of ${most}`,
+  group: 'Group',
+  whole: 'All',
+  zoomPath: (label) => `Zoom path for ${label}`,
+  zoomedTo: (name) => `Showing ${name}`,
   loading: 'Loading chart',
   loaded: (label) => `${label} loaded`,
   empty: 'No data for this range',
@@ -304,6 +316,16 @@ interface ChartContextValue {
    * each series' value: the words after its name and whether it is picked.
    */
   describe?: (index: number) => string
+  /**
+   * What a press at `point` on the plot opens, such as a treemap zooming
+   * into the group there, or none; a press that opens something doesn't
+   * pick.
+   */
+  zoomAt?: (point: { x: number; y: number }, box: DOMRect) => (() => void) | null
+  /** What Enter or Space on the category at `index` opens, as `zoomAt` does, or none. */
+  zoomIn?: (index: number) => (() => void) | null
+  /** What Escape goes back to once nothing is lit, such as a treemap zooming back out, or none. */
+  zoomOut?: (() => void) | null
   /** The data table's columns after the category, and each category's cells, in place of one per series. */
   table?: ChartTable
   /** What the tooltip shows for the category at `index`, in place of each series' value. */
@@ -717,6 +739,14 @@ const chartFrameClassName =
 /** A tooltip row's quieter text, in full colour on the row of the series brought forward. */
 const tooltipQuietClassName =
   'text-background/75 transition-colors duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-lit/row:text-background forced-colors:text-[CanvasText]'
+
+/**
+ * Text written on a mark, such as a slice's or a tile's label: near white or
+ * near black, whichever reads on the mark's colour, `--label-on`; in forced
+ * colours, the page's text on a box of its own.
+ */
+const labelOnClassName =
+  'text-[oklch(from_var(--label-on)_clamp(0.15,(0.6-l)*1000,0.99)_0_0)] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText]'
 
 /** A series' colour beside its name in a tooltip, on its `--swatch` (`swatchStyle`). */
 const swatchClassName =
@@ -1191,6 +1221,8 @@ function ChartColumns() {
   // Among points placed by two values, the axis the last arrow stepped along, which the
   // slider's value counts on, so Up raises it as much as Right does.
   const [along, setAlong] = useState<'x' | 'y'>('x')
+  // Whether a press under the pointer opens something, such as a treemap's group.
+  const [opens, setOpens] = useState(false)
   const ready = status === 'ready'
   const count = current.length
   // A chart that scrolls opens at its end, so the keys start there too.
@@ -1220,7 +1252,10 @@ function ChartColumns() {
       // From where it is now, so a glide still running for the last key is replaced.
       left:
         frame.scrollLeft +
-        revealBy(inView(frame), { left: x - REVEAL_HALF, right: x + REVEAL_HALF }),
+        revealBy(inView(frame), {
+          left: x - REVEAL_HALF,
+          right: x + REVEAL_HALF,
+        }),
       behavior: revealBehavior(frame),
     })
   }, [active, plot, pointOf])
@@ -1247,6 +1282,14 @@ function ChartColumns() {
     const index = pick(event)
     setActive(index)
     if (index !== null) setLastIndex(index)
+    if (chart.zoomAt) {
+      setOpens(
+        chart.zoomAt(
+          { x: event.clientX, y: event.clientY },
+          event.currentTarget.getBoundingClientRect(),
+        ) !== null,
+      )
+    }
     if (seriesAt) {
       const box = event.currentTarget.getBoundingClientRect()
       setEmphasis(
@@ -1266,7 +1309,7 @@ function ChartColumns() {
   const className = cn(
     'focus-visible:ring-ring/50 relative z-30 min-h-0 min-w-0 rounded-(--control-radius-capped) focus-visible:outline-hidden [grid-area:plot] focus-visible:ring-3 group-data-scrolls/chart:focus-visible:ring-inset',
     orientation === 'vertical' ? 'touch-pan-y' : 'touch-pan-x',
-    ready && selectable && 'cursor-pointer',
+    ready && (selectable || opens) && 'cursor-pointer',
   )
   // The slider only while there is something to step through, so a screen reader doesn't
   // find a disabled one beside the note that says why.
@@ -1310,7 +1353,16 @@ function ChartColumns() {
         if (seriesAt) setEmphasis(null)
       }}
       onClick={(event) => {
-        if (!ready || !selectable) return
+        if (!ready) return
+        const zoom = chart.zoomAt?.(
+          { x: event.clientX, y: event.clientY },
+          event.currentTarget.getBoundingClientRect(),
+        )
+        if (zoom) {
+          zoom()
+          return
+        }
+        if (!selectable) return
         const index = pick(event)
         if (index !== null) toggleSelected(index)
       }}
@@ -1330,6 +1382,24 @@ function ChartColumns() {
           setActive(null)
           if (seriesAt) setEmphasis(null)
           return
+        }
+        if (event.key === 'Escape' && chart.zoomOut) {
+          event.preventDefault()
+          event.stopPropagation()
+          chart.zoomOut()
+          setLastIndex(0)
+          return
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          const zoom = chart.zoomIn?.(reached)
+          if (zoom) {
+            event.preventDefault()
+            zoom()
+            // The keys start again from the first of the tiles now in view.
+            setLastIndex(0)
+            setActive(0)
+            return
+          }
         }
         if (
           stepSeries &&
@@ -2480,6 +2550,7 @@ export {
   forcedSeriesTextColor,
   formatterOf,
   isForecast,
+  labelOnClassName,
   patternImage,
   drawingFrame,
   drawingSize,

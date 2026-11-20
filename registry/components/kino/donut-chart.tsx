@@ -14,6 +14,7 @@ import {
   drawingSize,
   figureProps,
   forcedSeriesTextColor,
+  labelOnClassName,
   plotLayerClassName,
   useCategoryChart,
   useChart,
@@ -803,7 +804,7 @@ const DonutLabel = memo(function DonutLabel({
         'font-medium whitespace-nowrap tabular-nums',
         edge === null
           ? // On its slice: near white or near black, whichever reads on the slice's colour.
-            'text-[oklch(from_var(--label-on)_clamp(0.15,(0.57-l)*1000,0.99)_0_0)] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText]'
+            labelOnClassName
           : dim
             ? 'text-muted-foreground'
             : 'text-foreground',

@@ -199,11 +199,11 @@ function BreadcrumbSeparator({ className, children, ...props }: ComponentProps<'
 /** What the highlight glides between: the links and "…". */
 const CRUMB_TARGETS = '[data-slot=breadcrumb-link],[data-slot=breadcrumb-ellipsis]'
 
-/** A folded crumb, as its row in the menu: its name, and the link it stands for. */
+/** A folded crumb, as its row in the menu: its name, and the link or button it stands for. */
 interface FoldedCrumb {
   readonly label: string
   readonly href: string | null
-  readonly link: HTMLAnchorElement | null
+  readonly link: HTMLElement | null
 }
 
 /** Whether a click opens a link somewhere else: a new tab or window, or a download. */
@@ -270,8 +270,13 @@ function BreadcrumbOverflow({
           <DropdownMenuContent>
             {folded.map((crumb, index) =>
               crumb.href === null ? (
-                // oxlint-disable-next-line react/no-array-index-key -- the folded crumbs keep their order
-                <DropdownMenuItem key={index} disabled>
+                // A crumb that is a button, such as a chart's way back out, is a row that presses it.
+                <DropdownMenuItem
+                  // oxlint-disable-next-line react/no-array-index-key -- the folded crumbs keep their order
+                  key={index}
+                  disabled={!crumb.link}
+                  onClick={() => crumb.link?.click()}
+                >
                   {crumb.label}
                 </DropdownMenuItem>
               ) : (
@@ -330,7 +335,7 @@ function foldedCrumbs(list: Element): FoldedCrumb[] {
       ':scope > [data-slot=breadcrumb-item][data-collapsed]',
     ),
     (crumb) => {
-      const link = crumb.querySelector<HTMLAnchorElement>('[data-slot=breadcrumb-link]')
+      const link = crumb.querySelector<HTMLElement>('[data-slot=breadcrumb-link]')
       return {
         label: (link?.getAttribute('aria-label') ?? crumb.textContent ?? '').trim(),
         href: link?.getAttribute('href') ?? null,
