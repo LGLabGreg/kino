@@ -333,6 +333,67 @@ export function scrollLinkedRange({
   return { start, end }
 }
 
+/**
+ * A move that only slides, from `from` to `to` (each a translation in CSS
+ * px), set on whole device pixels: both ends rounded to one at `ratio` device
+ * pixels per CSS pixel, and how many steps of one device pixel the move takes
+ * along its longer axis. A layer the compositor moves by a fraction of a
+ * pixel is resampled and its text goes soft, so a slow drift steps from pixel
+ * to pixel instead. Nothing when it doesn't move a whole pixel.
+ */
+export function pixelSteps(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  ratio: number,
+): {
+  from: { x: number; y: number }
+  to: { x: number; y: number }
+  steps: number
+} | null {
+  const snap = (value: number) => Math.round(value * ratio) / ratio
+  const start = { x: snap(from.x), y: snap(from.y) }
+  const end = { x: snap(to.x), y: snap(to.y) }
+  const steps = Math.round(
+    Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y)) * ratio,
+  )
+  return steps > 0 ? { from: start, to: end, steps } : null
+}
+
+/** Where `frame` would put `element`, when all it does is slide it; otherwise `null`. */
+function translationOf(element: HTMLElement, frame: Keyframe) {
+  const probe = element.animate([frame], { fill: 'forwards' })
+  const transform = getComputedStyle(element).transform
+  probe.cancel()
+  const matrix = new DOMMatrixReadOnly(transform === 'none' ? undefined : transform)
+  const slides =
+    matrix.is2D && matrix.a === 1 && matrix.b === 0 && matrix.c === 0 && matrix.d === 1
+  return slides ? { x: matrix.e, y: matrix.f } : null
+}
+
+/** A move's keyframes, on whole device pixels when it only slides at the scroll's own rate. */
+function keyframesOf(
+  element: HTMLElement,
+  start: Keyframe,
+  end: Keyframe,
+  easing: string,
+  ratio: number,
+): Keyframe[] {
+  const from = easing === 'linear' ? translationOf(element, start) : null
+  const to = from ? translationOf(element, end) : null
+  const stepped = from && to ? pixelSteps(from, to, ratio) : null
+  if (!stepped) return [{ ...start, easing }, { ...end }]
+  const at = ({ x, y }: { x: number; y: number }) => `translate(${x}px, ${y}px)`
+  return [
+    {
+      ...start,
+      transform: at(stepped.from),
+      // A level at each pixel from one end to the other, both ends included.
+      easing: `steps(${stepped.steps + 1}, jump-none)`,
+    },
+    { ...end, transform: at(stepped.to) },
+  ]
+}
+
 /** An element's top in the page, from layout alone, so a transform on it or above it doesn't move it. */
 function pageTop(element: HTMLElement) {
   let top = 0
@@ -356,7 +417,9 @@ function pageTop(element: HTMLElement) {
  * move, the element rests at `to`. Where motion is reduced, or the browser has
  * no scroll timelines, nothing moves it: it rests where its own CSS puts it, so
  * a starting pose set in CSS for the first paint sits under
- * `motion-safe:supports-[animation-timeline:scroll()]:`.
+ * `motion-safe:supports-[animation-timeline:scroll()]:`. A move that only
+ * slides, at the scroll's own rate, steps from one device pixel to the next,
+ * so the text in it stays sharp wherever the scroll stops.
  */
 export function useScrollLinked(
   ref: RefObject<HTMLElement | null>,
@@ -389,6 +452,8 @@ export function useScrollLinked(
     let animation: Animation | undefined
     let placed = ''
     let frame = 0
+    let watched = 0
+    let resolution: MediaQueryList | undefined
 
     const place = () => {
       // A box that scrolls it, or else the page.
@@ -410,11 +475,21 @@ export function useScrollLinked(
           : getComputedStyle(element)
               .getPropertyValue('--motion-layout-fade-easing')
               .trim()
+      // A screen of another density, or a zoom, moves the device pixels the move steps on.
+      const ratio = window.devicePixelRatio || 1
+      if (ratio !== watched) {
+        watched = ratio
+        resolution?.removeEventListener('change', schedule)
+        resolution = window.matchMedia(`(resolution: ${ratio}dppx)`)
+        resolution.addEventListener('change', schedule)
+      }
+      // Read again each time, so a distance set in a variable above it follows a change.
+      const keyframes = reduced
+        ? []
+        : keyframesOf(element, start, end, easing || 'linear', ratio)
       const key = reduced
         ? 'reduced'
-        : offsets && easing
-          ? `${offsets.start} ${offsets.end} ${easing}`
-          : 'rest'
+        : `${offsets && easing ? `${offsets.start} ${offsets.end}` : 'rest'} ${JSON.stringify(keyframes)}`
       const timeline = timelines.get(scroller)
       if (key === placed && (!offsets || animation?.timeline === timeline)) return
       placed = key
@@ -423,10 +498,9 @@ export function useScrollLinked(
       if (reduced) return
       if (!offsets || !easing) {
         // Too little scroll for the move: it rests where it would end.
-        animation = element.animate([{ ...end }], { fill: 'forwards' })
+        animation = element.animate([keyframes.at(-1) ?? end], { fill: 'forwards' })
         return
       }
-      const keyframes = [{ ...start, easing }, { ...end }]
       // In scroll px, so content that grows below the element moves nothing.
       const rangeStart = `${offsets.start}px`
       const rangeEnd = `${offsets.end}px`
@@ -459,13 +533,24 @@ export function useScrollLinked(
       attributeFilter: ['data-feel', 'data-motion'],
       subtree: true,
     })
+    // So can a variable the move reads, such as how far it goes. An observer of
+    // its own: observing <html> again would replace the watch above.
+    const variables = new MutationObserver(schedule)
+    for (let above = element.parentElement; above; above = above.parentElement) {
+      variables.observe(above, {
+        attributes: true,
+        attributeFilter: ['style', 'class'],
+      })
+    }
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
     motion.addEventListener('change', schedule)
     return () => {
       resizes.disconnect()
       window.removeEventListener('resize', schedule)
       preferences.disconnect()
+      variables.disconnect()
       motion.removeEventListener('change', schedule)
+      resolution?.removeEventListener('change', schedule)
       cancelAnimationFrame(frame)
       animation?.cancel()
     }
