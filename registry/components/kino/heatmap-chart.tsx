@@ -293,7 +293,11 @@ function HeatmapChart(props: HeatmapChartProps) {
         description={description}
         empty={empty}
         className={cn('h-auto', className)}
-        placeholder={placeholder && <CellGridPlaceholder />}
+        placeholder={
+          placeholder && (
+            <CellGridPlaceholder slot='heatmap-chart' columns={columns} rows={rows} />
+          )
+        }
         {...figureProps({ ...props, index: CELL_NAME }, heatmapChartKeys)}
       >
         <CellGridSizer columns={columns} rows={rows} />

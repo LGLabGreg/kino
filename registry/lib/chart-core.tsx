@@ -2245,8 +2245,112 @@ function figureProps<P extends CategoryChartProps>(
   return out as ComponentProps<'figure'>
 }
 
+/*
+ * What the charts of shares of a whole, such as the Donut and the Waffle,
+ * share: a share's value and colour, and its tooltip.
+ */
+
+/** A share's value: a number above zero, or zero for one that is missing or below it. */
+function shareValue(datum: ChartDatum, dataKey: string) {
+  return Math.max(0, numberOf(datum[dataKey]) ?? 0)
+}
+
+/** A share's colour: its own, or the next of the chart's colours for one the config leaves out. */
+function shareColor(chart: Pick<ChartContextValue, 'series'>, category: ChartCategory) {
+  const slot = chart.series.indexOf(category.key)
+  return `var(--color-${category.key}, var(--chart-${((slot === -1 ? category.index : slot) % 5) + 1}))`
+}
+
+/** A row of a share's tooltip: one of its values, and its share. */
+interface ShareTooltipRow {
+  /** The value's name, when there are several, such as a ring's. */
+  label: string | null
+  value: string
+  share: string
+}
+
+/**
+ * The tooltip for a share: its swatch and its name, its share and its
+ * value, or under its name, each of its values'. `swatch` stands in for the
+ * share's own, for a share drawn otherwise, such as a waffle's remaining
+ * cells.
+ */
+function ShareTooltipContent({
+  chart,
+  category,
+  name,
+  rows,
+  swatch: own,
+}: {
+  chart: Omit<ChartContextValue, 'pointOf'>
+  category: ChartCategory
+  name: string
+  rows: readonly ShareTooltipRow[]
+  swatch?: ReactNode
+}) {
+  const slot = chart.series.indexOf(category.key)
+  const swatch = own ?? (
+    <span
+      aria-hidden
+      className={cn(
+        swatchClassName,
+        forcedSeriesColor(slot === -1 ? category.index : slot),
+      )}
+      style={swatchStyle(
+        category.key,
+        slot === -1 ? 'solid' : chart.patternOf(category.key),
+      )}
+    />
+  )
+  const figures = (row: ShareTooltipRow) => (
+    <>
+      {/* A value with a unit reads in its own order whatever the page's direction. */}
+      <span
+        dir='auto'
+        className='text-background/75 tabular-nums forced-colors:text-[CanvasText]'
+      >
+        {row.share}
+      </span>
+      <span dir='auto' className='font-medium tabular-nums'>
+        {row.value}
+      </span>
+    </>
+  )
+  const single = rows.length === 1 ? rows[0] : undefined
+  return (
+    // The tooltip sits outside the chart, so it carries the chart's id for its colours.
+    <div data-chart={chart.id} className='flex min-w-36 flex-col gap-1'>
+      <div className='flex items-center gap-2'>
+        {swatch}
+        <span
+          className={cn(
+            'min-w-0 flex-1 break-words',
+            single ? 'text-background/75 forced-colors:text-[CanvasText]' : 'font-medium',
+          )}
+        >
+          {name}
+        </span>
+        {single && figures(single)}
+      </div>
+      {!single &&
+        rows.map((row) => (
+          <div key={row.label} className='flex items-center gap-2 ps-4'>
+            <span className='text-background/75 min-w-0 flex-1 break-words forced-colors:text-[CanvasText]'>
+              {row.label}
+            </span>
+            {figures(row)}
+          </div>
+        ))}
+    </div>
+  )
+}
+
 export {
   axisLayerClassName,
+  shareColor,
+  ShareTooltipContent,
+  type ShareTooltipRow,
+  shareValue,
   stickTo,
   axisSlide,
   CategoryChartFrame,

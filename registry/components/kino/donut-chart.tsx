@@ -8,25 +8,20 @@ import {
   type ChartCategory,
   type ChartContextValue,
   type ChartPoint,
+  shareColor,
+  ShareTooltipContent,
+  shareValue,
   drawingFrame,
   drawingSize,
   figureProps,
-  forcedSeriesColor,
-  swatchClassName,
   forcedSeriesTextColor,
   plotLayerClassName,
-  swatchStyle,
   useCategoryChart,
   useChart,
   useChartActive,
   useRegistry,
 } from '@/registry/lib/chart-core'
-import {
-  categoryBand,
-  type ChartDatum,
-  type ChartPattern,
-  numberOf,
-} from '@/registry/lib/chart-math'
+import { categoryBand, type ChartPattern } from '@/registry/lib/chart-math'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -236,7 +231,9 @@ function DonutChart(props: DonutChartProps) {
   const bands = ringBands(outer, outer * hole, keys.length, RING_GAP)
   const rings: DonutRing[] = keys.map((key, at) => {
     const band = bands[at] ?? { inner: 0, outer: 0 }
-    const values = chart.current.map((category) => valueOf(category.datum, key.dataKey))
+    const values = chart.current.map((category) =>
+      shareValue(category.datum, key.dataKey),
+    )
     const circumference = Math.PI * (band.inner + band.outer)
     const shares = donutSlices(values, circumference > 0 ? MIN_ARC / circumference : 0)
     const slices = new Map<string, Slice>()
@@ -318,7 +315,7 @@ function DonutChart(props: DonutChartProps) {
       const category = chart.current[at]
       if (!category) return null
       return (
-        <DonutTooltipContent
+        <ShareTooltipContent
           chart={chart}
           category={category}
           name={nameOf(category)}
@@ -393,11 +390,6 @@ function useGrowScale(
     setScale(Number.isFinite(read) && read >= 1 ? read : GROW)
   }, [root, grow, width, height])
   return grow ? scale : 1
-}
-
-/** A slice's value: a number above zero, or zero for one that is missing or below it. */
-function valueOf(datum: ChartDatum, dataKey: string) {
-  return Math.max(0, numberOf(datum[dataKey]) ?? 0)
 }
 
 /**
@@ -657,7 +649,7 @@ function DonutSlices({ ring: at }: { ring: number }) {
                 // Only the outer ring grows: an inner one would reach into the ring around it.
                 grown={donut.grow && at === 0 && lit}
                 entering={donut.entering}
-                color={sliceColor(chart, category)}
+                color={shareColor(chart, category)}
                 slot={slot === -1 ? category.index : slot}
                 pattern={slot === -1 ? 'solid' : chart.patternOf(category.key)}
               />
@@ -715,12 +707,6 @@ const SliceGap = memo(function SliceGap({
     />
   )
 })
-
-/** A slice's colour: its own, or the next of the chart's colours for a slice the config leaves out. */
-function sliceColor(chart: Pick<ChartContextValue, 'series'>, category: ChartCategory) {
-  const slot = chart.series.indexOf(category.key)
-  return `var(--color-${category.key}, var(--chart-${((slot === -1 ? category.index : slot) % 5) + 1}))`
-}
 
 /**
  * One slice: its dash along the ring, with its pattern. Memoised, so the
@@ -862,7 +848,7 @@ function DonutChartLabels({
   })
   // Every category's, a leaving one's too, so its label fades out with its words.
   const textOf = (category: ChartCategory) => {
-    const value = valueOf(category.datum, ring.dataKey)
+    const value = shareValue(category.datum, ring.dataKey)
     // A leaving slice keeps the share it had while it was part of the whole.
     const whole = category.leaving ? ring.total + value : ring.total
     const slice: DonutLabelSlice = {
@@ -917,7 +903,7 @@ function DonutChartLabels({
             radius={radius}
             stretch={stretch}
             edge={outside ? donut.edge : null}
-            color={sliceColor(chart, category)}
+            color={shareColor(chart, category)}
             shown={at !== -1 && slice.size > 0 && !donut.entering && (shown[at] ?? false)}
             dim={spotlit !== null && spotlit !== category.index}
           >
@@ -1133,86 +1119,6 @@ function DonutTrack({ slot, breathe = false }: { slot: string; breathe?: boolean
           }
         />
       </div>
-    </div>
-  )
-}
-
-/** A row of the tooltip: one ring's value of the slice, and its share. */
-interface DonutTooltipRow {
-  /** The ring's name, when there are several. */
-  label: string | null
-  value: string
-  share: string
-}
-
-/**
- * The tooltip for a slice: its swatch and its name, its share and its value,
- * or under its name, each ring's.
- */
-function DonutTooltipContent({
-  chart,
-  category,
-  name,
-  rows,
-}: {
-  chart: Omit<ChartContextValue, 'pointOf'>
-  category: ChartCategory
-  name: string
-  rows: readonly DonutTooltipRow[]
-}) {
-  const slot = chart.series.indexOf(category.key)
-  const swatch = (
-    <span
-      aria-hidden
-      className={cn(
-        swatchClassName,
-        forcedSeriesColor(slot === -1 ? category.index : slot),
-      )}
-      style={swatchStyle(
-        category.key,
-        slot === -1 ? 'solid' : chart.patternOf(category.key),
-      )}
-    />
-  )
-  const figures = (row: DonutTooltipRow) => (
-    <>
-      {/* A value with a unit reads in its own order whatever the page's direction. */}
-      <span
-        dir='auto'
-        className='text-background/75 tabular-nums forced-colors:text-[CanvasText]'
-      >
-        {row.share}
-      </span>
-      <span dir='auto' className='font-medium tabular-nums'>
-        {row.value}
-      </span>
-    </>
-  )
-  const single = rows.length === 1 ? rows[0] : undefined
-  return (
-    // The tooltip sits outside the chart, so it carries the chart's id for its colours.
-    <div data-chart={chart.id} className='flex min-w-36 flex-col gap-1'>
-      <div className='flex items-center gap-2'>
-        {swatch}
-        <span
-          className={cn(
-            'min-w-0 flex-1 break-words',
-            single ? 'text-background/75 forced-colors:text-[CanvasText]' : 'font-medium',
-          )}
-        >
-          {name}
-        </span>
-        {single && figures(single)}
-      </div>
-      {!single &&
-        rows.map((row) => (
-          <div key={row.label} className='flex items-center gap-2 ps-4'>
-            <span className='text-background/75 min-w-0 flex-1 break-words forced-colors:text-[CanvasText]'>
-              {row.label}
-            </span>
-            {figures(row)}
-          </div>
-        ))}
     </div>
   )
 }

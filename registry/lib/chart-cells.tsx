@@ -166,6 +166,14 @@ function cellGridChart(
   }
 }
 
+/**
+ * The room between cells: the chart's `--<slot>-gap`, 2px by default, or
+ * less where the cells are small, so a cell never shrinks to its gap.
+ */
+function cellGap(columns: number, rows: number) {
+  return `min(var(--cells-gap, 2px), ${100 / columns}cqw * 0.15, ${100 / rows}cqh * 0.15)`
+}
+
 /** A cell's colour, and how strong it is, which forced colours keep as its opacity. */
 interface CellFill {
   color: string
@@ -285,6 +293,7 @@ function CellGridCells({
           plotLayerClassName,
           'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
         )}
+        style={cellLayerVariables(grid.slot)}
       >
         {brought.map((category) => (
           <CellGridCell
@@ -322,6 +331,20 @@ function cellProps(grid: CellGridValue, category: ChartCategory) {
 }
 
 /**
+ * How far the rest steps back, how much of the `draw` role the wave waits
+ * and the room between cells: the chart's own variables, such as
+ * `--heatmap-chart-dim`, `--heatmap-chart-wave` and `--heatmap-chart-gap`,
+ * set on its layer of cells for the cells inside.
+ */
+function cellLayerVariables(slot: string) {
+  return {
+    '--cells-dim': `var(--${slot}-dim, 0.3)`,
+    '--cells-wave': `var(--${slot}-wave, 0.6)`,
+    '--cells-gap': `var(--${slot}-gap, 2px)`,
+  } as CSSProperties
+}
+
+/**
  * The layer of every cell, which steps back as one while `dim`. Memoised,
  * so moving from cell to cell redraws none of it.
  */
@@ -345,10 +368,7 @@ const CellLayer = memo(function CellLayer({
       )}
       style={
         {
-          // How far the rest steps back, and how much of the `draw` role the wave waits:
-          // the chart's own variables, `--heatmap-chart-dim` and `--heatmap-chart-wave`.
-          '--cells-dim': `var(--${grid.slot}-dim, 0.3)`,
-          '--cells-wave': `var(--${grid.slot}-wave, 0.6)`,
+          ...cellLayerVariables(grid.slot),
           ...style,
         } as CSSProperties
       }
@@ -391,7 +411,11 @@ function LitCell({
   direction: 'ltr' | 'rtl'
 }) {
   return (
-    <div aria-hidden className={cn(plotLayerClassName, 'z-11')}>
+    <div
+      aria-hidden
+      className={cn(plotLayerClassName, 'z-11')}
+      style={cellLayerVariables(slot)}
+    >
       <span
         data-slot={`${slot}-lit-cell`}
         data-off={on ? undefined : ''}
@@ -405,7 +429,7 @@ function LitCell({
         style={
           {
             '--cell-fill': color ?? undefined,
-            '--cell-gap': `min(2px, ${100 / columns}cqw * 0.15, ${100 / rows}cqh * 0.15)`,
+            '--cell-gap': cellGap(columns, rows),
             width: `calc(${100 / columns}cqw - var(--cell-gap))`,
             height: `calc(${100 / rows}cqh - var(--cell-gap))`,
             transform: `translate(calc(${direction === 'rtl' ? -1 : 1} * (${(column / columns) * 100}cqw + var(--cell-gap) / 2)), calc(${(row / rows) * 100}cqh + var(--cell-gap) / 2))`,
@@ -419,8 +443,8 @@ function LitCell({
 /**
  * One cell, at `column` and `row` of a grid `columns` by `rows`, in its
  * `fill`, or with none, a dashed outline. Its colour fades on the `draw`
- * role, later and quicker the further along its column is, so a new range
- * sweeps across and every cell lands within one `draw`. One that arrives
+ * role, later and quicker the further `along` it is, its column by default,
+ * so a new range sweeps across and every cell lands within one `draw`. One that arrives
  * fades in the same way, over one that leaves from its place, which waits
  * below until the new one has landed. A `still` one, a copy over the rest,
  * is simply there. Memoised, so lighting a cell redraws none of them.
@@ -435,6 +459,9 @@ const CellGridCell = memo(function CellGridCell({
   strength,
   leaving,
   still = false,
+  along: given,
+  image,
+  forced,
 }: {
   slot: string
   column: number
@@ -446,8 +473,19 @@ const CellGridCell = memo(function CellGridCell({
   strength: number
   leaving: boolean
   still?: boolean
+  /** How far along the wave the cell is, from 0 to 1; its column's place by default. */
+  along?: number
+  /** A pattern drawn over the colour, from `patternImage`. */
+  image?: string
+  /** The cell's colour under forced colours, a class; the text colour, as strong as its fill, by default. */
+  forced?: string
 }) {
-  const along = columns <= 1 ? 0 : column / (columns - 1)
+  const along = given ?? (columns <= 1 ? 0 : column / (columns - 1))
+  // The pattern shown before this one, kept while it fades out as the new one fades in.
+  const [patterns, setPatterns] = useState<{ now?: string; was?: string }>({ now: image })
+  if (patterns.now !== image) setPatterns({ now: image, was: patterns.now })
+  const shown =
+    color === null ? [] : [patterns.was, image].filter((one) => one !== undefined)
   return (
     <span
       data-slot={`${slot}-cell`}
@@ -461,6 +499,7 @@ const CellGridCell = memo(function CellGridCell({
         'data-empty:outline-border data-empty:bg-transparent data-empty:outline-1 data-empty:-outline-offset-1 data-empty:outline-dashed',
         // Forced colours take the fills away, so each cell is the text colour, as strong as its fill.
         'forced-colors:bg-[CanvasText] forced-colors:opacity-(--cell-strength) forced-colors:data-empty:bg-transparent forced-colors:data-empty:opacity-100 forced-colors:data-empty:outline-[GrayText]',
+        forced,
       )}
       style={
         {
@@ -469,15 +508,24 @@ const CellGridCell = memo(function CellGridCell({
           // The wave: a cell further along waits longer and fades quicker, so all land within one `draw`.
           '--cell-delay': `calc(var(--motion-draw-duration) * var(--cells-wave) * ${along})`,
           '--cell-span': `calc(var(--motion-draw-duration) * (1 - var(--cells-wave) * ${along}))`,
-          // The room between cells: 2px, or less where the cells are small.
-          '--cell-gap': `min(2px, ${100 / columns}cqw * 0.15, ${100 / rows}cqh * 0.15)`,
+          '--cell-gap': cellGap(columns, rows),
           insetInlineStart: `calc(${(column / columns) * 100}cqw + var(--cell-gap) / 2)`,
           top: `calc(${(row / rows) * 100}cqh + var(--cell-gap) / 2)`,
           width: `calc(${100 / columns}cqw - var(--cell-gap))`,
           height: `calc(${100 / rows}cqh - var(--cell-gap))`,
         } as CSSProperties
       }
-    />
+    >
+      {/* A pattern can't fade into another, so each is a layer of its own that fades in or out on the cell's wave. */}
+      {shown.map((pattern) => (
+        <span
+          key={pattern}
+          data-off={pattern === image ? undefined : ''}
+          className='absolute inset-0 rounded-[inherit] transition-none group-data-mounted/chart:[transition:opacity_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay)] motion-reduce:group-data-mounted/chart:[transition:opacity_var(--motion-draw-duration)_var(--motion-draw-fade-easing)] group-data-mounted/chart:starting:opacity-0 data-off:opacity-0 in-data-still:transition-none!'
+          style={{ background: pattern }}
+        />
+      ))}
+    </span>
   )
 })
 
@@ -615,24 +663,48 @@ function CellStepLegend({
   )
 }
 
-/** The placeholder while the data loads: the grid's cells, breathing slowly. */
-function CellGridPlaceholder() {
-  const { slot, columns, rows } = useCellGrid()
+/**
+ * The placeholder while the data loads: the grid's cells, breathing slowly,
+ * in the box the cells take, the whole plot by default.
+ */
+function CellGridPlaceholder({
+  slot,
+  columns,
+  rows,
+  className,
+  style,
+}: {
+  slot: string
+  columns: number
+  rows: number
+  className?: string
+  style?: CSSProperties
+}) {
   return (
     <div
       data-slot={`${slot}-placeholder`}
       aria-hidden
+      style={cellLayerVariables(slot)}
       className={cn(
         plotLayerClassName,
         'z-10 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-mounted/chart:starting:opacity-0',
       )}
     >
       <div
-        className={cn('absolute inset-0 grid gap-0.5', placeholderBreatheClassName)}
-        style={{
-          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-        }}
+        className={cn(
+          'absolute inset-0 grid gap-(--cell-gap)',
+          placeholderBreatheClassName,
+          className,
+        )}
+        style={
+          {
+            ...style,
+            // The cells' own room between them, so the cells land where the placeholder's were.
+            '--cell-gap': cellGap(columns, rows),
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+          } as CSSProperties
+        }
       >
         {Array.from({ length: columns * rows }, (_, at) => (
           <span
@@ -653,7 +725,9 @@ export {
   CELL_NAME,
   type CellAt,
   type CellFill,
+  CellGridCell,
   CellGridCells,
+  cellLayerVariables,
   cellGridChart,
   CellGridContext,
   type CellGridLayout,
