@@ -17,7 +17,7 @@ import {
   pickClassName,
   rowTintClassName,
 } from '@/registry/lib/highlight'
-import { popupPositionerProps, usePopupGrow } from '@/registry/lib/popup'
+import { HOVER_DELAY, popupPositionerProps, usePopupGrow } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { transitionsSettled, withoutTransition } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
@@ -129,13 +129,15 @@ function Current({ items }: { items: string }) {
 }
 
 /**
- * The menu and its one panel. Every prop goes to Base UI's Root. New content
+ * The menu and its one panel. A hover waits 200ms before it opens the panel,
+ * as every popup that opens on hover does. Every prop goes to Base UI's Root. New content
  * slides in from the side the pointer moved towards, by
  * `--navigation-menu-slide` (28px by default).
  */
 function NavigationMenu({
   className,
   children,
+  delay = HOVER_DELAY,
   closeDelay = GLIDE_GROUP_CLOSE_DELAY,
   onValueChange,
   ...props
@@ -160,6 +162,7 @@ function NavigationMenu({
       <GlideGroupMemory>
         <NavigationMenuPrimitive.Root
           data-slot='navigation-menu'
+          delay={delay}
           closeDelay={closeDelay}
           onValueChange={(value, details) => {
             if (value != null && details.reason === 'trigger-hover') {

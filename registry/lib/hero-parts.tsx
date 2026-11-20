@@ -165,9 +165,13 @@ function HeroBackdrop({ className, ...props }: ComponentProps<'div'>) {
 const heroSectionClassName =
   '@container/hero relative isolate flex min-h-full w-full min-w-0 flex-col overflow-x-clip'
 
-/** The content's column: as wide as a page's, with a gutter that grows with the room. */
-const heroColumnClassName =
-  'mx-auto w-full max-w-7xl min-w-0 px-(--surface-padding) @3xl/hero:px-10'
+/**
+ * A landing page's column: as wide as a page's, with a gutter that grows with
+ * the room of the container around it. The Hero's content and the Site
+ * header's bar both sit in it, so their edges line up.
+ */
+const pageColumnClassName =
+  'mx-auto w-full max-w-7xl min-w-0 px-(--surface-padding) @3xl:px-10'
 
 /**
  * The words of a hero that reads top to bottom: the announcement, then the
@@ -298,7 +302,6 @@ function HeroShot({
 export {
   HeroAnnouncement,
   HeroBackdrop,
-  heroColumnClassName,
   heroDescriptionClassName,
   heroEnter,
   type HeroProps,
@@ -306,4 +309,5 @@ export {
   HeroShot,
   HeroWords,
   NudgeArrow,
+  pageColumnClassName,
 }

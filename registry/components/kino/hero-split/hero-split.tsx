@@ -2,11 +2,11 @@
 
 import {
   HeroBackdrop,
-  heroColumnClassName,
   heroEnter,
   type HeroProps,
   heroSectionClassName,
   HeroWords,
+  pageColumnClassName,
 } from '@/registry/lib/hero-parts'
 import { useScrollLinked } from '@/registry/lib/scroll'
 import { useId, useRef } from 'react'
@@ -57,7 +57,7 @@ function HeroSplit({
       <HeroBackdrop />
       <div
         className={cn(
-          heroColumnClassName,
+          pageColumnClassName,
           'grid flex-1 items-center gap-12 pt-16 pb-16 @3xl/hero:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] @3xl/hero:pt-24 @3xl/hero:pb-24',
         )}
       >

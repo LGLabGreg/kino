@@ -2,11 +2,11 @@
 
 import {
   HeroBackdrop,
-  heroColumnClassName,
   heroEnter,
   type HeroProps,
   heroSectionClassName,
   HeroWords,
+  pageColumnClassName,
 } from '@/registry/lib/hero-parts'
 import { useScrollLinked } from '@/registry/lib/scroll'
 import { useId, useRef } from 'react'
@@ -61,7 +61,7 @@ function Hero({
       <HeroBackdrop />
       <div
         className={cn(
-          heroColumnClassName,
+          pageColumnClassName,
           'flex flex-1 flex-col items-center gap-12 pt-16 @3xl/hero:gap-16 @3xl/hero:pt-24',
           !shot && 'pb-16 @3xl/hero:pb-24',
         )}
