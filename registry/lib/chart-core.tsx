@@ -42,7 +42,7 @@ import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
-import { transitionsQuiet } from '@/registry/lib/resize'
+import { runningTransitions, transitionsQuiet } from '@/registry/lib/resize'
 import { revealBehavior, revealBy } from '@/registry/lib/scroll'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
@@ -110,6 +110,8 @@ interface ChartMessages {
   forecast: string
   /** A change since the category before, such as "up 22%". */
   change: (change: number, size: string) => string
+  /** A value against the most it could be, such as "86 of 120". */
+  outOf: (value: string, most: string) => string
   loading: string
   /** Said when the data arrives, with the chart's `label`. */
   loaded: (label: string) => string
@@ -132,6 +134,7 @@ const defaultMessages: ChartMessages = {
   forecast: 'forecast',
   change: (change, size) =>
     change > 0 ? `up ${size}` : change < 0 ? `down ${size}` : 'no change',
+  outOf: (value, most) => `${value} of ${most}`,
   loading: 'Loading chart',
   loaded: (label) => `${label} loaded`,
   empty: 'No data for this range',
@@ -222,6 +225,8 @@ interface ChartContextValue {
   current: readonly ChartCategory[]
   orientation: ChartOrientation
   direction: ReadingDirection
+  /** Drawn round a centre, clockwise from the top in either reading direction. */
+  round: boolean
   stack: ChartStack
   scale: ValueScale
   /** The scale before the last change, so what arrives starts where it would have been. */
@@ -242,6 +247,8 @@ interface ChartContextValue {
   valueText: (value: number) => string
   /** Anything under a series' key as the chart writes it: a number, a `[from, to]` range, or no value. */
   datumText: (value: unknown) => string
+  /** How a series' value on a category is written in the tooltip, the data table and what is read out: `datumText` of it by default. */
+  seriesText: (category: ChartCategory, key: string) => string
   categoryText: (value: unknown) => string
   /** The chart's own `format`, which the value axis follows. */
   format?: ChartFormat
@@ -704,6 +711,10 @@ const chartFrameClassName =
   'group/chart @container/chart relative isolate grid h-72 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] [grid-template-areas:"top_top_top"_"._top-axis_."_"start-axis_plot_end-axis"_"._bottom-axis_."_"bottom_bottom_bottom"] text-xs'
 
 /** A layer of the plot: the size of the plot, and the box its insets are measured in. */
+/** A tooltip row's quieter text, in full colour on the row of the series brought forward. */
+const tooltipQuietClassName =
+  'text-background/75 transition-colors duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-lit/row:text-background forced-colors:text-[CanvasText]'
+
 /** A series' colour beside its name in a tooltip, on its `--swatch` (`swatchStyle`). */
 const swatchClassName =
   'size-2 shrink-0 rounded-[calc(var(--control-radius-xs)/4)] bg-(--swatch)'
@@ -988,9 +999,13 @@ function valuePlace(value: number, scale: ValueScale) {
  * toward where the new scale puts it, so the change of range shows. A tick
  * still fading in when the range turns back fades out from where it is. In
  * value order, so no tick's element moves in the page, which would make it
- * jump.
+ * jump. `property` is the one the ticks move on, which `layer` waits on.
  */
-function useTicks(layer: RefObject<HTMLElement | null>, axis: ChartAxis = 'value') {
+function useTicks(
+  layer: RefObject<HTMLElement | null>,
+  axis: ChartAxis = 'value',
+  property = 'translate',
+) {
   const { scale } = scalesOf(useChart(), axis)
   const key = scale.ticks.join()
   const [drawn, setDrawn] = useState({
@@ -1008,7 +1023,7 @@ function useTicks(layer: RefObject<HTMLElement | null>, axis: ChartAxis = 'value
   }
   useWhenQuiet(
     layer,
-    'translate',
+    property,
     drawn.leaving.length > 0,
     () => setDrawn((was) => (was.key === key ? { ...was, leaving: [] } : was)),
     drawn.key,
@@ -1087,7 +1102,7 @@ function columnLabel(chart: ChartContextValue, index: number) {
       const projected = isForecast(chart, key, index)
         ? `, ${chart.messages.forecast}`
         : ''
-      return `${typeof name === 'string' ? name : key} ${chart.datumText(value)}${projected}${said}`
+      return `${typeof name === 'string' ? name : key} ${chart.seriesText(category, key)}${projected}${said}`
     })
   return `${name}: ${values.join(', ')}`
 }
@@ -1336,7 +1351,15 @@ function ChartColumns() {
           ? stepPoint(chart.xy.points, reached, event.key, direction)
           : chart.grid
             ? stepCell(chart.grid.cells, reached, event.key, direction)
-            : stepIndex(event.key, reached, count, orientation, direction)
+            : // Round the circle, Right steps clockwise, the way the marks run, as they
+              // aren't mirrored in right to left.
+              stepIndex(
+                event.key,
+                reached,
+                count,
+                orientation,
+                chart.round ? 'ltr' : direction,
+              )
         if (next === null) return
         event.preventDefault()
         if (chart.xy) setAlong(keyAxis(event.key))
@@ -1412,20 +1435,61 @@ const ChartColumnTriggers = memo(function ChartColumnTriggers({
  */
 function ChartDataTable() {
   const chart = useChart()
-  const { current, series, hidden, config, datumText, categoryText, status, messages } =
+  const { current, series, hidden, config, seriesText, categoryText, status, messages } =
     chart
   if (status !== 'ready') return null
   const shown = series.filter((key) => !hidden.includes(key))
   const { table } = chart
+  // The table sits in a hidden box: a table grows to fit its cells past `sr-only`'s 1px.
   if (table) {
     return (
-      <table className='sr-only' aria-label={messages.table}>
+      <div className='sr-only'>
+        <table aria-label={messages.table}>
+          <thead>
+            <tr>
+              <th scope='col'>{messages.category}</th>
+              {table.columns.map((column) => (
+                <th key={column} scope='col'>
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {current.map((category) => (
+              <tr key={category.key}>
+                <th scope='row'>{categoryText(category.value)}</th>
+                {table.cells(category).map((cell, at) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- the columns are fixed
+                  <td key={at}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+          {table.footer && (
+            <tfoot>
+              <tr>
+                <th scope='row'>{messages.total}</th>
+                {table.footer.map((cell, at) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- the columns are fixed
+                  <td key={at}>{cell}</td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    )
+  }
+  return (
+    <div className='sr-only'>
+      <table aria-label={messages.table}>
         <thead>
           <tr>
             <th scope='col'>{messages.category}</th>
-            {table.columns.map((column) => (
-              <th key={column} scope='col'>
-                {column}
+            {shown.map((key) => (
+              <th key={key} scope='col'>
+                {config[key]?.label ?? key}
               </th>
             ))}
           </tr>
@@ -1434,53 +1498,17 @@ function ChartDataTable() {
           {current.map((category) => (
             <tr key={category.key}>
               <th scope='row'>{categoryText(category.value)}</th>
-              {table.cells(category).map((cell, at) => (
-                // oxlint-disable-next-line react/no-array-index-key -- the columns are fixed
-                <td key={at}>{cell}</td>
+              {shown.map((key) => (
+                <td key={key}>
+                  {seriesText(category, key)}
+                  {isForecast(chart, key, category.index) && `, ${messages.forecast}`}
+                </td>
               ))}
             </tr>
           ))}
         </tbody>
-        {table.footer && (
-          <tfoot>
-            <tr>
-              <th scope='row'>{messages.total}</th>
-              {table.footer.map((cell, at) => (
-                // oxlint-disable-next-line react/no-array-index-key -- the columns are fixed
-                <td key={at}>{cell}</td>
-              ))}
-            </tr>
-          </tfoot>
-        )}
       </table>
-    )
-  }
-  return (
-    <table className='sr-only' aria-label={messages.table}>
-      <thead>
-        <tr>
-          <th scope='col'>{messages.category}</th>
-          {shown.map((key) => (
-            <th key={key} scope='col'>
-              {config[key]?.label ?? key}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {current.map((category) => (
-          <tr key={category.key}>
-            <th scope='row'>{categoryText(category.value)}</th>
-            {shown.map((key) => (
-              <td key={key}>
-                {datumText(category.datum[key])}
-                {isForecast(chart, key, category.index) && `, ${messages.forecast}`}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    </div>
   )
 }
 
@@ -1648,6 +1676,8 @@ interface CategoryChartOptions<Shapes> {
   }
   /** Round the value axis's ends out to a tick; off for shares that fill the axis. */
   nice: boolean
+  /** Drawn round a centre, clockwise in either reading direction, so the arrows step the way it runs. */
+  round?: boolean
   /** Whether the chart's height comes from its data, so only a change of width is a resize. */
   heightFromData?: boolean
   /**
@@ -1846,6 +1876,12 @@ function useCategoryChart<Shapes>(
 
   const written = { ...defaultMessages, ...messages }
   const valueText = formatterOf(locale, format)
+  const datumText = (value: unknown) => {
+    const range = rangeOf(value)
+    if (range) return `${valueText(range[0])} – ${valueText(range[1])}`
+    const number = numberOf(value)
+    return number === null ? written.noValue : valueText(number)
+  }
   const chart: Omit<ChartContextValue, 'pointOf'> = {
     id,
     label,
@@ -1859,6 +1895,7 @@ function useCategoryChart<Shapes>(
     current,
     orientation: options.orientation,
     direction,
+    round: options.round ?? false,
     stack: options.stack,
     scale,
     previousScale,
@@ -1874,12 +1911,8 @@ function useCategoryChart<Shapes>(
         }
       : undefined,
     valueText,
-    datumText: (value) => {
-      const range = rangeOf(value)
-      if (range) return `${valueText(range[0])} – ${valueText(range[1])}`
-      const number = numberOf(value)
-      return number === null ? written.noValue : valueText(number)
-    },
+    datumText,
+    seriesText: (category, key) => datumText(category.datum[key]),
     categoryText: categoryFormat,
     format,
     activeProps: { activeIndex, defaultActiveIndex, onActiveIndexChange },
@@ -1985,6 +2018,41 @@ function xyPlace(
     x: chart.direction === 'rtl' ? 1 - along : along,
     y: 1 - fractionOf(point.y, chart.scale.domain),
   }
+}
+
+/**
+ * Whether the category lit now was lit from rest, for a frame: what marks
+ * it then appears in place, since after a rest there is no move to explain,
+ * and glides from there on. A rest begins once what marks the last lit
+ * category, `element`, has finished leaving, so a pointer that
+ * comes back while it still fades glides on from where it is.
+ */
+function useFromRest(spotlit: number | null, element: RefObject<Element | null>) {
+  const [fromRest, setFromRest] = useState(false)
+  const previous = useRef(spotlit)
+  const rested = useRef(true)
+  useLayoutEffect(() => {
+    const before = previous.current
+    previous.current = spotlit
+    if (spotlit === null) {
+      const node = element.current
+      if (before === null || !node) return
+      rested.current = false
+      let frame = requestAnimationFrame(function check() {
+        if (runningTransitions(node).length === 0) rested.current = true
+        else frame = requestAnimationFrame(check)
+      })
+      return () => cancelAnimationFrame(frame)
+    }
+    setFromRest(before === null && rested.current)
+    return undefined
+  }, [spotlit, element])
+  useEffect(() => {
+    if (!fromRest) return
+    const frame = requestAnimationFrame(() => setFromRest(false))
+    return () => cancelAnimationFrame(frame)
+  }, [fromRest])
+  return fromRest
 }
 
 /** Values that parts of the chart add while they show, such as the values reference lines need the axis to reach. */
@@ -2393,6 +2461,7 @@ export {
   drawingSize,
   plotLayerClassName,
   swatchClassName,
+  tooltipQuietClassName,
   seriesColor,
   slideLine,
   slideTo,
@@ -2405,6 +2474,7 @@ export {
   useRegistry,
   useChartActive,
   useEntered,
+  useFromRest,
   useTicks,
   useWhenQuiet,
   valuePlace,

@@ -790,3 +790,19 @@ export function gridCellAt(
     Math.min(count - 1, Math.max(0, Math.floor(value * count)))
   return { column: clamp(along, columns), row: clamp(at.y, rows) }
 }
+
+/**
+ * Where a step up (-1) or down (1) `order`, drawn top first, lands from
+ * `from`: Up and Down through a chart's series. From none, or from one not
+ * in it, Up goes to the top and Down to the bottom, as they point; a step
+ * past either end goes back to none, so every series shows again.
+ */
+export function stepThrough(
+  order: readonly string[],
+  from: string | null,
+  step: -1 | 1,
+): string | null {
+  const at = from === null ? -1 : order.indexOf(from)
+  if (at === -1) return (step === -1 ? order[0] : order.at(-1)) ?? null
+  return order[at + step] ?? null
+}

@@ -12,6 +12,10 @@
 export const placeholderFillClassName =
   'bg-foreground/8 dark:bg-foreground/12 forced-colors:bg-[GrayText]!'
 
+/** The same tint as the text colour, for marks an SVG draws in `currentColor`, such as a chart's shapes. */
+export const placeholderInkClassName =
+  'text-foreground/8 dark:text-foreground/12 forced-colors:text-[GrayText]!'
+
 /** The slow breath. */
 export const placeholderBreatheClassName =
   'animate-[pulse_calc(var(--motion-layout-duration)*6)_ease-in-out_infinite]'

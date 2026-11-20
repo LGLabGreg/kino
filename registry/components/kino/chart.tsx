@@ -16,6 +16,7 @@ import {
   ChangeText,
   forcedSeriesColor,
   swatchClassName,
+  tooltipQuietClassName,
   formatterOf,
   isForecast,
   plotLayerClassName,
@@ -1193,12 +1194,13 @@ function ChartTooltipContent({
     hidden,
     config,
     valueText,
-    datumText,
+    seriesText,
     categoryText,
     ordered,
     locale,
     patternOf,
     messages,
+    emphasis,
   } = chart
   const category = current[index]
   if (!category) return null
@@ -1212,13 +1214,18 @@ function ChartTooltipContent({
       {shown.map((key) => {
         const value = category.datum[key]
         return (
-          <div key={key} className='flex items-center gap-2'>
+          // The series brought forward reads in full colour; the rest stay as they are, legible.
+          <div
+            key={key}
+            data-lit={emphasis === key ? '' : undefined}
+            className='group/row flex items-center gap-2'
+          >
             <span
               aria-hidden
               className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
               style={swatchStyle(key, patternOf(key))}
             />
-            <span className='text-background/75 min-w-0 flex-1 truncate forced-colors:text-[CanvasText]'>
+            <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
               {config[key]?.label ?? key}
               {isForecast(chart, key, index) && ` · ${messages.forecast}`}
             </span>
@@ -1226,12 +1233,12 @@ function ChartTooltipContent({
               <ChangeText
                 change={changeSince(value, before.datum[key])}
                 locale={locale}
-                className='text-background/75 forced-colors:text-[CanvasText]'
+                className={tooltipQuietClassName}
               />
             )}
             {/* A value with a unit reads in its own order whatever the page's direction. */}
             <span dir='auto' className='font-medium tabular-nums'>
-              {datumText(value)}
+              {seriesText(category, key)}
             </span>
           </div>
         )

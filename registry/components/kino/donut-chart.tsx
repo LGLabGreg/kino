@@ -7,7 +7,6 @@ import {
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  type ChartPoint,
   shareColor,
   ShareTooltipContent,
   shareValue,
@@ -22,6 +21,22 @@ import {
   useRegistry,
 } from '@/registry/lib/chart-core'
 import { categoryBand, type ChartPattern } from '@/registry/lib/chart-math'
+import {
+  foldPoint,
+  insideLabelFits,
+  LEADER,
+  outerPoint,
+  outsideLabelsShown,
+  outsideRoom,
+  RadialLabel,
+  ringBands,
+  type RingBand,
+  ringSlices,
+  round,
+  type Slice,
+  sliceAt,
+  sliceDash,
+} from '@/registry/lib/chart-radial'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -73,18 +88,6 @@ interface DonutChartProps extends Omit<
    * that loads doesn't animate into place.
    */
   entrance?: 'draw' | 'none'
-}
-
-/** A slice's place on the ring, as fractions of a turn clockwise from the top. */
-interface Slice {
-  start: number
-  size: number
-}
-
-/** A ring's edges, in px from the centre. */
-interface RingBand {
-  inner: number
-  outer: number
 }
 
 /** One ring's value of each slice, by its key in the data and its name. */
@@ -149,17 +152,8 @@ const RING_GAP = 4
  */
 const MIN_ARC = 6
 
-/** How far past the ring, in px, the pointer still finds a slice. */
-const PICK_SLACK = 8
-
 /** How much a growing slice scales, when `--donut-chart-grow` isn't set. */
 const GROW = 1.08
-
-/** A label's line past the ring: the gap before it and its length, then the gap before the text, in px. */
-const LEADER = { gap: 3, length: 10, text: 4 } as const
-
-/** A line of the chart's text, in px. */
-const TEXT_HEIGHT = 16
 
 /**
  * The chart's root: it works out each ring's slices from the data, and lays
@@ -205,6 +199,7 @@ function DonutChart(props: DonutChartProps) {
       stack: 'none',
       entrance: entrance !== 'none',
       moveProperty: 'stroke-dasharray',
+      round: true,
       nice: false,
       seriesOfRow: (row) => String(row[props.index]),
       bandOf: (at, count) => categoryBand(at, count),
@@ -235,7 +230,7 @@ function DonutChart(props: DonutChartProps) {
       shareValue(category.datum, key.dataKey),
     )
     const circumference = Math.PI * (band.inner + band.outer)
-    const shares = donutSlices(values, circumference > 0 ? MIN_ARC / circumference : 0)
+    const shares = ringSlices(values, circumference > 0 ? MIN_ARC / circumference : 0)
     const slices = new Map<string, Slice>()
     for (const category of chart.categories) {
       if (!chart.entered) slices.set(category.key, { start: 0, size: 0 })
@@ -393,155 +388,6 @@ function useGrowScale(
 }
 
 /**
- * Each value's slice of the ring, in order clockwise from the top, as
- * fractions of a turn. A value above zero takes at least `least` of the turn,
- * taken from the others in proportion, so it shows and can be pointed at.
- * With nothing to share, every slice is empty at the top.
- */
-function donutSlices(values: readonly number[], least = 0): Slice[] {
-  const positive = values.map((value) => Math.max(0, value))
-  const count = positive.filter((value) => value > 0).length
-  const floor = count === 0 ? 0 : Math.min(least, 1 / count)
-  // The values held at the floor: each pass adds those the rest's shares leave below it.
-  const held = new Set<number>()
-  const sizesWith = () => {
-    const free = 1 - held.size * floor
-    const rest = positive.reduce(
-      (sum, value, at) => (held.has(at) ? sum : sum + value),
-      0,
-    )
-    return positive.map((value, at) =>
-      value === 0 ? 0 : held.has(at) ? floor : rest === 0 ? 0 : (value / rest) * free,
-    )
-  }
-  let sizes = sizesWith()
-  for (;;) {
-    const below = sizes.flatMap((size, at) =>
-      positive[at]! > 0 && !held.has(at) && size < floor ? [at] : [],
-    )
-    if (below.length === 0) break
-    for (const at of below) held.add(at)
-    sizes = sizesWith()
-  }
-  let start = 0
-  return sizes.map((size) => {
-    const slice = { start, size }
-    start += size
-    return slice
-  })
-}
-
-/**
- * The rings' bands, outermost first: the room from `inner` to `outer` px
- * shared evenly by `count` rings, `gap` px apart. A gap never takes more
- * than a fifth of a ring's room, so thin rings stay rings.
- */
-function ringBands(outer: number, inner: number, count: number, gap: number): RingBand[] {
-  const rings = Math.max(1, count)
-  const room = Math.max(0, outer - inner)
-  const between = rings === 1 ? 0 : Math.min(gap, room / rings / 5)
-  const thickness = (room - between * (rings - 1)) / rings
-  return Array.from({ length: rings }, (_, at) => {
-    const edge = outer - at * (thickness + between)
-    return { outer: edge, inner: Math.max(0, edge - thickness) }
-  })
-}
-
-/** Where a slice that leaves from place `at` folds to: the start of the slice now there, or the end. */
-function foldPoint(slices: readonly Slice[], at: number) {
-  const next = slices[at]
-  if (next) return next.start
-  const last = slices.at(-1)
-  return last ? last.start + last.size : 0
-}
-
-/**
- * The slice under a point `x` across and `y` down from the centre, in px, by
- * its place in the data: the ring the point is on, or nearest to while it is
- * close, then the slice its angle falls in.
- */
-function sliceAt(
-  x: number,
-  y: number,
-  rings: readonly (RingBand & { slices: readonly Slice[] })[],
-): number | null {
-  const distance = Math.hypot(x, y)
-  const outermost = rings[0]
-  const innermost = rings.at(-1)
-  if (!outermost || !innermost || outermost.outer <= 0) return null
-  if (distance > outermost.outer + PICK_SLACK) return null
-  if (innermost.inner > 0 && distance < innermost.inner - PICK_SLACK) return null
-  const away = (band: RingBand) =>
-    Math.max(0, band.inner - distance, distance - band.outer)
-  const ring = rings.reduce((near, next) => (away(next) < away(near) ? next : near))
-  const turn = turnOf(x, y)
-  const at = ring.slices.findIndex(
-    (slice) => slice.size > 0 && turn >= slice.start && turn < slice.start + slice.size,
-  )
-  return at === -1 ? null : at
-}
-
-/** How far round a point is from the top, clockwise, as a fraction of a turn. */
-function turnOf(x: number, y: number) {
-  const turn = Math.atan2(x, -y) / (Math.PI * 2)
-  return turn < 0 ? turn + 1 : turn
-}
-
-/**
- * The point `radius` px out from the centre, `turn` round from the top, as
- * fractions of a plot `width` by `height` px, and the side a tooltip there
- * opens on.
- */
-function outerPoint(
-  turn: number,
-  width: number,
-  height: number,
-  radius = Math.min(width, height) / 2,
-): ChartPoint {
-  const angle = turn * Math.PI * 2
-  const x = (width / 2 + radius * Math.sin(angle)) / width
-  const y = (height / 2 - radius * Math.cos(angle)) / height
-  // Above the ring's top half and below its bottom half, never beside it, where a tooltip
-  // that doesn't fit would flip across the hole.
-  const side = turn >= 0.25 && turn < 0.75 ? 'bottom' : 'top'
-  return { x, y, side }
-}
-
-/** A dash along a circle, in px: its length and the offset that starts it where it belongs. */
-interface SliceDash {
-  dash: string
-  offset: number
-  /** The slice has nothing to draw, so it shows nothing rather than a hairline. */
-  empty: boolean
-}
-
-/**
- * A slice as a dash along a circle `circumference` px round that starts at
- * the top: its length, and an offset that is never negative, as Safari
- * misplaces a negative one. Slices meet end to end; the gaps between them are
- * cut out by the ring's mask. The dash repeats a px later than the circle
- * ends, so a browser that measures the circle a little longer never draws a
- * slice a second time.
- */
-function sliceDash(slice: Slice, circumference: number, alone: boolean): SliceDash {
-  const period = circumference + 1
-  const length = slice.size * circumference
-  // Never a dash of nothing, which Safari draws as a hairline; a whole ring, the whole period,
-  // so it has no seam.
-  const drawn =
-    alone && slice.size > 0 ? period : Math.max(0.01, Math.min(length, circumference))
-  return {
-    dash: `${round(drawn)} ${round(period - drawn)}`,
-    offset: round(period - slice.start * circumference),
-    empty: length === 0,
-  }
-}
-
-function round(value: number) {
-  return Math.round(value * 100) / 100
-}
-
-/**
  * One ring: a circle for each slice, each drawn as its dash, in its
  * category's colour. While the chart enters, the slices draw round from the
  * top on `draw`; after that every change moves on `layout`, and a slice that
@@ -602,7 +448,10 @@ function DonutSlices({ ring: at }: { ring: number }) {
                 fill='white'
               />
               {chart.categories.map((category) => {
-                const slice = ring.slices.get(category.key) ?? { start: 0, size: 0 }
+                const slice = ring.slices.get(category.key) ?? {
+                  start: 0,
+                  size: 0,
+                }
                 return (
                   <SliceGap
                     key={category.key}
@@ -622,7 +471,10 @@ function DonutSlices({ ring: at }: { ring: number }) {
         )}
         <g mask={gaps ? `url(#${maskId})` : undefined}>
           {chart.categories.map((category) => {
-            const slice = ring.slices.get(category.key) ?? { start: 0, size: 0 }
+            const slice = ring.slices.get(category.key) ?? {
+              start: 0,
+              size: 0,
+            }
             const { dash, offset, empty } = sliceDash(slice, circumference, drawn === 1)
             const arriving = sliceDash(
               { start: slice.start, size: 0 },
@@ -916,96 +768,8 @@ function DonutChartLabels({
 }
 
 /**
- * The room outside labels take past the ring, in px, in a plot `width` by
- * `height` px whose widest label is `widest` px: a line of text above and
- * below, and the widest beside, each past its line.
- */
-function outsideRoom(width: number, height: number, widest: number) {
-  if (width === 0 || height === 0) return 0
-  const past = LEADER.gap + LEADER.length + LEADER.text
-  const half = Math.min(width, height) / 2 - 0.5
-  const edge = Math.min(width / 2 - past - widest, height / 2 - past - TEXT_HEIGHT)
-  return Math.ceil(Math.max(0, half - Math.max(0, edge)))
-}
-
-/**
- * A label's box past the ring, in px from the centre: the line ends `radius`
- * out, `turn` round, and the box sits against that end, away from the ring.
- */
-function outsideLabelBox(turn: number, radius: number, width: number) {
-  const angle = turn * Math.PI * 2
-  const sin = Math.sin(angle)
-  const cos = Math.cos(angle)
-  const x = radius * sin + (sin * width) / 2
-  const y = -radius * cos - (cos * TEXT_HEIGHT) / 2
-  return {
-    left: x - width / 2,
-    right: x + width / 2,
-    top: y - TEXT_HEIGHT / 2,
-    bottom: y + TEXT_HEIGHT / 2,
-  }
-}
-
-/**
- * Which outside labels show, by place: each slice with a share, unless its
- * box `widths` wide would overlap that of a bigger slice that shows. Labels
- * end `radius` px from the centre.
- */
-function outsideLabelsShown(
-  slices: readonly Slice[],
-  widths: readonly number[],
-  radius: number,
-): boolean[] {
-  const shown = slices.map(() => false)
-  const placed: ReturnType<typeof outsideLabelBox>[] = []
-  const order = slices
-    .map((slice, at) => ({ slice, at }))
-    .filter(({ slice }) => slice.size > 0)
-    .sort((a, b) => b.slice.size - a.slice.size)
-  for (const { slice, at } of order) {
-    const box = outsideLabelBox(slice.start + slice.size / 2, radius, widths[at] ?? 0)
-    const clear = placed.every(
-      (other) =>
-        box.right + 2 <= other.left ||
-        box.left - 2 >= other.right ||
-        box.bottom <= other.top ||
-        box.top >= other.bottom,
-    )
-    if (!clear) continue
-    placed.push(box)
-    shown[at] = true
-  }
-  return shown
-}
-
-/**
- * Whether a label `width` px wide fits on its slice, centred `radius` px
- * out on a ring `thickness` px thick: the upright box, measured across the
- * ring and along it, with a little room to spare.
- */
-function insideLabelFits(
-  slice: Slice,
-  width: number,
-  radius: number,
-  thickness: number,
-  gap: number,
-) {
-  if (slice.size <= 0) return false
-  const angle = (slice.start + slice.size / 2) * Math.PI * 2
-  const sin = Math.abs(Math.sin(angle))
-  const cos = Math.abs(Math.cos(angle))
-  const across = width * sin + TEXT_HEIGHT * cos
-  const along = width * cos + TEXT_HEIGHT * sin
-  const chord = 2 * radius * Math.sin(Math.min(Math.PI / 2, slice.size * Math.PI)) - gap
-  // A slice over half the ring is wide enough wherever the label sits along it.
-  const room = slice.size >= 0.5 ? Infinity : chord
-  return across + 4 <= thickness && along + 6 <= room
-}
-
-/**
- * One label, turned round the centre to its slice's middle and stood back
- * upright, so it travels along the ring with its slice. Outside, a short line
- * leads to it from the ring's `edge`. Memoised, as the slices are.
+ * One slice's label, on its slice or past the ring on a short line from its
+ * `edge`, in the words' colours there. Memoised, as the slices are.
  */
 const DonutLabel = memo(function DonutLabel({
   turn,
@@ -1019,7 +783,6 @@ const DonutLabel = memo(function DonutLabel({
 }: {
   turn: number
   radius: number
-  /** Before the plot is measured, one over the stand-in's shorter side, which `radius` is in; else null. */
   stretch: number | null
   /** The ring's edge, in px, for a label outside; null for one on its slice. */
   edge: number | null
@@ -1029,61 +792,27 @@ const DonutLabel = memo(function DonutLabel({
   dim: boolean
   children: string
 }) {
-  const angle = turn * Math.PI * 2
   return (
-    <div
+    <RadialLabel
+      turn={turn}
+      radius={radius}
+      stretch={stretch}
+      edge={edge}
+      centred={edge === null}
+      shown={shown}
       className={cn(
-        'absolute top-1/2 left-1/2 size-0 transition-none duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-mounted/chart:transition-[opacity]',
-        !shown && 'opacity-0',
+        'font-medium whitespace-nowrap tabular-nums',
+        edge === null
+          ? // On its slice: near white or near black, whichever reads on the slice's colour.
+            'text-[oklch(from_var(--label-on)_clamp(0.15,(0.57-l)*1000,0.99)_0_0)] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText]'
+          : dim
+            ? 'text-muted-foreground'
+            : 'text-foreground',
       )}
-      style={
-        {
-          '--label-turn': `${round(turn * 360)}deg`,
-          '--label-out':
-            stretch === null
-              ? `${-round(radius)}px`
-              : `calc(min(100cqw, 100cqh) * ${-round(radius * stretch * 100) / 100})`,
-        } as CSSProperties
-      }
+      style={{ '--label-on': color } as CSSProperties}
     >
-      {edge !== null && (
-        <div className='absolute size-0 [rotate:var(--label-turn)] transition-none duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:group-data-mounted/chart:transition-none group-data-mounted/chart:transition-[rotate]'>
-          <span
-            className='bg-muted-foreground/60 absolute left-0 w-px -translate-x-1/2 forced-colors:bg-[CanvasText]'
-            style={{ bottom: round(edge + LEADER.gap), height: LEADER.length }}
-          />
-        </div>
-      )}
-      {/*
-       * Out along its slice's middle and turned back as far, in one transform, so both turns
-       * move in step and the text stays upright all the way round.
-       */}
-      <div className='absolute size-0 [transform:rotate(var(--label-turn))_translateY(var(--label-out))_rotate(calc(var(--label-turn)*-1))] transition-none duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:group-data-mounted/chart:transition-none group-data-mounted/chart:transition-[transform]'>
-        <span
-          className={cn(
-            'absolute top-0 left-0 font-medium whitespace-nowrap tabular-nums transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] group-data-mounted/chart:transition-[color,translate] motion-reduce:group-data-mounted/chart:transition-[color]',
-            edge === null
-              ? // On its slice: near white or near black, whichever reads on the slice's colour.
-                'text-[oklch(from_var(--label-on)_clamp(0.15,(0.57-l)*1000,0.99)_0_0)] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText]'
-              : dim
-                ? 'text-muted-foreground'
-                : 'text-foreground',
-          )}
-          style={
-            {
-              '--label-on': color,
-              // Outside, against the end of its line and away from the ring; on its slice, centred.
-              translate:
-                edge === null
-                  ? '-50% -50%'
-                  : `calc(-50% + ${round(Math.sin(angle) * 50)}%) calc(-50% - ${round(Math.cos(angle) * 50)}%)`,
-            } as CSSProperties
-          }
-        >
-          {children}
-        </span>
-      </div>
-    </div>
+      {children}
+    </RadialLabel>
   )
 })
 
@@ -1206,14 +935,4 @@ export {
   DonutChartRing,
   type DonutLabelPosition,
   type DonutLabelSlice,
-  donutSlices,
-  foldPoint,
-  insideLabelFits,
-  outerPoint,
-  outsideLabelsShown,
-  outsideRoom,
-  ringBands,
-  sliceAt,
-  sliceDash,
-  turnOf,
 }

@@ -20,6 +20,7 @@ import {
   seriesColor,
   useChart,
   useChartActive,
+  useFromRest,
 } from '@/registry/lib/chart-core'
 import {
   type Band,
@@ -28,7 +29,6 @@ import {
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
 import {
-  type AlignedPoint,
   alignLines,
   brightSpan,
   bridgesThrough,
@@ -41,13 +41,10 @@ import {
   pointsAt,
 } from '@/registry/lib/line-path'
 import { placeholderBreatheClassName } from '@/registry/lib/placeholder'
-import { runningTransitions } from '@/registry/lib/resize'
 import {
-  progressOf,
   registerProgress,
   registerProperties,
-  runProgress,
-  stopProgress,
+  usePointsMove,
 } from '@/registry/lib/run-progress'
 import {
   type ComponentProps,
@@ -58,7 +55,6 @@ import {
   type Ref,
   type RefObject,
   use,
-  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -198,41 +194,6 @@ function LineFamilyFrame({
   )
 }
 
-/**
- * Whether the category lit now was lit from rest, for a frame: what marks
- * it then appears in place, since after a rest there is no move to explain,
- * and glides from there on. A rest begins once what marks the last lit
- * category, `element`, has finished leaving, so a pointer that
- * comes back while it still fades glides on from where it is.
- */
-function useFromRest(spotlit: number | null, element: RefObject<Element | null>) {
-  const [fromRest, setFromRest] = useState(false)
-  const previous = useRef(spotlit)
-  const rested = useRef(true)
-  useLayoutEffect(() => {
-    const before = previous.current
-    previous.current = spotlit
-    if (spotlit === null) {
-      const node = element.current
-      if (before === null || !node) return
-      rested.current = false
-      let frame = requestAnimationFrame(function check() {
-        if (runningTransitions(node).length === 0) rested.current = true
-        else frame = requestAnimationFrame(check)
-      })
-      return () => cancelAnimationFrame(frame)
-    }
-    setFromRest(before === null && rested.current)
-    return undefined
-  }, [spotlit, element])
-  useEffect(() => {
-    if (!fromRest) return
-    const frame = requestAnimationFrame(() => setFromRest(false))
-    return () => cancelAnimationFrame(frame)
-  }, [fromRest])
-  return fromRest
-}
-
 /** The number a series' points move on, from 0 where they were to 1 where they go. */
 const LINE_PROGRESS = '--line-progress'
 
@@ -351,15 +312,10 @@ function paint(
 /** How far past the plot's edges a series' clips reach, in px, so its caps and dots aren't cut. */
 const SPLIT_BLEED = 12
 
-/** Whether `element`'s points are on their way. */
-function moving(element: Element) {
-  return runningTransitions(element, { property: LINE_PROGRESS }).length > 0
-}
-
 /**
  * Moves a series' elements to `to` whenever it changes: from wherever they
  * are, even halfway through a move, on the frames of `--line-progress`. A
- * change of size alone redraws at once, as the plot's other parts move then.
+ * change of size or curve alone redraws at once.
  */
 function useLineMove(
   elements: LineElements,
@@ -370,80 +326,25 @@ function useLineMove(
   fill: boolean,
   start: readonly LinePoint[],
 ) {
-  // The move under way, or the last: its points matched up, and where it goes.
-  const state = useRef<{
-    aligned: AlignedPoint[]
-    to: readonly LinePoint[]
-  } | null>(null)
-  const mounting = useRef(true)
-  const latest = useRef({ curve, size, splitKey, fill })
-  useLayoutEffect(() => {
-    latest.current = { curve, size, splitKey, fill }
-  })
-  const signature = to
-    .map(
-      (point) =>
-        `${point.key}:${point.x.toFixed(5)}:${point.y.toFixed(5)}:${point.base?.toFixed(5)}:${point.defined}`,
-    )
-    .join('|')
-  useLayoutEffect(() => {
-    const atMount = mounting.current
-    mounting.current = false
-    const element = elements.progress.current
-    const was = state.current
-    // A series not drawn, while the chart loads or is empty, starts again from `start`.
-    if (!element || to.length === 0) {
-      if (element) stopProgress(element)
-      state.current = null
-      return
-    }
-    // From where it is drawn mid-move; at rest from where it went, so the points that came in
-    // only to grow or fold a stretch don't stay and pile up from move to move.
-    const shown = !was
-      ? []
-      : moving(element)
-        ? pointsAt(was.aligned, progressOf(element, LINE_PROGRESS))
-        : was.to
-    const now = shown.length > 0 ? shown : start
-    const aligned = alignLines(now, to, latest.current.curve)
-    state.current = { aligned, to }
-    const draw = (points: readonly LinePoint[], moving = false) =>
-      paint(
-        elements,
-        drawingOf(
-          points,
-          latest.current.curve,
-          latest.current.size,
-          latest.current.splitKey,
-          latest.current.fill,
-        ),
-        points,
-        moving,
+  usePointsMove(
+    elements.progress,
+    LINE_PROGRESS,
+    to,
+    to
+      .map(
+        (point) =>
+          `${point.key}:${point.x.toFixed(5)}:${point.y.toFixed(5)}:${point.base?.toFixed(5)}:${point.defined}`,
       )
-    // A chart that loads with its data shows its series where they are, with no move, until it
-    // has painted: the value axis may still settle on its ticks as the page hydrates.
-    if (atMount || !element.closest('[data-mounted]')) {
-      stopProgress(element)
-      draw(to)
-      return
-    }
-    runProgress(element, LINE_PROGRESS, (progress, done) =>
-      done ? draw(to) : draw(pointsAt(aligned, progress), true),
-    )
-    return () => stopProgress(element)
-    // The points are compared by their signature, so a new array of the same points moves nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature])
-  // A new size or curve with no new points redraws where the series is: on its way, mid-move,
-  // over the end the render has just written.
-  useLayoutEffect(() => {
-    const element = elements.progress.current
-    const move = element && moving(element) ? state.current : null
-    const points =
-      element && move ? pointsAt(move.aligned, progressOf(element, LINE_PROGRESS)) : to
-    paint(elements, drawingOf(points, curve, size, splitKey, fill), points, move !== null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.width, size.height, curve, splitKey, fill])
+      .join('|'),
+    start,
+    `${size.width}|${size.height}|${curve}|${splitKey}|${fill}`,
+    {
+      align: (from, next) => alignLines(from, next, curve),
+      at: pointsAt,
+      draw: (points, moving) =>
+        paint(elements, drawingOf(points, curve, size, splitKey, fill), points, moving),
+    },
+  )
 }
 
 interface LineSeriesProps extends Omit<ComponentProps<'div'>, 'children' | 'color'> {

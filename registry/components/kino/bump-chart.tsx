@@ -13,6 +13,7 @@ import {
   swatchClassName,
   slideLine,
   swatchStyle,
+  tooltipQuietClassName,
   useCategoryChart,
   useChart,
 } from '@/registry/lib/chart-core'
@@ -30,6 +31,7 @@ import {
   numberOf,
   plotPoint,
   type Span,
+  stepThrough,
 } from '@/registry/lib/chart-math'
 import { CutTooltip } from '@/registry/lib/cut'
 import { heightAt, type LinePoint } from '@/registry/lib/line-path'
@@ -227,10 +229,7 @@ function stepRank(
   from: string | null,
   step: -1 | 1,
 ): string | null {
-  const order = rankOrder(row, keys)
-  const at = from === null ? -1 : order.indexOf(from)
-  if (at === -1) return order[0] ?? null
-  return order[Math.min(order.length - 1, Math.max(0, at + step))] ?? null
+  return stepThrough(rankOrder(row, keys), from, step)
 }
 
 /**
@@ -504,7 +503,7 @@ function BumpTooltipContent({ index }: { index: number }) {
               data-lit={emphasis === key ? '' : undefined}
               className='group/row col-span-full grid grid-cols-subgrid items-center'
             >
-              <span className={cn(tipQuiet, 'text-end tabular-nums')}>
+              <span className={cn(tooltipQuietClassName, 'text-end tabular-nums')}>
                 {rank === null ? null : rankText(rank)}
               </span>
               <span
@@ -512,7 +511,7 @@ function BumpTooltipContent({ index }: { index: number }) {
                 className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
                 style={swatchStyle(key, 'solid')}
               />
-              <span className={cn(tipQuiet, 'min-w-0 truncate')}>
+              <span className={cn(tooltipQuietClassName, 'min-w-0 truncate')}>
                 {config[key]?.label ?? key}
               </span>
               {/* A move up or down, in places; none says nothing. */}
@@ -520,7 +519,7 @@ function BumpTooltipContent({ index }: { index: number }) {
                 change={move === 0 ? null : move}
                 locale={locale}
                 format={rankText}
-                className={cn(tipQuiet, 'text-end')}
+                className={cn(tooltipQuietClassName, 'text-end')}
               />
               <span dir='auto' className='text-end font-medium tabular-nums'>
                 {amount === null ? null : valueText(amount)}
@@ -532,10 +531,6 @@ function BumpTooltipContent({ index }: { index: number }) {
     </div>
   )
 }
-
-/** A tooltip row's quieter text, in full colour on the row of the item brought forward. */
-const tipQuiet =
-  'text-background/75 transition-colors duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-lit/row:text-background forced-colors:text-[CanvasText]'
 
 type BumpProps = Omit<
   LineSeriesProps,
