@@ -116,7 +116,7 @@ function FeatureLink({ className, children, ...props }: ComponentProps<'a'>) {
       {...props}
     >
       {children}
-      <NudgeArrow className='size-4' />
+      <NudgeArrow />
     </a>
   )
 }

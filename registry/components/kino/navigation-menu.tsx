@@ -278,7 +278,7 @@ function NavigationMenuTrigger({
       {...props}
     >
       {children}
-      <NavigationMenuPrimitive.Icon className="text-muted-foreground transition-transform duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-popup-open:rotate-180 motion-reduce:transition-none [&_svg:not([class*='size-'])]:size-3.5">
+      <NavigationMenuPrimitive.Icon className="text-muted-foreground transition-transform duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-popup-open:rotate-180 motion-reduce:transition-none [&_svg:not([class*='size-'])]:size-4">
         <IconPlaceholder
           lucide='ChevronDownIcon'
           tabler='IconChevronDown'

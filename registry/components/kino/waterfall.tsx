@@ -817,12 +817,7 @@ function WaterfallSpan({
           <span dir='auto' className='min-w-0 flex-1 truncate text-left rtl:text-right'>
             {label}
           </span>
-          {failed && (
-            <NoticeIcon
-              type='error'
-              className='h-auto [&_svg:not([class*=size-])]:size-3.5'
-            />
-          )}
+          {failed && <NoticeIcon type='error' className='h-auto' />}
           <span
             aria-hidden
             dir='auto'

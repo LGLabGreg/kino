@@ -122,7 +122,7 @@ function BreadcrumbItem({ className, ...props }: ComponentProps<'li'>) {
  * highlight under it is the shape of a small control at every density.
  */
 const crumbClassName =
-  "inline-flex h-(--control-height-xs) max-w-full min-w-0 items-center gap-1 rounded-(--control-radius-xs) px-[calc(var(--control-padding)*0.8)] whitespace-nowrap [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+  "inline-flex h-(--control-height-xs) max-w-full min-w-0 items-center gap-1 rounded-(--control-radius-xs) px-[calc(var(--control-padding)*0.8)] whitespace-nowrap [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 const crumbLinkClassName =
   'transition-colors duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden data-glided:text-foreground forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText]'
@@ -177,7 +177,7 @@ function BreadcrumbSeparator({ className, children, ...props }: ComponentProps<'
       role='presentation'
       aria-hidden
       className={cn(
-        "text-muted-foreground/70 inline-flex shrink-0 items-center data-collapsed:hidden [&_svg:not([class*='size-'])]:size-3.5 rtl:[&>svg]:rotate-180",
+        "text-muted-foreground/70 inline-flex shrink-0 items-center data-collapsed:hidden [&_svg:not([class*='size-'])]:size-4 rtl:[&>svg]:rotate-180",
         className,
       )}
       {...props}

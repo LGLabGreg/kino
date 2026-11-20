@@ -75,7 +75,7 @@ function heroEnter(part: HeroPart) {
 /**
  * An arrow that points on along the line, and nudges that way while the link
  * around it, marked `group/nudge`, is hovered: the Hero's announcement and a
- * feature's link. Its size comes from `className`.
+ * feature's link. It sits beside text, so it is 16px, as every icon there is.
  */
 function NudgeArrow({ className }: { className?: string }) {
   return (
@@ -87,7 +87,7 @@ function NudgeArrow({ className }: { className?: string }) {
       remixicon='RiArrowRightLine'
       aria-hidden
       className={cn(
-        'shrink-0 transition-transform duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/nudge:translate-x-0.5 motion-reduce:transition-none rtl:-scale-x-100 rtl:group-hover/nudge:-translate-x-0.5',
+        'size-4 shrink-0 transition-transform duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/nudge:translate-x-0.5 motion-reduce:transition-none rtl:-scale-x-100 rtl:group-hover/nudge:-translate-x-0.5',
         className,
       )}
     />
@@ -125,7 +125,7 @@ function HeroAnnouncement({
           <bdi data-cut className='min-w-0 truncate'>
             {children}
           </bdi>
-          <NudgeArrow className='text-muted-foreground size-3.5' />
+          <NudgeArrow className='text-muted-foreground' />
         </a>
       }
     />
