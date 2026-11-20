@@ -14,7 +14,6 @@ import {
   createContext,
   type TransitionEvent,
   use,
-  useRef,
   useState,
 } from 'react'
 
@@ -30,7 +29,7 @@ type RollState = { phase: 'still' } | { phase: 'rolling'; trend: 1 | -1 }
 
 const STILL: RollState = { phase: 'still' }
 
-const ROLLING_REASONS = new Set<NumberFieldPrimitive.Root.ChangeEventReason>([
+const STEP_REASONS = new Set<NumberFieldPrimitive.Root.ChangeEventReason>([
   'increment-press',
   'decrement-press',
   'keyboard',
@@ -44,9 +43,17 @@ function rollOf(
   next: number | null,
   prev: number | null,
 ): RollState {
-  if (!ROLLING_REASONS.has(reason) || next === null || prev === null || next === prev) {
-    return STILL
-  }
+  return isStep(reason) ? rollTo(next, prev) : STILL
+}
+
+/** Whether a change of this reason stepped the value, by a button, a key, the wheel or a scrub, rather than typing or pasting it. */
+function isStep(reason: NumberFieldPrimitive.Root.ChangeEventReason) {
+  return STEP_REASONS.has(reason)
+}
+
+/** The roll from `prev` to `next`: none when either is empty or they are the same. */
+function rollTo(next: number | null, prev: number | null): RollState {
+  if (next === null || prev === null || next === prev) return STILL
   return { phase: 'rolling', trend: next > prev ? 1 : -1 }
 }
 
@@ -61,8 +68,14 @@ function NumberField({
   ...props
 }: Omit<NumberFieldPrimitive.Root.Props, 'className'> & { className?: string }) {
   const [roll, setRoll] = useState<RollState>(STILL)
-  // The value it showed last, when the field keeps its own; a parent that owns it may change it between steps.
-  const shown = useRef<number | null>(props.defaultValue ?? null)
+  // The value it showed last. A parent that owns the value may change it on its own, as a pager's Next does: that rolls too.
+  const [shown, setShown] = useState<number | null>(
+    props.value === undefined ? (props.defaultValue ?? null) : props.value,
+  )
+  if (props.value !== undefined && props.value !== shown) {
+    setShown(props.value)
+    setRoll(rollTo(props.value, shown))
+  }
   const settle = () => setRoll(STILL)
 
   return (
@@ -71,9 +84,8 @@ function NumberField({
         data-slot='number-field'
         className={cn('flex min-w-0 flex-col', className)}
         onValueChange={(value, details) => {
-          const prev = props.value === undefined ? shown.current : props.value
-          shown.current = value
-          setRoll(rollOf(details.reason, value, prev))
+          setShown(value)
+          setRoll(rollOf(details.reason, value, shown))
           onValueChange?.(value, details)
         }}
         {...props}
@@ -293,6 +305,7 @@ function NumberFieldScrubArea({
 }
 
 export {
+  isStep,
   NumberField,
   NumberFieldDecrement,
   NumberFieldGroup,

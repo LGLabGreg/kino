@@ -3,6 +3,7 @@
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { daysBetween, isISODate, useLocale } from '@/registry/lib/dates'
+import { clampPage, pageCountOf, pageForSize, pageRange } from '@/registry/lib/pages'
 import {
   columnFacetingFeature,
   columnFilteringFeature,
@@ -26,7 +27,14 @@ import {
   type Updater,
   useTable,
 } from '@tanstack/react-table'
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 /*
  * The data behind a Table: what it sorts, searches, filters, pages, picks
@@ -374,18 +382,6 @@ function activeFilters(
   return active
 }
 
-/** The page shown: within the pages there are, never before the first. */
-function clampPage(page: number, pageCount: number): number {
-  if (!Number.isFinite(page)) return 1
-  return Math.min(Math.max(1, Math.trunc(page)), Math.max(1, pageCount))
-}
-
-/** How many pages `count` rows take; one page when nothing pages them. */
-function pageCountOf(count: number, pageSize: number | undefined): number {
-  if (!pageSize || pageSize <= 0) return 1
-  return Math.max(1, Math.ceil(count / pageSize))
-}
-
 /** The items on `page`, counted from 1; all of them when nothing pages them. */
 function pageSlice<T>(
   items: readonly T[],
@@ -394,18 +390,6 @@ function pageSlice<T>(
 ): T[] {
   if (!pageSize || pageSize <= 0) return [...items]
   return items.slice((page - 1) * pageSize, page * pageSize)
-}
-
-/** The rows a page shows, from 1, out of `count`: 11–20 of 42, or 0–0 of 0. */
-function pageRange(
-  page: number,
-  pageSize: number | undefined,
-  count: number,
-): { from: number; to: number; of: number } {
-  if (count === 0) return { from: 0, to: 0, of: 0 }
-  if (!pageSize || pageSize <= 0) return { from: 1, to: count, of: count }
-  const from = (page - 1) * pageSize + 1
-  return { from: Math.min(from, count), to: Math.min(page * pageSize, count), of: count }
 }
 
 /** Everything picked once this page's boxes say `pageValue`: the page's own picks replaced, the rest kept in order. */
@@ -514,9 +498,18 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
     if (allMatchingGiven && !allMatchingFlag) setAllMatchingFlag(false)
   })
 
+  // A change made since the last render, so a second one in the same event, such as a pager's
+  // new page after its new page size, builds on it rather than on the view this render saw.
+  const changedRef = useRef<TableView | null>(null)
+  useLayoutEffect(() => {
+    changedRef.current = null
+  })
+
   /** One change to the view, told once to each listener, so a server fetches once. */
   const changeView = (patch: Partial<TableView>) => {
-    const next: TableView = { ...view, ...patch }
+    const was = changedRef.current ?? view
+    const next: TableView = { ...was, ...patch }
+    changedRef.current = next
     // The caller's slices win where given; the rest are kept here.
     setOwnView(next)
     const told: [keyof TableView, ((value: never) => void) | undefined][] = [
@@ -529,12 +522,11 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
       ['columnWidths', options.onColumnWidthsChange],
     ]
     for (const [key, onChange] of told) {
-      if (key in patch && !Object.is(patch[key], view[key]))
-        onChange?.(next[key] as never)
+      if (key in patch && !Object.is(patch[key], was[key])) onChange?.(next[key] as never)
     }
     options.onViewChange?.(next)
     // Every row that matched is no longer every row that matches.
-    if (allMatchingFlag && viewKey(next) !== viewKey(view)) setAllMatchingFlag(false)
+    if (allMatchingFlag && viewKey(next) !== viewKey(was)) setAllMatchingFlag(false)
   }
 
   // The search the field shows, ahead of the one the rows follow while it waits.
@@ -780,10 +772,14 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
   }
 
   const setPage = (next: number) => {
-    const to = clampPage(next, pageCount)
-    if (to === page) return
+    // Against the pages there are at the size this event already set, if it set one.
+    const sized = changedRef.current?.pageSize
+    const count = sized ? pageCountOf(rowCount, sized) : pageCount
+    const to = clampPage(next, count)
+    // Already there, also when a change earlier in the same event moved it, as a new page size does.
+    if (to === (changedRef.current?.page ?? page)) return
     changeView({ page: to })
-    announce(messages.page(to, pageCount))
+    announce(messages.page(to, count))
   }
 
   const facets = (id: string): TableOption[] => {
@@ -881,7 +877,12 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
     pageCount,
     setPage,
     pageSize,
-    setPageSize: (size: number) => changeView({ pageSize: size, page: 1 }),
+    /** A new size keeps the first row the page showed. */
+    setPageSize: (size: number) =>
+      changeView({
+        pageSize: size,
+        page: pageForSize(page, pageSize ?? rowCount, size),
+      }),
     /** “11–20 of 42”. */
     range: pageRange(page, pageSize, rowCount),
     /**
@@ -1056,7 +1057,6 @@ function resolve<T>(updater: Updater<T>, current: T): T {
 export type TableData<Row extends object> = ReturnType<typeof useTableData<Row>>
 
 export {
-  clampPage,
   cleanHidden,
   cleanSort,
   compareValues,
@@ -1064,8 +1064,6 @@ export {
   kindOf,
   matchesOptions,
   mergePageSelection,
-  pageCountOf,
-  pageRange,
   csvOf,
   pageSlice,
   swapsRows,
