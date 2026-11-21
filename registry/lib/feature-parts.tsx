@@ -1,4 +1,4 @@
-import { NudgeArrow } from '@/registry/lib/hero-parts'
+import { NudgeLink } from '@/registry/lib/hero-parts'
 import type { HEADING_BELOW, SectionHeadingLevel } from '@/registry/lib/section-heading'
 import { Studio } from '@/registry/lib/studio'
 import type { ComponentProps, ReactNode } from 'react'
@@ -105,25 +105,13 @@ function FeatureWords({
  * that nudges along the line on hover, as the Hero's announcement's does. Name what it's about for a screen
  * reader, since every feature's link may read Learn more.
  */
-function FeatureLink({ className, children, ...props }: ComponentProps<'a'>) {
-  return (
-    <a
-      data-slot='feature-link'
-      className={cn(
-        'group/nudge text-foreground inline-flex min-h-6 items-center gap-1 font-medium underline-offset-4 hover:underline focus-visible:rounded-(--control-radius-xs) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden',
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <NudgeArrow />
-    </a>
-  )
+function FeatureLink(props: ComponentProps<'a'>) {
+  return <NudgeLink data-slot='feature-link' {...props} />
 }
 
-/** Where a picture sits on a stage: centred, with room around it. */
+/** Where a picture sits on a stage: centred, with more room around it once the stage, a `stage` container, has it. */
 const featurePictureClassName =
-  'flex w-full min-w-0 items-center justify-center p-3 @md/features:p-6'
+  'flex w-full min-w-0 items-center justify-center p-3 @xs/stage:p-6'
 
 /**
  * The stage a picture stands on: a grey studio, lit softly behind it. Hidden
@@ -137,7 +125,7 @@ function FeatureStage({ className, children, ...props }: ComponentProps<'div'>) 
       data-slot='feature-stage'
       // Its width set, so on a narrow column its min height lowers an aspect ratio rather than widening it.
       className={cn(
-        'relative isolate flex min-h-64 w-full min-w-0 overflow-hidden',
+        '@container/stage relative isolate flex min-h-64 w-full min-w-0 overflow-hidden',
         className,
       )}
       {...props}

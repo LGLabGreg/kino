@@ -94,6 +94,27 @@ function NudgeArrow({ className }: { className?: string }) {
   )
 }
 
+/**
+ * A quiet link: its words, then an arrow that nudges along the line on
+ * hover. A feature's link to more, and the Call to action's second way in
+ * beside its main button.
+ */
+function NudgeLink({ className, children, ...props }: ComponentProps<'a'>) {
+  return (
+    <a
+      data-slot='nudge-link'
+      className={cn(
+        'group/nudge text-foreground inline-flex min-h-6 items-center gap-1 font-medium underline-offset-4 hover:underline focus-visible:rounded-(--control-radius-xs) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <NudgeArrow />
+    </a>
+  )
+}
+
 /** A link to what's new, above the title: a badge, a line and an arrow that nudges on hover. */
 function HeroAnnouncement({
   badge,
@@ -132,10 +153,19 @@ function HeroAnnouncement({
   )
 }
 
-/** The title's look: large, tight and balanced across its lines. */
-const heroTitleClassName =
-  // Display type closes up: a body's tracking leaves gaps between letters this large.
-  'text-4xl leading-[1.05] font-semibold tracking-[-0.035em] text-balance @2xl/hero:text-5xl @5xl/hero:text-6xl'
+/**
+ * A landing page's display type, at any size: tight and balanced across its
+ * lines. Display type closes up: a body's tracking leaves gaps between
+ * letters this large. The Hero's title and the Call to action's.
+ */
+const displayTitleClassName =
+  'leading-[1.05] font-semibold tracking-[-0.035em] text-balance'
+
+/** The title's look: display type, larger as the hero widens. */
+const heroTitleClassName = cn(
+  displayTitleClassName,
+  'text-4xl @2xl/hero:text-5xl @5xl/hero:text-6xl',
+)
 
 /**
  * What the hero stands on: a fine grid that fades out from the top centre,
@@ -300,6 +330,7 @@ function HeroShot({
 }
 
 export {
+  displayTitleClassName,
   HeroAnnouncement,
   HeroBackdrop,
   heroDescriptionClassName,
@@ -309,5 +340,6 @@ export {
   HeroShot,
   HeroWords,
   NudgeArrow,
+  NudgeLink,
   pageColumnClassName,
 }

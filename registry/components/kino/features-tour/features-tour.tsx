@@ -105,7 +105,8 @@ function FeaturesTour({
           </TabsList>
           {/* One frame for every feature: only the picture changes as the pick does. */}
           <div className='min-w-0'>
-            <div className='relative'>
+            {/* The stage's room, for the picture laid over it. */}
+            <div className='@container/stage relative'>
               <HeroShot decorative>
                 <FeatureStage className='aspect-[4/3]' />
               </HeroShot>

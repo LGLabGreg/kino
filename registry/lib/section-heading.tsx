@@ -23,6 +23,7 @@ function SectionHeading({
   heading = 'h2',
   align = 'center',
   className,
+  titleClassName,
   children,
 }: {
   /** The title's id, for the section's `aria-labelledby`. */
@@ -34,6 +35,8 @@ function SectionHeading({
   heading?: SectionHeadingLevel
   align?: 'center' | 'start'
   className?: string
+  /** Sizes of the title's own, where a section speaks louder, as a Call to action's close does. */
+  titleClassName?: string
   /** Below the words: a switch, or a link to more. */
   children?: ReactNode
 }) {
@@ -60,7 +63,10 @@ function SectionHeading({
         ) : null}
         <Title
           id={id}
-          className='text-3xl font-semibold tracking-tight text-balance @3xl:text-4xl'
+          className={cn(
+            'text-3xl font-semibold tracking-tight text-balance @3xl:text-4xl',
+            titleClassName,
+          )}
         >
           {/* Its own direction, so its words read the same way round right to left. */}
           <bdi>{title}</bdi>
