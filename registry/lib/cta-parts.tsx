@@ -1,4 +1,4 @@
-import { displayTitleClassName, pageColumnClassName } from '@/registry/lib/hero-parts'
+import { displayTitleClassName, sectionColumnClassName } from '@/registry/lib/hero-parts'
 import { SectionHeading, type SectionHeadingLevel } from '@/registry/lib/section-heading'
 import type { ComponentProps, ReactNode } from 'react'
 
@@ -33,7 +33,7 @@ const ctaSectionClassName =
 /** The title closes the page, so it speaks louder than a section's: the Hero's display type, with room under it. */
 const ctaTitleClassName = cn(displayTitleClassName, 'mb-2 text-4xl @3xl:text-5xl')
 
-const ctaColumnClassName = cn(pageColumnClassName, 'py-16 @3xl/cta:py-24')
+const ctaColumnClassName = sectionColumnClassName
 
 /** The line under the action: quiet, and short enough to read at a glance. */
 function CtaNote({ children }: { children: ReactNode }) {

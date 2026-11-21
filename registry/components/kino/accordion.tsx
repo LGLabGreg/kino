@@ -1,17 +1,14 @@
 'use client'
 
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import {
-  collapseClassName,
-  followPanelContent,
-  runningTransitions,
-} from '@/registry/lib/resize'
-import { scrollerOf } from '@/registry/lib/scroll'
+import { collapseClassName, followPanelContent } from '@/registry/lib/resize'
+import { holdAtEdge, topEdge } from '@/registry/lib/scroll'
 import { Accordion as AccordionPrimitive } from '@base-ui/react/accordion'
 import { cva } from 'class-variance-authority'
 import {
   type ComponentProps,
   createContext,
+  createElement,
   type MouseEvent,
   use,
   useEffect,
@@ -25,8 +22,11 @@ type AccordionVariant = 'default' | 'card'
 /** Each part reads its accordion's variant here, so one nested in a panel keeps its own. */
 const AccordionVariantContext = createContext<AccordionVariant>('default')
 
-/** Frames with nothing moving before the pressed trigger is let go. */
-const SETTLE_FRAMES = 4
+/** The element each trigger's heading is: a level under the heading the accordion sits under. */
+type AccordionHeading = 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+
+const AccordionHeadingContext = createContext<AccordionHeading>('h3')
+
 /** The room left above a trigger held at the top edge, so its focus ring and its card's border show. */
 const EDGE_GAP_PX = 8
 
@@ -45,50 +45,40 @@ function keepPressedTriggerInView(event: MouseEvent<HTMLElement>) {
       ? event.target.closest<HTMLElement>('[data-slot=accordion-trigger]')
       : null
   if (!trigger || trigger.closest('[data-slot=accordion]') !== root) return
-  const scroller = scrollerOf(root)
-  const edge =
-    (scroller ? scroller.getBoundingClientRect().top : 0) +
-    (Number.parseFloat(
-      getComputedStyle(scroller ?? document.documentElement).scrollPaddingTop,
-    ) || 0) +
-    (Number.parseFloat(getComputedStyle(trigger).scrollMarginTop) || 0) +
-    EDGE_GAP_PX
   // A trigger already cut by the edge when pressed stays where it is.
-  const line = Math.min(trigger.getBoundingClientRect().top, edge)
-  let quiet = 0
-  const frame = () => {
-    if (!trigger.isConnected) return
-    const over = trigger.getBoundingClientRect().top - line
-    if (over < -0.5) (scroller ?? window).scrollBy({ top: over, behavior: 'instant' })
-    const moving =
-      runningTransitions(root, { property: 'height', subtree: true }).length > 0
-    quiet = moving ? 0 : quiet + 1
-    if (quiet < SETTLE_FRAMES) requestAnimationFrame(frame)
-  }
-  requestAnimationFrame(frame)
+  holdAtEdge(
+    trigger,
+    root,
+    Math.min(trigger.getBoundingClientRect().top, topEdge(trigger, EDGE_GAP_PX)),
+  )
 }
 
 function Accordion({
   className,
   variant = 'default',
+  heading = 'h3',
   onClick,
   ...props
 }: Omit<AccordionPrimitive.Root.Props, 'className'> & { className?: string } & {
   variant?: AccordionVariant
+  /** Each trigger's heading level: one under the heading the accordion sits under. */
+  heading?: AccordionHeading
 }) {
   return (
-    <AccordionVariantContext value={variant}>
-      <AccordionPrimitive.Root
-        data-slot='accordion'
-        data-variant={variant}
-        className={cn('flex w-full min-w-0 flex-col', className)}
-        onClick={(event) => {
-          onClick?.(event)
-          keepPressedTriggerInView(event)
-        }}
-        {...props}
-      />
-    </AccordionVariantContext>
+    <AccordionHeadingContext value={heading}>
+      <AccordionVariantContext value={variant}>
+        <AccordionPrimitive.Root
+          data-slot='accordion'
+          data-variant={variant}
+          className={cn('flex w-full min-w-0 flex-col', className)}
+          onClick={(event) => {
+            onClick?.(event)
+            keepPressedTriggerInView(event)
+          }}
+          {...props}
+        />
+      </AccordionVariantContext>
+    </AccordionHeadingContext>
   )
 }
 
@@ -162,8 +152,12 @@ function AccordionTrigger({
   className?: string
 }) {
   const variant = use(AccordionVariantContext)
+  const heading = use(AccordionHeadingContext)
   return (
-    <AccordionPrimitive.Header className='flex min-w-0 rounded-[inherit]'>
+    <AccordionPrimitive.Header
+      render={(headerProps) => createElement(heading, headerProps)}
+      className='flex min-w-0 rounded-[inherit]'
+    >
       <AccordionPrimitive.Trigger
         data-slot='accordion-trigger'
         className={cn(accordionTriggerVariants({ variant }), className)}
@@ -281,3 +275,4 @@ function AccordionContent({
 }
 
 export { Accordion, AccordionItem, AccordionTrigger, AccordionContent }
+export type { AccordionHeading }

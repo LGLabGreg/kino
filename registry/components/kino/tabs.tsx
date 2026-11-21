@@ -15,6 +15,7 @@ import {
   pillRowClassName,
   pillTrackClassName,
 } from '@/registry/lib/pill'
+import { mergeRefs } from '@/registry/lib/refs'
 import { inertCopy, markResizing, transitionsQuiet } from '@/registry/lib/resize'
 import { revealInRow } from '@/registry/lib/scroll'
 import { SwapIcon } from '@/registry/lib/swap'
@@ -26,6 +27,7 @@ import {
   type ReactNode,
   use,
   useEffect,
+  useMemo,
   useRef,
 } from 'react'
 
@@ -43,6 +45,9 @@ const TabsValueContext = createContext<unknown>(NO_TAB)
 /** Why Base UI picks a tab on its own: it keeps those picks even when cancelled. */
 const AUTOMATIC_PICKS = ['initial', 'missing', 'disabled'] as const
 
+/** Whether the panels stay in the page for the browser's find, as `Tabs`' `hiddenUntilFound` says. */
+const TabsUntilFoundContext = createContext(false)
+
 /** Whether the tab around it is picked, for its icon. */
 const TabsActiveContext = createContext(false)
 
@@ -51,8 +56,16 @@ function Tabs({
   value,
   defaultValue,
   onValueChange,
+  hiddenUntilFound = false,
   ...props
-}: Omit<TabsPrimitive.Root.Props, 'className'> & { className?: string }) {
+}: Omit<TabsPrimitive.Root.Props, 'className'> & {
+  className?: string
+  /**
+   * Keeps every panel in the page, hidden until the browser's find in page
+   * lands in one, which then picks its tab.
+   */
+  hiddenUntilFound?: boolean
+}) {
   // Base UI's own default, so the two agree until it reports a change.
   const [picked, follow] = useFollowedValue(
     value,
@@ -62,19 +75,21 @@ function Tabs({
     { automatic: AUTOMATIC_PICKS },
   )
   return (
-    <TabsValueContext value={picked}>
-      <TabsPrimitive.Root
-        data-slot='tabs'
-        className={cn(
-          'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
-          className,
-        )}
-        value={value}
-        defaultValue={defaultValue}
-        onValueChange={follow}
-        {...props}
-      />
-    </TabsValueContext>
+    <TabsUntilFoundContext value={hiddenUntilFound}>
+      <TabsValueContext value={picked}>
+        <TabsPrimitive.Root
+          data-slot='tabs'
+          className={cn(
+            'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
+            className,
+          )}
+          value={value}
+          defaultValue={defaultValue}
+          onValueChange={follow}
+          {...props}
+        />
+      </TabsValueContext>
+    </TabsUntilFoundContext>
   )
 }
 
@@ -314,13 +329,14 @@ function TabsTrigger({
 
 /**
  * A tab's icon: `children`, and `activeIcon` while the tab is picked. It
- * rolls as a Toggle's icon does, to the other icon or to itself.
+ * rolls to the other icon as a Toggle's icon does. A tab whose icon stays
+ * the same takes it as a plain child: rolling to itself shows nothing change.
  */
 function TabsIcon({
   activeIcon,
   children,
 }: {
-  activeIcon?: ReactNode
+  activeIcon: ReactNode
   children: ReactNode
 }) {
   return (
@@ -338,11 +354,27 @@ function TabsIcon({
 
 function TabsContent({
   className,
+  keepMounted,
+  ref,
   ...props
 }: Omit<TabsPrimitive.Panel.Props, 'className'> & { className?: string }) {
+  const untilFound = use(TabsUntilFoundContext)
+  const picked = use(TabsValueContext) === props.value
+  const own = useRef<HTMLDivElement>(null)
+  const panelRef = useMemo(() => mergeRefs(own, ref), [ref])
+
+  // A panel not picked stays in the page, hidden until the browser's find lands in it.
+  useEffect(() => {
+    const panel = own.current
+    if (!untilFound || picked || !panel) return
+    return hideUntilFound(panel)
+  }, [untilFound, picked])
+
   return (
     <TabsPrimitive.Panel
+      ref={panelRef}
       data-slot='tabs-content'
+      keepMounted={keepMounted || untilFound}
       // Base UI keeps the old panel mounted while the new one enters; hiding it at once stops the two overlapping.
       className={cn(
         'focus-visible:ring-ring/50 min-w-0 rounded-(--control-radius-capped) text-sm focus-visible:ring-3 focus-visible:outline-hidden transition-[opacity,translate] duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-[orientation=vertical]/tabs:flex-1 data-ending-style:hidden data-starting-style:opacity-0 motion-safe:data-starting-style:translate-y-(--tabs-content-rise,6px)',
@@ -351,6 +383,34 @@ function TabsContent({
       {...props}
     />
   )
+}
+
+/**
+ * Hides a panel until the browser's find in page lands in it, then picks its
+ * tab, as a person pressing it would. React and Base UI write `hidden` as a
+ * yes or no, Base UI once the panel has finished leaving, so the value is
+ * put back each time they write it. Kept outside the component: it reaches
+ * its tab through the page.
+ */
+function hideUntilFound(panel: HTMLElement) {
+  const hide = () => {
+    if (panel.getAttribute('hidden') !== 'until-found')
+      panel.setAttribute('hidden', 'until-found')
+  }
+  hide()
+  const writes = new MutationObserver(() => {
+    if (panel.hasAttribute('hidden')) hide()
+  })
+  writes.observe(panel, { attributes: true, attributeFilter: ['hidden'] })
+  const found = () => {
+    const tab = panel.getAttribute('aria-labelledby')
+    if (tab) document.getElementById(tab)?.click()
+  }
+  panel.addEventListener('beforematch', found)
+  return () => {
+    writes.disconnect()
+    panel.removeEventListener('beforematch', found)
+  }
 }
 
 /**

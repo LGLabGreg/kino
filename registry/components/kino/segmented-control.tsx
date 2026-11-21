@@ -212,13 +212,15 @@ function SegmentedControlItem<Value>({
 
 /**
  * A segment's icon: `children`, and `checkedIcon` while the segment is
- * picked. It rolls as a Tab's icon does, to the other icon or to itself.
+ * picked. It rolls to the other icon as a Tab's icon does. A segment whose
+ * icon stays the same takes it as a plain child: rolling to itself shows
+ * nothing change.
  */
 function SegmentedControlIcon({
   checkedIcon,
   children,
 }: {
-  checkedIcon?: ReactNode
+  checkedIcon: ReactNode
   children: ReactNode
 }) {
   return (

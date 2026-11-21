@@ -740,9 +740,8 @@ function SwapText({ text, className }: { text: string; className?: string }) {
 }
 
 /**
- * An icon that rolls when something turns on, such as a pressed toggle or a
- * picked tab, to `onIcon` or to itself, and back when it turns off. With one
- * icon, reduced motion changes nothing: there is nothing to show.
+ * An icon that rolls to `onIcon` when something turns on, such as a pressed
+ * toggle or a picked tab, and back when it turns off.
  */
 function SwapIcon({
   on,
@@ -752,7 +751,7 @@ function SwapIcon({
   children,
 }: {
   on: boolean
-  onIcon?: ReactNode
+  onIcon: ReactNode
   /** The `data-slot` of the icon's box, such as `toggle-icon`. */
   slot: string
   /**
@@ -763,16 +762,9 @@ function SwapIcon({
   children: ReactNode
 }) {
   return (
-    <Swap
-      roll
-      className={cn(
-        swapIconClassName,
-        clip && 'overflow-y-clip',
-        onIcon === undefined && 'motion-reduce:*:transition-none',
-      )}
-    >
+    <Swap roll className={cn(swapIconClassName, clip && 'overflow-y-clip')}>
       <span key={on ? 'on' : 'off'} data-slot={slot} className='flex'>
-        {on && onIcon !== undefined ? onIcon : children}
+        {on ? onIcon : children}
       </span>
     </Swap>
   )

@@ -204,6 +204,12 @@ const pageColumnClassName =
   'mx-auto w-full max-w-7xl min-w-0 px-(--surface-padding) @3xl:px-10'
 
 /**
+ * A landing page's section in that column, with a section's room above and
+ * below: the Call to action's and the FAQ's.
+ */
+const sectionColumnClassName = cn(pageColumnClassName, 'py-16 @3xl:py-24')
+
+/**
  * The words of a hero that reads top to bottom: the announcement, then the
  * title with its description close under it, then the actions, each group
  * further apart than the lines within it.
@@ -342,4 +348,5 @@ export {
   NudgeArrow,
   NudgeLink,
   pageColumnClassName,
+  sectionColumnClassName,
 }

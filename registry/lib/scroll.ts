@@ -1,6 +1,7 @@
 'use client'
 
 import { reducesMotion } from '@/registry/lib/reduce-motion'
+import { runningTransitions } from '@/registry/lib/resize'
 import {
   type RefCallback,
   type RefObject,
@@ -205,6 +206,54 @@ export function useScrollRegion(
   return scrolls
     ? ({ role: 'region', 'aria-labelledby': labelId, tabIndex: 0 } as const)
     : undefined
+}
+
+/** Frames with nothing moving before an element held at the top is let go. */
+const SETTLE_FRAMES = 4
+
+/**
+ * The line an element held at the top of its scroller stops at, in the
+ * viewport: the scroller's top, lowered by its `scroll-padding-top` (a sticky
+ * header) and the element's `scroll-margin-top`, and `gap` more.
+ */
+export function topEdge(element: Element, gap = 0): number {
+  const scroller = scrollerOf(element)
+  return (
+    (scroller ? scroller.getBoundingClientRect().top : 0) +
+    (Number.parseFloat(
+      getComputedStyle(scroller ?? document.documentElement).scrollPaddingTop,
+    ) || 0) +
+    (Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0) +
+    gap
+  )
+}
+
+/**
+ * Keeps `element` from rising past `line` while heights inside `watch` move,
+ * as answers above it close: it rides up to the line and waits there while
+ * its scroller scrolls under it. A scroll on its way to it goes on until the
+ * element reaches the line. It lets go once nothing has moved for a few
+ * frames. Kept outside components: the React Compiler drops the forced reads
+ * written inside one.
+ */
+export function holdAtEdge(element: Element, watch: Element, line: number) {
+  const scroller = scrollerOf(element)
+  const position = () => (scroller ? scroller.scrollTop : window.scrollY)
+  let last = position()
+  let quiet = 0
+  const frame = () => {
+    if (!element.isConnected) return
+    const over = element.getBoundingClientRect().top - line
+    if (over < -0.5) (scroller ?? window).scrollBy({ top: over, behavior: 'instant' })
+    const now = position()
+    const moving =
+      now !== last ||
+      runningTransitions(watch, { property: 'height', subtree: true }).length > 0
+    last = now
+    quiet = moving ? 0 : quiet + 1
+    if (quiet < SETTLE_FRAMES) requestAnimationFrame(frame)
+  }
+  requestAnimationFrame(frame)
 }
 
 /**

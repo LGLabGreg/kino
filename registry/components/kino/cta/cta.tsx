@@ -45,9 +45,7 @@ function Cta({
       {...props}
     >
       <HeroBackdrop />
-      <div
-        className={cn(ctaColumnClassName, 'flex flex-col items-center @3xl/cta:py-32')}
-      >
+      <div className={cn(ctaColumnClassName, 'flex flex-col items-center @3xl:py-32')}>
         <div className='flex w-full max-w-2xl min-w-0 flex-col items-center'>
           <CtaWords
             titleId={titleId}
