@@ -48,7 +48,8 @@ function useSeen<Element extends HTMLElement>(
       ([entry]) => {
         if (!entry?.isIntersecting) return
         observer.disconnect()
-        setSeen('seen')
+        // Read again now: reduced motion may have been asked for since it mounted.
+        setSeen(reducesMotion(element) ? 'reduced' : 'seen')
       },
       { threshold: share ?? fullView(element.offsetHeight, window.innerHeight) },
     )
@@ -144,4 +145,4 @@ function useScene<Element extends HTMLElement>(
   }
 }
 
-export { CRISP_ENTER_MS, fullView, sceneStep, useScene }
+export { CRISP_ENTER_MS, feelStretch, fullView, sceneStep, useScene, useSeen }
