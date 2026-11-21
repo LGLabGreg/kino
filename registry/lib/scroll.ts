@@ -1,7 +1,7 @@
 'use client'
 
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { runningTransitions } from '@/registry/lib/resize'
+import { roleDuration, runningTransitions } from '@/registry/lib/resize'
 import {
   type RefCallback,
   type RefObject,
@@ -295,8 +295,8 @@ export function bringIntoSightBy(
  * it), or when the morph role takes no time.
  */
 export function revealBehavior(scroller: HTMLElement): ScrollBehavior {
-  const duration = getComputedStyle(scroller).getPropertyValue('--motion-morph-duration')
-  const reduced = reducesMotion(scroller) || Number.parseFloat(duration) === 0
+  const reduced =
+    reducesMotion(scroller) || roleDuration(scroller, 'morph', Number.NaN) === 0
   return reduced ? 'auto' : 'smooth'
 }
 

@@ -1,4 +1,4 @@
-import { runningTransitions } from '@/registry/lib/resize'
+import { roleDuration, runningTransitions } from '@/registry/lib/resize'
 
 /*
  * How a part says no to what the person tried: it swells for a moment and
@@ -7,13 +7,6 @@ import { runningTransitions } from '@/registry/lib/resize'
  * scales on `data-refused`, and holds a still cue (a ring, a colour) on it
  * under reduced motion, where nothing scales.
  */
-
-/** A CSS time, such as a `--motion-press-duration` of `0.3s` or `300ms`, in ms; `fallback` when it is empty or not a time. */
-export function cssTime(value: string, fallback: number) {
-  const number = Number.parseFloat(value)
-  if (!Number.isFinite(number)) return fallback
-  return value.trim().endsWith('ms') ? number : number * 1000
-}
 
 const refusing = new WeakMap<HTMLElement, () => void>()
 
@@ -43,13 +36,7 @@ export function refuse(element: HTMLElement): () => void {
   // Under reduced motion nothing scales, so nothing ends: the still cue stays for two presses.
   const frame = requestAnimationFrame(() => {
     if (runningTransitions(element, { property: 'scale' }).length === 0) {
-      timer = setTimeout(
-        settle,
-        cssTime(
-          getComputedStyle(element).getPropertyValue('--motion-press-duration'),
-          300,
-        ) * 2,
-      )
+      timer = setTimeout(settle, roleDuration(element, 'press', 300) * 2)
     }
   })
   return settle

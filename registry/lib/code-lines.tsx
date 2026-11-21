@@ -1,6 +1,6 @@
 'use client'
 
-import { animateSize, startRun } from '@/registry/lib/resize'
+import { useFoldMove } from '@/registry/lib/fold'
 import { scrollRegionRingClassName, useScrollRegion } from '@/registry/lib/scroll'
 import {
   type CodeLanguage,
@@ -12,9 +12,7 @@ import {
 import {
   type ComponentProps,
   type CSSProperties,
-  type RefObject,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -320,46 +318,6 @@ function CodeScroller({
       </pre>
     </div>
   )
-}
-
-/**
- * Moves the box to its new height when it folds or unfolds, from the height
- * it is at, so a change cut short turns back where it is. The folded cap,
- * `data-folded`, goes on only once a fold has finished.
- */
-function useFoldMove(ref: RefObject<HTMLElement | null>, folded: boolean) {
-  const first = useRef(true)
-
-  useLayoutEffect(() => {
-    const element = ref.current
-    if (!element) return
-    if (first.current) {
-      first.current = false
-      if (folded) element.dataset.folded = ''
-      return
-    }
-    const from = element.getBoundingClientRect().height
-    element.style.height = ''
-    // The height it comes to rest at, measured with the cap on.
-    if (folded) element.dataset.folded = ''
-    else delete element.dataset.folded
-    const to = element.offsetHeight
-    delete element.dataset.folded
-    if (Math.abs(to - from) < 0.5) {
-      startRun(element)
-      delete element.dataset.moving
-      if (folded) element.dataset.folded = ''
-      return
-    }
-    // While it moves its lines don't scroll, so no scrollbar comes and goes.
-    element.dataset.moving = ''
-    void animateSize(element, 'height', from, to).then((latest) => {
-      if (!latest) return
-      element.style.height = ''
-      delete element.dataset.moving
-      if (folded) element.dataset.folded = ''
-    })
-  }, [ref, folded])
 }
 
 export {

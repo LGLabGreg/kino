@@ -1,7 +1,7 @@
 'use client'
 
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { FOLLOWS_TRANSITION } from '@/registry/lib/resize'
+import { FOLLOWS_TRANSITION, roleDuration } from '@/registry/lib/resize'
 import { type RefObject, useEffect, useRef, useState } from 'react'
 
 /*
@@ -72,13 +72,8 @@ const CRISP_ENTER_MS = 500
 
 /** How much longer than in Crisp the `enter` role runs where `element` is, so a scene keeps pace with the feel. */
 function feelStretch(element: Element): number {
-  const duration = getComputedStyle(element)
-    .getPropertyValue('--motion-enter-duration')
-    .trim()
-  const ms = duration.endsWith('ms')
-    ? Number.parseFloat(duration)
-    : Number.parseFloat(duration) * 1000
-  return Number.isFinite(ms) && ms > 0 ? ms / CRISP_ENTER_MS : 1
+  const ms = roleDuration(element, 'enter')
+  return ms > 0 ? ms / CRISP_ENTER_MS : 1
 }
 
 /**

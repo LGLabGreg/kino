@@ -15,8 +15,8 @@ import {
 } from '@/registry/lib/code-lines'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
+import { bringTopBack } from '@/registry/lib/fold'
 import { followHeight } from '@/registry/lib/resize'
-import { revealBehavior } from '@/registry/lib/scroll'
 import { codeLines } from '@/registry/lib/syntax'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 
@@ -179,18 +179,7 @@ function CodeBlock({
 
   const toggle = () => {
     const root = rootRef.current
-    // Folding a block whose top has scrolled away, or under a sticky header its scroll margin clears, brings its top back.
-    if (
-      expanded &&
-      root &&
-      root.getBoundingClientRect().top <
-        parseFloat(getComputedStyle(root).scrollMarginTop)
-    ) {
-      root.scrollIntoView({
-        block: 'start',
-        behavior: revealBehavior(root),
-      })
-    }
+    if (expanded && root) bringTopBack(root)
     setExpanded(!expanded)
   }
 

@@ -42,6 +42,25 @@ export function startSizeRun(element: object, size: Size): () => boolean {
  */
 export const FOLLOWS_TRANSITION = 'follows-transition'
 
+/** A CSS time, such as a `--motion-press-duration` of `0.3s` or `300ms`, in ms; `fallback` when it is empty or not a time. */
+export function cssTime(value: string, fallback: number) {
+  const number = Number.parseFloat(value)
+  if (!Number.isFinite(number)) return fallback
+  return value.trim().endsWith('ms') ? number : number * 1000
+}
+
+/** A motion role's duration where `element` is, in ms, as the feel sets it; `fallback` outside a Kino theme. */
+export function roleDuration(
+  element: Element,
+  role: 'press' | 'enter' | 'exit' | 'layout' | 'morph' | 'draw',
+  fallback = 0,
+) {
+  return cssTime(
+    getComputedStyle(element).getPropertyValue(`--motion-${role}-duration`),
+    fallback,
+  )
+}
+
 /** A computed CSS list split at its top-level commas: `linear(0, 1), ease` is two items. */
 function cssList(value: string): string[] {
   const items: string[] = []
@@ -78,8 +97,7 @@ export function transitionTiming(
   )
   if (index < 0) return null
   const at = (list: string[]) => list[index % list.length] ?? ''
-  const time = at(cssList(style.transitionDuration))
-  const duration = Number.parseFloat(time) * (time.endsWith('ms') ? 1 : 1000)
+  const duration = cssTime(at(cssList(style.transitionDuration)), 0)
   if (!(duration > 0)) return null
   return { duration, easing: at(cssList(style.transitionTimingFunction)) }
 }
