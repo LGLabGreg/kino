@@ -17,12 +17,14 @@ export const pillRowClassName = 'gap-0.5 p-[3px]'
 
 /**
  * An item: the control height less the track's inset on both sides, so the
- * track is as tall as a button. Its corner is the pill's, inside the
+ * track is as tall as a button. It clips what rolls in it up and down, such as
+ * a tab's icon, as a Button does, so nothing it rolls adds to the row's
+ * height, which a scroller would scroll and Base UI measures its indicator by. Its corner is the pill's, inside the
  * track's by about the inset, so its focus ring, the backdrop (which takes
  * the item's corners) and the pill share one shape.
  */
 export const pillItemLayout =
-  "inline-flex h-[calc(var(--control-height)_-_6px)] items-center justify-center gap-1.5 rounded-[max(0px,calc(var(--list-radius)-2px))] px-[calc(var(--control-padding)_+_2px)] text-sm font-medium whitespace-nowrap select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "inline-flex overflow-y-clip h-[calc(var(--control-height)_-_6px)] items-center justify-center gap-1.5 rounded-[max(0px,calc(var(--list-radius)-2px))] px-[calc(var(--control-padding)_+_2px)] text-sm font-medium whitespace-nowrap select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 /**
  * An item's label colours and focus ring. A disabled item fades its label,

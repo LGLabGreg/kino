@@ -1,6 +1,5 @@
 'use client'
 
-import { buttonIconSwap } from '@/registry/components/kino/button'
 import type { InputControl } from '@/registry/components/kino/input'
 import {
   InputGroup,
@@ -16,7 +15,7 @@ import { ariaShortcut, useApplePlatform, useShortcut } from '@/registry/lib/keys
 import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
-import { Swap } from '@/registry/lib/swap'
+import { Swap, swapIconClassName } from '@/registry/lib/swap'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -154,7 +153,7 @@ function SearchField({
       className={cn(searchFieldVariants({ variant }), className)}
     >
       <InputGroupAddon>
-        <Swap roll className={buttonIconSwap}>
+        <Swap roll className={swapIconClassName}>
           {spinning ? (
             <Spinner />
           ) : (

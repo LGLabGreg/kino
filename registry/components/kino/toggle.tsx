@@ -1,8 +1,8 @@
 'use client'
 
-import { buttonIconSwap, buttonVariants } from '@/registry/components/kino/button'
+import { buttonVariants } from '@/registry/components/kino/button'
 import { mergeRefs } from '@/registry/lib/refs'
-import { Swap } from '@/registry/lib/swap'
+import { SwapIcon } from '@/registry/lib/swap'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
 import type { VariantProps } from 'class-variance-authority'
@@ -121,19 +121,10 @@ function ToggleIcon({
   pressedIcon: ReactNode
   children: ReactNode
 }) {
-  const pressed = use(PressedContext)
   return (
-    <Swap roll className={buttonIconSwap}>
-      {pressed ? (
-        <span key='pressed' data-slot='toggle-icon' className='flex'>
-          {pressedIcon}
-        </span>
-      ) : (
-        <span key='rest' data-slot='toggle-icon' className='flex'>
-          {children}
-        </span>
-      )}
-    </Swap>
+    <SwapIcon on={use(PressedContext)} onIcon={pressedIcon} slot='toggle-icon'>
+      {children}
+    </SwapIcon>
   )
 }
 

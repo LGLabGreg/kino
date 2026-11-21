@@ -1,11 +1,11 @@
 'use client'
 
-import { Button, buttonIconSwap } from '@/registry/components/kino/button'
+import { Button } from '@/registry/components/kino/button'
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import { useSaveBar } from '@/registry/lib/form-changes'
 import { ariaShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { mergeRefs } from '@/registry/lib/refs'
-import { Swap, SwapText } from '@/registry/lib/swap'
+import { Swap, SwapText, swapIconClassName } from '@/registry/lib/swap'
 import { useDirection } from '@base-ui/react/direction-provider'
 import {
   type ComponentProps,
@@ -126,7 +126,7 @@ function SaveBar({
             </span>
           ))}
           <span className='flex min-w-0 items-center [grid-area:1/1]'>
-            <Swap align='start' roll className={buttonIconSwap}>
+            <Swap align='start' roll className={swapIconClassName}>
               {spinning ? (
                 <span className='flex pe-1.5'>
                   <Spinner aria-hidden />

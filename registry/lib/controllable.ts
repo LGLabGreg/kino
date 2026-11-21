@@ -38,3 +38,44 @@ export function useControllable<T, Rest extends unknown[] = []>(
     },
   ] as const
 }
+
+/**
+ * A value a Base UI part keeps itself, followed so the parts beside it can
+ * read it: theirs when they pass one, else what the part last told
+ * `onChange`, unless that was cancelled. Give the part `value`, `defaultValue`
+ * and the returned handler unchanged, so it still owns the value and its
+ * automatic changes, such as picking the first tab, which it reports too.
+ * `automatic` names the reasons of changes the part makes whether or not
+ * the handler cancels them, so those are followed either way.
+ */
+export function useFollowedValue<T, Rest extends unknown[] = []>(
+  value: T | undefined,
+  initial: T | undefined,
+  onChange: ((value: T, ...rest: Rest) => void) | undefined,
+  { automatic = [] }: { automatic?: readonly string[] } = {},
+) {
+  const [own, setOwn] = useState(initial)
+  return [
+    value !== undefined ? value : own,
+    (next: T, ...rest: Rest) => {
+      onChange?.(next, ...rest)
+      if (followsChange(rest[0], automatic)) setOwn(next)
+    },
+  ] as const
+}
+
+/**
+ * Whether a followed value takes a change with these event details: when its
+ * handler didn't cancel it, or when it is one of the `automatic` reasons the
+ * part keeps either way.
+ */
+export function followsChange(details: unknown, automatic: readonly string[] = []) {
+  if (!isCanceled(details)) return true
+  return (
+    typeof details === 'object' &&
+    details !== null &&
+    'reason' in details &&
+    typeof details.reason === 'string' &&
+    automatic.includes(details.reason)
+  )
+}

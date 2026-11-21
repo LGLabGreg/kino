@@ -333,6 +333,14 @@ function SwapHeld({ showing, children }: { showing: boolean; children: ReactNode
   )
 }
 
+// An icon that changes rolls: the old one leaves upwards and the new one rises
+// from below, fading as it goes. The travel is a share of the button's own
+// height, the share Greg picked in the playground (about 20px for a default
+// button at Balanced), so a small button's icon never leaves it empty. Outside
+// a button it is a share of the control height.
+const swapIconClassName =
+  'shrink-0 overflow-x-clip [--swap-default-roll:calc(var(--button-height,var(--control-height))*0.55)] [--swap-default-scale:0.8]'
+
 /**
  * A box whose content changes. When the children change (see `contentKey`),
  * the old ones fade out, the new ones fade in, and the box's width follows.
@@ -731,6 +739,45 @@ function SwapText({ text, className }: { text: string; className?: string }) {
   )
 }
 
+/**
+ * An icon that rolls when something turns on, such as a pressed toggle or a
+ * picked tab, to `onIcon` or to itself, and back when it turns off. With one
+ * icon, reduced motion changes nothing: there is nothing to show.
+ */
+function SwapIcon({
+  on,
+  onIcon,
+  slot,
+  clip = false,
+  children,
+}: {
+  on: boolean
+  onIcon?: ReactNode
+  /** The `data-slot` of the icon's box, such as `toggle-icon`. */
+  slot: string
+  /**
+   * Clips the roll at the icon's own box, for an icon with more beside it
+   * than a control's edge, such as a line of text below in a taller row.
+   */
+  clip?: boolean
+  children: ReactNode
+}) {
+  return (
+    <Swap
+      roll
+      className={cn(
+        swapIconClassName,
+        clip && 'overflow-y-clip',
+        onIcon === undefined && 'motion-reduce:*:transition-none',
+      )}
+    >
+      <span key={on ? 'on' : 'off'} data-slot={slot} className='flex'>
+        {on && onIcon !== undefined ? onIcon : children}
+      </span>
+    </Swap>
+  )
+}
+
 export {
   SwapTextTitleContext,
   contentKey,
@@ -741,6 +788,8 @@ export {
   nextView,
   seam,
   Swap,
+  SwapIcon,
+  swapIconClassName,
   swapTo,
   SwapText,
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import { useFollowedValue } from '@/registry/lib/controllable'
 import {
   followPick,
   followPointer,
@@ -17,9 +18,10 @@ import {
 } from '@/registry/lib/pill'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { revealInRow } from '@/registry/lib/scroll'
+import { SwapIcon } from '@/registry/lib/swap'
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'
 import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
-import { createContext, use, useEffect, useMemo, useRef } from 'react'
+import { createContext, type ReactNode, use, useEffect, useMemo, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -42,11 +44,26 @@ const segmentedControlRow = cn(
 /** True inside the pill's copy of the row, where a segment is only its label. */
 const SegmentedControlCopyContext = createContext(false)
 
+/** No segment's value, so nothing reads as picked outside a `SegmentedControl`. */
+const NO_SEGMENT = Symbol('no segment')
+
+/**
+ * The picked value, followed from Base UI's own, so the pill's copy of the
+ * row knows it as the row does, in the same render.
+ */
+const SegmentedControlValueContext = createContext<unknown>(NO_SEGMENT)
+
+/** Whether the segment around it is picked, for its icon. */
+const SegmentedControlCheckedContext = createContext(false)
+
 function SegmentedControl<Value>({
   ref,
   className,
   children,
   orientation = 'horizontal',
+  value,
+  defaultValue,
+  onValueChange,
   ...props
 }: Omit<RadioGroupPrimitive.Props<Value>, 'className'> & {
   className?: string
@@ -58,6 +75,7 @@ function SegmentedControl<Value>({
   const groupRefs = useMemo(() => mergeRefs(groupRef, markMounted, ref), [ref])
   const pillRef = useRef<HTMLSpanElement>(null)
   const backdropRef = useRef<HTMLSpanElement>(null)
+  const [picked, follow] = useFollowedValue(value, defaultValue, onValueChange)
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -85,59 +103,67 @@ function SegmentedControl<Value>({
   }, [])
 
   return (
-    <div
-      data-slot='segmented-control-track'
-      className={cn(
-        pillTrackClassName,
-        'w-fit max-w-full has-data-invalid:ring-1 has-data-invalid:ring-destructive forced-colors:has-data-invalid:outline-2 forced-colors:has-data-invalid:outline-dashed',
-        className,
-      )}
-    >
+    <SegmentedControlValueContext value={picked}>
       <div
-        ref={scrollerRef}
-        data-slot='segmented-control-scroller'
+        data-slot='segmented-control-track'
         className={cn(
-          'min-w-0',
-          // A row wider than its column scrolls; a column grows down the page.
-          orientation === 'horizontal' &&
-            'scrollbar-none overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_var(--segmented-control-fade-left,0px),black_calc(100%-var(--segmented-control-fade-right,0px)),transparent)]',
+          pillTrackClassName,
+          'w-fit max-w-full has-data-invalid:ring-1 has-data-invalid:ring-destructive forced-colors:has-data-invalid:outline-2 forced-colors:has-data-invalid:outline-dashed',
+          className,
         )}
       >
-        <RadioGroupPrimitive
-          ref={groupRefs}
-          data-slot='segmented-control'
-          data-orientation={orientation}
-          className={cn(segmentedControlRow, 'group/segmented-control relative isolate')}
-          {...props}
+        <div
+          ref={scrollerRef}
+          data-slot='segmented-control-scroller'
+          className={cn(
+            'min-w-0',
+            // A row wider than its column scrolls; a column grows down the page.
+            orientation === 'horizontal' &&
+              'scrollbar-none overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_var(--segmented-control-fade-left,0px),black_calc(100%-var(--segmented-control-fade-right,0px)),transparent)]',
+          )}
         >
-          {children}
-          <span
-            ref={backdropRef}
-            aria-hidden
-            data-slot='segmented-control-backdrop'
-            className={cn(highlightClassName, pillBackdropClassName)}
-          />
-          <span
-            ref={pillRef}
-            aria-hidden
-            // Whatever the row holds is copied here, so nothing in the copy may take focus.
-            inert
-            data-slot='segmented-control-pill'
+          <RadioGroupPrimitive
+            ref={groupRefs}
+            data-slot='segmented-control'
+            data-orientation={orientation}
             className={cn(
-              pickClassName,
-              pillClassName,
-              'z-10 group-data-disabled/segmented-control:data-[highlight=shown]:opacity-50',
+              segmentedControlRow,
+              'group/segmented-control relative isolate',
             )}
+            value={value}
+            defaultValue={defaultValue}
+            onValueChange={follow}
+            {...props}
           >
-            <span className={cn(segmentedControlRow, 'h-full')}>
-              <SegmentedControlCopyContext value={true}>
-                {children}
-              </SegmentedControlCopyContext>
+            {children}
+            <span
+              ref={backdropRef}
+              aria-hidden
+              data-slot='segmented-control-backdrop'
+              className={cn(highlightClassName, pillBackdropClassName)}
+            />
+            <span
+              ref={pillRef}
+              aria-hidden
+              // Whatever the row holds is copied here, so nothing in the copy may take focus.
+              inert
+              data-slot='segmented-control-pill'
+              className={cn(
+                pickClassName,
+                pillClassName,
+                'z-10 group-data-disabled/segmented-control:data-[highlight=shown]:opacity-50',
+              )}
+            >
+              <span className={cn(segmentedControlRow, 'h-full')}>
+                <SegmentedControlCopyContext value={true}>
+                  {children}
+                </SegmentedControlCopyContext>
+              </span>
             </span>
-          </span>
-        </RadioGroupPrimitive>
+          </RadioGroupPrimitive>
+        </div>
       </div>
-    </div>
+    </SegmentedControlValueContext>
   )
 }
 
@@ -155,8 +181,14 @@ function SegmentedControlItem<Value>({
 }: Omit<RadioPrimitive.Root.Props<Value>, 'className' | 'nativeButton' | 'render'> & {
   className?: string
 }) {
+  const checked = use(SegmentedControlValueContext) === props.value
+  const content = (
+    <SegmentedControlCheckedContext value={checked}>
+      {children}
+    </SegmentedControlCheckedContext>
+  )
   if (use(SegmentedControlCopyContext)) {
-    return <span className={cn(segmentLayout, className)}>{children}</span>
+    return <span className={cn(segmentLayout, className)}>{content}</span>
   }
   return (
     <RadioPrimitive.Root
@@ -173,9 +205,31 @@ function SegmentedControlItem<Value>({
       )}
       {...props}
     >
-      {children}
+      {content}
     </RadioPrimitive.Root>
   )
 }
 
-export { SegmentedControl, SegmentedControlItem }
+/**
+ * A segment's icon: `children`, and `checkedIcon` while the segment is
+ * picked. It rolls as a Tab's icon does, to the other icon or to itself.
+ */
+function SegmentedControlIcon({
+  checkedIcon,
+  children,
+}: {
+  checkedIcon?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <SwapIcon
+      on={use(SegmentedControlCheckedContext)}
+      onIcon={checkedIcon}
+      slot='segmented-control-icon'
+    >
+      {children}
+    </SwapIcon>
+  )
+}
+
+export { SegmentedControl, SegmentedControlIcon, SegmentedControlItem }

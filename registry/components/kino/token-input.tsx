@@ -1,6 +1,5 @@
 'use client'
 
-import { buttonIconSwap } from '@/registry/components/kino/button'
 import { InputInvalidIcon, inputBoxClassName } from '@/registry/components/kino/input'
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import {
@@ -18,7 +17,7 @@ import { CutTooltip } from '@/registry/lib/cut'
 import { useFieldControl } from '@/registry/lib/field-control'
 import { fromWhereItIs, leaveAsCopy, returnFromCopy } from '@/registry/lib/flow'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
-import { Swap } from '@/registry/lib/swap'
+import { Swap, swapIconClassName } from '@/registry/lib/swap'
 import {
   type TriggerEditor,
   TriggerEditorContext,
@@ -1092,7 +1091,7 @@ function TokenInputEditor({
 }
 
 const tokenSpinnerSwap = cn(
-  buttonIconSwap,
+  swapIconClassName,
   '-me-1 [--button-height:var(--control-height-xs)]',
 )
 

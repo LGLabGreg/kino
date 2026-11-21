@@ -1,7 +1,7 @@
 'use client'
 
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
-import { Swap, SwapText, flattenChildren } from '@/registry/lib/swap'
+import { Swap, SwapText, flattenChildren, swapIconClassName } from '@/registry/lib/swap'
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { isValidElement, type ReactNode } from 'react'
@@ -58,18 +58,10 @@ const buttonVariants = cva(
   },
 )
 
-// An icon that changes rolls: the old one leaves upwards and the new one rises
-// from below, fading as it goes. The travel is a share of the button's own
-// height, the share Greg picked in the playground (about 20px for a default
-// button at Balanced), so a small button's icon never leaves it empty. Outside
-// a button it is a share of the control height.
-const buttonIconSwap =
-  'shrink-0 overflow-x-clip [--swap-default-roll:calc(var(--button-height,var(--control-height))*0.55)] [--swap-default-scale:0.8]'
-
 /** Where an icon or the spinner sits beside the label. Empty, it takes no room. */
 function ButtonSlot({ side, children }: { side: 'start' | 'end'; children: ReactNode }) {
   return (
-    <Swap align={side} roll className={buttonIconSwap}>
+    <Swap align={side} roll className={swapIconClassName}>
       {children ? (
         <span
           className={cn(
@@ -102,7 +94,7 @@ function ButtonContent({
   // An icon button has nowhere to make room: its icon gives way to the spinner.
   if (iconOnly) {
     return (
-      <Swap roll className={buttonIconSwap}>
+      <Swap roll className={swapIconClassName}>
         {spinning ? <Spinner /> : children}
       </Swap>
     )
@@ -165,4 +157,4 @@ function Button({
   )
 }
 
-export { Button, buttonIconSwap, buttonVariants }
+export { Button, buttonVariants }

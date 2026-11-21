@@ -1,5 +1,6 @@
 'use client'
 
+import { useFollowedValue } from '@/registry/lib/controllable'
 import {
   followPointer,
   highlightClassName,
@@ -16,25 +17,64 @@ import {
 } from '@/registry/lib/pill'
 import { inertCopy, markResizing, transitionsQuiet } from '@/registry/lib/resize'
 import { revealInRow } from '@/registry/lib/scroll'
+import { SwapIcon } from '@/registry/lib/swap'
 import { Tabs as TabsPrimitive } from '@base-ui/react/tabs'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { type ComponentProps, createContext, use, useEffect, useRef } from 'react'
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  use,
+  useEffect,
+  useRef,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
+/** No tab's value, so nothing reads as picked outside a `Tabs`. */
+const NO_TAB = Symbol('no tab')
+
+/**
+ * The picked tab's value, followed from Base UI's own, so the pill's copy of
+ * the list knows it as the list does, in the same render.
+ */
+const TabsValueContext = createContext<unknown>(NO_TAB)
+
+/** Why Base UI picks a tab on its own: it keeps those picks even when cancelled. */
+const AUTOMATIC_PICKS = ['initial', 'missing', 'disabled'] as const
+
+/** Whether the tab around it is picked, for its icon. */
+const TabsActiveContext = createContext(false)
+
 function Tabs({
   className,
+  value,
+  defaultValue,
+  onValueChange,
   ...props
 }: Omit<TabsPrimitive.Root.Props, 'className'> & { className?: string }) {
+  // Base UI's own default, so the two agree until it reports a change.
+  const [picked, follow] = useFollowedValue(
+    value,
+    defaultValue === undefined ? 0 : defaultValue,
+    onValueChange,
+    // Base UI picks a tab for one that's missing or disabled, cancelled or not.
+    { automatic: AUTOMATIC_PICKS },
+  )
   return (
-    <TabsPrimitive.Root
-      data-slot='tabs'
-      className={cn(
-        'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
-        className,
-      )}
-      {...props}
-    />
+    <TabsValueContext value={picked}>
+      <TabsPrimitive.Root
+        data-slot='tabs'
+        className={cn(
+          'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
+          className,
+        )}
+        value={value}
+        defaultValue={defaultValue}
+        onValueChange={follow}
+        {...props}
+      />
+    </TabsValueContext>
   )
 }
 
@@ -231,6 +271,7 @@ function TabsTrigger({
 }: Omit<TabsPrimitive.Tab.Props, 'className'> & { className?: string }) {
   const copy = use(TabsCopyContext)
   const rows = use(TabsRowsContext)
+  const active = use(TabsValueContext) === props.value
   if (rows) {
     return (
       <TabsPrimitive.Tab
@@ -239,7 +280,7 @@ function TabsTrigger({
         style={style}
         {...props}
       >
-        {children}
+        <TabsActiveContext value={active}>{children}</TabsActiveContext>
       </TabsPrimitive.Tab>
     )
   }
@@ -249,7 +290,7 @@ function TabsTrigger({
         className={cn(tabsTriggerLayout, className)}
         style={typeof style === 'function' ? undefined : style}
       >
-        {children}
+        <TabsActiveContext value={active}>{children}</TabsActiveContext>
       </span>
     )
   }
@@ -266,8 +307,32 @@ function TabsTrigger({
       style={style}
       {...props}
     >
-      {children}
+      <TabsActiveContext value={active}>{children}</TabsActiveContext>
     </TabsPrimitive.Tab>
+  )
+}
+
+/**
+ * A tab's icon: `children`, and `activeIcon` while the tab is picked. It
+ * rolls as a Toggle's icon does, to the other icon or to itself.
+ */
+function TabsIcon({
+  activeIcon,
+  children,
+}: {
+  activeIcon?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    // A row holds more than its icon's line, so the roll stays in that line.
+    <SwapIcon
+      on={use(TabsActiveContext)}
+      onIcon={activeIcon}
+      slot='tabs-icon'
+      clip={use(TabsRowsContext)}
+    >
+      {children}
+    </SwapIcon>
   )
 }
 
@@ -383,4 +448,4 @@ function rowInsets(
   return { top: row.top - list.top, bottom: list.bottom - row.bottom }
 }
 
-export { Tabs, TabsContent, TabsList, TabsTrigger, rowInsets }
+export { Tabs, TabsContent, TabsIcon, TabsList, TabsTrigger, rowInsets }
