@@ -5,39 +5,41 @@ import {
   axisLayerClassName,
   axisSlide,
   plotOffset,
-  stickTo,
   type ChartAxis,
   type ChartAxisName,
   type ChartCategory,
   type ChartContextValue,
-  type ChartFormat,
-  ChartGroup,
-  ChartLegendToggles,
-  ChangeText,
-  forcedSeriesColor,
-  swatchClassName,
-  tooltipQuietClassName,
-  formatterOf,
-  isForecast,
-  plotLayerClassName,
+  ChartTooltipContent,
+  ChartTooltipTotal,
   scalesOf,
   slideLine,
-  swatchStyle,
   tickMove,
   useChart,
   useChartActive,
   useTicks,
+  stickTo,
   valuePlace,
 } from '@/registry/lib/chart-core'
 import {
   axisNames,
   type ChartSummary,
-  changeSince,
   fractionOf,
   numberOf,
   physicalStart,
   summaryOf,
 } from '@/registry/lib/chart-math'
+import {
+  type ChartFormat,
+  ChartGroup,
+  ChartLegendToggles,
+  formatterOf,
+  type ChartPoint,
+  plotLayerClassName,
+  tooltipTriggerId,
+  useChartFocus,
+  useChartRootValue,
+} from '@/registry/lib/chart-root'
+import { type ChartTarget, indexOfKey, sameTarget } from '@/registry/lib/chart-state'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {
   createHighlight,
@@ -107,7 +109,7 @@ function GridLines({
 }) {
   const chart = useChart()
   const { scale, previousScale } = scalesOf(chart, axis)
-  const ticks = useTicks(layer, axis)
+  const ticks = useTicks(axis)
   return (
     <div ref={layer} className='absolute inset-0 [container-type:size]'>
       {chart.status === 'ready' &&
@@ -276,7 +278,7 @@ function ValueAxis({
           : { maximumFractionDigits: 1, ...own, notation: 'compact' }),
   )
   const layer = useRef<HTMLSpanElement>(null)
-  const all = useTicks(layer, axis)
+  const all = useTicks(axis)
   const ticks = status === 'ready' ? all : []
   const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [write(tick.value)]))
   const across = side === 'start' || side === 'end'
@@ -996,16 +998,9 @@ function ChartLegend({
   className,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & { position?: 'top' | 'bottom' }) {
-  const {
-    series,
-    config,
-    hidden,
-    setHidden,
-    setEmphasis,
-    patternOf,
-    markerOf,
-    messages,
-  } = useChart()
+  const { series, config, hidden, setHidden, setEmphasis, patternOf, messages } =
+    useChart()
+  const { markerOf } = useChartRootValue()
   return (
     <div
       data-slot='chart-legend'
@@ -1022,7 +1017,7 @@ function ChartLegend({
         series={series}
         labelOf={(key) => config[key]?.label ?? key}
         patternOf={patternOf}
-        markerOf={markerOf}
+        markerOf={(key) => markerOf(key) ?? undefined}
         hidden={hidden}
         onHiddenChange={setHidden}
         onEmphasisChange={setEmphasis}
@@ -1063,87 +1058,89 @@ function ChartTooltip({
   children,
   ...props
 }: ChartTooltipProps) {
-  const { active, setActive } = useChartActive()
+  const { setActive } = useChartActive()
   const chart = useChart()
-  const { tooltip, columnId, status, stack, orientation, plot, current } = chart
-  const open = active !== null && status === 'ready'
-  // A series the pointer brought forward goes back with the category it lit.
-  const release = () => {
-    setActive(null)
-    if (chart.seriesAt) chart.setEmphasis(null)
-  }
+  const { reader } = useChartRootValue()
+  const { focus } = useChartFocus()
+  const { tooltip, id, status, stack, orientation, plot, current } = chart
+  const open = focus !== null && status === 'ready'
+  // What it last showed, which it keeps showing while it closes.
+  const [shown, setShown] = useState<ChartTarget | null>(null)
+  if (focus !== null && !sameTarget(focus, shown)) setShown(focus)
+  const target = focus ?? shown
+  const index =
+    target === null || target.kind === 'node'
+      ? null
+      : indexOfKey(
+          current.map((category) => category.key),
+          target.key,
+        )
+  const category = index === null ? undefined : current[index]
+  const point = target === null ? null : reader.anchor(target)
   return (
     <GlideGroupMemory>
       <TooltipPrimitive.Root
         handle={tooltip}
         open={open}
-        triggerId={open ? columnId(active) : null}
+        triggerId={open ? tooltipTriggerId(id) : null}
         onOpenChange={(next, details) => {
           if (next) return
-          // The columns clear it when the pointer leaves or focus goes, so only Escape and
-          // a press away from the chart close it here. A press on the chart, or on another
-          // chart in its group, leaves the values showing.
+          // The plot clears it when the pointer leaves or focus goes, so only Escape and a press
+          // away from the chart close it here. A press on the chart, or on another chart in its
+          // group, leaves the values showing.
           if (details.reason === 'escape-key') {
-            release()
+            setActive(null)
             return
           }
           if (details.reason !== 'outside-press') return
-          const target = details.event?.target
+          const pressed = details.event?.target
           const figure = plot.current?.closest('figure')
           if (
-            target instanceof Element &&
-            (figure?.contains(target) || target.closest("[data-slot='chart-columns']"))
+            pressed instanceof Element &&
+            (figure?.contains(pressed) || pressed.closest("[data-slot='chart-columns']"))
           )
             return
-          release()
+          setActive(null)
         }}
         disableHoverablePopup
       >
-        {({ payload }) => {
-          const category = payload === undefined ? undefined : current[payload]
-          if (payload === undefined || !category) return null
-          return (
-            <ChartTooltipPopup
-              // A new side starts the popup afresh there, rather than sliding it across the marks.
-              key={chart.pointOf(payload)?.side}
-              index={payload}
-              side={
-                side ??
-                chart.pointOf(payload)?.side ??
-                (orientation === 'vertical' ? 'top' : 'inline-end')
-              }
-              align={align}
-              className={className}
-              {...props}
-            >
-              {children ? (
-                children({ index: payload, category })
-              ) : chart.tooltipContent ? (
-                chart.tooltipContent(payload)
-              ) : (
-                <ChartTooltipContent index={payload} total={total ?? stack !== 'none'} />
-              )}
-            </ChartTooltipPopup>
-          )
-        }}
+        {target !== null && index !== null && category && (
+          <ChartTooltipPopup
+            // A new side starts the popup afresh there, rather than sliding it across the marks.
+            key={point?.side}
+            point={point}
+            side={
+              side ?? point?.side ?? (orientation === 'vertical' ? 'top' : 'inline-end')
+            }
+            align={align}
+            className={className}
+            {...props}
+          >
+            {children ? (
+              children({ index, category })
+            ) : (
+              <ChartTooltipTotal value={total ?? stack !== 'none'}>
+                {reader.tooltip(target)}
+              </ChartTooltipTotal>
+            )}
+          </ChartTooltipPopup>
+        )}
       </TooltipPrimitive.Root>
     </GlideGroupMemory>
   )
 }
 
 /**
- * The tooltip's popup, on the point the marks of the category at `index`
- * are going to, so it never waits behind them. The point is a new anchor
- * only when it moves, as the popup sets its positioning up again for each
- * new anchor.
+ * The tooltip's popup, on `point`, where the marks it shows are going, so it
+ * never waits behind them. The point is a new anchor only when it moves, as
+ * the popup sets its positioning up again for each new anchor.
  */
 function ChartTooltipPopup({
-  index,
+  point,
   className,
   ...props
-}: ComponentProps<typeof TooltipPopup> & { index: number }) {
-  const { plot, pointOf } = useChart()
-  const point = pointOf(index)
+}: ComponentProps<typeof TooltipPopup> & { point: ChartPoint | null }) {
+  const { plot } = useChart()
   const x = point?.x ?? 0
   const y = point?.y ?? 0
   const anchor = useMemo(
@@ -1166,93 +1163,6 @@ function ChartTooltipPopup({
       className={cn('max-w-72 px-2.5 py-2', className)}
       {...props}
     />
-  )
-}
-
-/**
- * The values of the category at `index`: its name, then a row for each
- * shown series, with its change since the category before when the
- * categories run in order, and their total with `total`.
- */
-function ChartTooltipContent({
-  index,
-  total = false,
-  hideLabel = false,
-  className,
-  children,
-  ...props
-}: ComponentProps<'div'> & {
-  index: number
-  total?: boolean
-  hideLabel?: boolean
-}) {
-  const chart = useChart()
-  const {
-    id,
-    current,
-    series,
-    hidden,
-    config,
-    valueText,
-    seriesText,
-    categoryText,
-    ordered,
-    locale,
-    patternOf,
-    messages,
-    emphasis,
-  } = chart
-  const category = current[index]
-  if (!category) return null
-  const before = ordered ? current[index - 1] : undefined
-  const shown = series.filter((key) => !hidden.includes(key))
-  const sum = shown.reduce((all, key) => all + (numberOf(category.datum[key]) ?? 0), 0)
-  return (
-    // The tooltip sits outside the chart, so it carries the chart's id for its colours.
-    <div data-chart={id} className={cn('grid min-w-36 gap-1', className)} {...props}>
-      {!hideLabel && <div className='font-medium'>{categoryText(category.value)}</div>}
-      {shown.map((key) => {
-        const value = category.datum[key]
-        return (
-          // The series brought forward reads in full colour; the rest stay as they are, legible.
-          <div
-            key={key}
-            data-lit={emphasis === key ? '' : undefined}
-            className='group/row flex items-center gap-2'
-          >
-            <span
-              aria-hidden
-              className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
-              style={swatchStyle(key, patternOf(key))}
-            />
-            <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
-              {config[key]?.label ?? key}
-              {isForecast(chart, key, index) && ` · ${messages.forecast}`}
-            </span>
-            {before && (
-              <ChangeText
-                change={changeSince(value, before.datum[key])}
-                locale={locale}
-                className={tooltipQuietClassName}
-              />
-            )}
-            {/* A value with a unit reads in its own order whatever the page's direction. */}
-            <span dir='auto' className='font-medium tabular-nums'>
-              {seriesText(category, key)}
-            </span>
-          </div>
-        )
-      })}
-      {total && shown.length > 1 && (
-        <div className='border-background/20 mt-0.5 flex items-center gap-2 border-t pt-1 forced-colors:border-[CanvasText]'>
-          <span className='text-background/75 flex-1 forced-colors:text-[CanvasText]'>
-            {messages.total}
-          </span>
-          <span className='font-medium tabular-nums'>{valueText(sum)}</span>
-        </div>
-      )}
-      {children}
-    </div>
   )
 }
 

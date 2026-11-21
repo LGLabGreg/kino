@@ -18,17 +18,13 @@ import {
   trackClip,
 } from '@/registry/lib/chart-bars'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  type ChartFormat,
   type EntrancePhase,
   figureProps,
-  formatterOf,
-  patternImage,
-  plotLayerClassName,
-  seriesColor,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -51,6 +47,13 @@ import {
   spanExtent,
   stacksOf,
 } from '@/registry/lib/chart-math'
+import {
+  type ChartFormat,
+  formatterOf,
+  patternImage,
+  plotLayerClassName,
+  seriesColor,
+} from '@/registry/lib/chart-root'
 import { type ComponentProps, createContext, use, useLayoutEffect } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -143,12 +146,16 @@ function BarChart(props: BarChartProps) {
   } = props
   const stackOf = (key: string) => config[key]?.stack ?? ''
   const gaps: BandGaps = categoryGap === undefined ? {} : { gap: categoryGap }
-  const { chart, shapes, rows, root, placeholder, fromPlaceholder, phase } =
-    useCategoryChart(props, {
+  const { chart, shapes, rows, placeholder, fromPlaceholder, phase } = useCategoryChart(
+    props,
+    {
       orientation,
       stack,
       entrance: entrance !== 'none',
-      moveProperty: 'clip-path',
+      cascade:
+        entrance === 'cascade'
+          ? { variable: '--bar-chart-cascade', fallback: 0.8 }
+          : undefined,
       nice: stack !== 'expand',
       bandOf: (index, count) => categoryBand(index, count, gaps),
       measure: (data, shown) => {
@@ -160,7 +167,8 @@ function BarChart(props: BarChartProps) {
           extent: spanExtent(spans),
         }
       },
-    })
+    },
+  )
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
   const reaches = rows.map((_, at) => farEnd(shapes.spans, shown, at))
   const order = reaches
@@ -176,7 +184,7 @@ function BarChart(props: BarChartProps) {
         )
       : cascadeAt(at, rows.length, cascadeFrom),
   )
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     ...(describe && {
       describe: (at: number) => {
@@ -217,7 +225,6 @@ function BarChart(props: BarChartProps) {
     >
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='bar-chart'
         description={description}

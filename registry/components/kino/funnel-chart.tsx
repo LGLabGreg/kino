@@ -14,19 +14,13 @@ import {
   slotBand,
 } from '@/registry/lib/chart-bars'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  ChartNumber,
   type EntrancePhase,
   figureProps,
-  forcedSeriesColor,
-  plotLayerClassName,
-  seriesColor,
-  swatchClassName,
-  swatchStyle,
-  tooltipQuietClassName,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -40,6 +34,15 @@ import {
   numberOf,
   plotPoint,
 } from '@/registry/lib/chart-math'
+import {
+  ChartNumber,
+  forcedSeriesColor,
+  plotLayerClassName,
+  seriesColor,
+  swatchClassName,
+  swatchStyle,
+  tooltipQuietClassName,
+} from '@/registry/lib/chart-root'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { type ComponentProps, createContext, Fragment, use, useLayoutEffect } from 'react'
 
@@ -145,13 +148,16 @@ function FunnelChart(props: FunnelChartProps) {
     children,
     ref,
   } = props
-  const { chart, rows, root, placeholder, fromPlaceholder, phase } = useCategoryChart(
+  const { chart, rows, placeholder, fromPlaceholder, phase } = useCategoryChart(
     { ...props, ordered: false },
     {
       orientation,
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: 'clip-path',
+      cascade:
+        entrance === 'cascade'
+          ? { variable: '--funnel-chart-cascade', fallback: 0.8 }
+          : undefined,
       nice: true,
       bandOf: (index, count) =>
         categoryBand(index, count, categoryGap === undefined ? {} : { gap: categoryGap }),
@@ -188,7 +194,7 @@ function FunnelChart(props: FunnelChartProps) {
     const label = config[key]?.label
     return typeof label === 'string' ? label : key
   }
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits on the top of the step's columns: the tallest bar, or the step before's behind it.
     pointOf: (at) => {
@@ -249,7 +255,6 @@ function FunnelChart(props: FunnelChartProps) {
     >
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='funnel-chart'
         description={description}

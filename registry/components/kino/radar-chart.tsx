@@ -1,25 +1,16 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  type ChartFormat,
-  ChartSvgPattern,
-  drawingFrame,
-  drawingSize,
   figureProps,
-  forcedSeriesColor,
-  forcedSeriesTextColor,
-  formatterOf,
-  plotLayerClassName,
-  seriesColor,
   tickMove,
   useCategoryChart,
   useChart,
   useChartActive,
-  useFromRest,
   useRegistry,
   useTicks,
 } from '@/registry/lib/chart-core'
@@ -45,6 +36,20 @@ import {
   turnOf,
 } from '@/registry/lib/chart-radial'
 import {
+  type ChartFormat,
+  ChartSvgPattern,
+  drawingFrame,
+  drawingSize,
+  forcedSeriesColor,
+  forcedSeriesTextColor,
+  formatterOf,
+  plotLayerClassName,
+  type MoveRole,
+  seriesColor,
+  useFromRest,
+  usePointsMove,
+} from '@/registry/lib/chart-root'
+import {
   createHighlight,
   type Highlight,
   highlightClassName,
@@ -53,16 +58,11 @@ import {
   placeholderBreatheClassName,
   placeholderInkClassName,
 } from '@/registry/lib/placeholder'
-import {
-  registerProgress,
-  registerProperties,
-  usePointsMove,
-} from '@/registry/lib/run-progress'
+import { registerProperties } from '@/registry/lib/run-progress'
 import {
   type ComponentProps,
   createContext,
   type CSSProperties,
-  type RefObject,
   use,
   useEffect,
   useId,
@@ -160,9 +160,6 @@ function useRadar() {
 
 const radarChartKeys = ['maxKey', 'entrance']
 
-/** The number an outline moves on, from 0 where it was to 1 where it goes. */
-const RADAR_PROGRESS = '--radar-progress'
-
 /** The room between the edge and the axes' names, in px. */
 const NAME_GAP = 8
 /** The narrowest names wrap at, in px: a few words a line. */
@@ -209,7 +206,6 @@ const PLACEHOLDER_RINGS = [1 / 3, 2 / 3, 1]
 
 /** The properties the chart moves on, so their transitions can run them. Once per page. */
 function registerRadarProperties() {
-  registerProgress(RADAR_PROGRESS)
   registerProperties([
     // Where the lit wedge points and how wide it is: the whole turn while nothing is lit.
     ...(['--radar-window-turn', '--radar-window-span'] as const).map((name) => ({
@@ -269,7 +265,7 @@ function RadarChart(props: RadarChartProps) {
     given && measuredEdge !== null
       ? thinTicks(given, Math.floor(measuredEdge / GIVEN_RING_SPACING))
       : given
-  const { chart, root, placeholder, phase } = useCategoryChart(
+  const { chart, placeholder, phase } = useCategoryChart(
     {
       ...props,
       tickCount: rings,
@@ -282,7 +278,6 @@ function RadarChart(props: RadarChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: RADAR_PROGRESS,
       round: true,
       nice: !ownScales,
       bandOf: categoryBand,
@@ -333,7 +328,7 @@ function RadarChart(props: RadarChartProps) {
       r: flat ? 0 : (fractionAt(category, key) ?? 0),
     }))
 
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits past the axis's name, so it covers neither the name nor the shapes.
     pointOf: (at) => {
@@ -424,7 +419,6 @@ function RadarChart(props: RadarChartProps) {
     >
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='radar-chart'
         description={description}
@@ -507,15 +501,14 @@ function useLitTurn() {
  * frame's outline. A new size alone redraws at once.
  */
 function useOutlineMove(
-  element: RefObject<SVGSVGElement | null>,
+  role: MoveRole,
   draw: (outline: readonly RadarVertex[]) => void,
   to: readonly RadarVertex[],
   start: readonly RadarVertex[],
   size: string,
 ) {
   usePointsMove(
-    element,
-    RADAR_PROGRESS,
+    role,
     to,
     to
       .map((vertex) => `${vertex.key}:${vertex.turn.toFixed(5)}:${vertex.r.toFixed(5)}`)
@@ -557,7 +550,7 @@ function Radar({
   const { spotlit } = useChartActive()
   const lit = useLitTurn()
   const spot = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(spotlit, spot)
+  const fromRest = useFromRest(spotlit)
   const id = useId().replaceAll(':', '')
   const hidden = chart.hidden.includes(dataKey)
   const rising = !chart.entered && radar.entrance === 'rise'
@@ -571,12 +564,12 @@ function Radar({
       ? radar.outlineOf(dataKey, rising || hidden)
       : []
   const start = to.map((vertex) => ({ ...vertex, r: 0 }))
-  const progress = useRef<SVGSVGElement>(null)
   const outlines = useRef<(SVGPathElement | null)[]>([])
   const marks = useRef<(SVGGElement | null)[]>([])
   const { edge, centre } = radar
   useOutlineMove(
-    progress,
+    // The entrance grows the outline out of the centre; every change after moves it.
+    radar.entering ? 'draw' : 'layout',
     (outline) => {
       const d = outlinePath(outline, centre.x, centre.y, edge)
       for (const path of outlines.current) path?.setAttribute('d', d)
@@ -748,12 +741,11 @@ function Radar({
         <svg
           viewBox={viewBox}
           {...frame}
-          ref={progress}
           data-entering={radar.entering ? '' : undefined}
           data-dim={stepsBack ? '' : undefined}
           className={cn(
             svgClass,
-            'text-(--radar-color) [--radar-progress:1] transition-[color,--radar-progress] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] forced-colors:data-dim:[--radar-chart-width:1px] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
+            'text-(--radar-color) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) forced-colors:data-dim:[--radar-chart-width:1px] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
             dimClass,
             forcedSeriesTextColor(slot),
           )}
@@ -789,7 +781,7 @@ function RadarLitMarks() {
   const { spotlit } = useChartActive()
   const lit = useLitTurn()
   const layer = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(spotlit, layer)
+  const fromRest = useFromRest(spotlit)
   // The axis last lit, where the dots stay while they fade out.
   const [last, setLast] = useState(spotlit)
   if (spotlit !== null && spotlit !== last) setLast(spotlit)
@@ -868,9 +860,8 @@ function RadarGrid({
   const lit = useLitTurn()
   const layer = useRef<HTMLDivElement>(null)
   const litSpoke = useRef<SVGLineElement>(null)
-  const fromRest = useFromRest(spotlit, litSpoke)
-  const ticks = useTicks(layer, 'value', 'transform')
-  const progress = useRef<SVGSVGElement>(null)
+  const fromRest = useFromRest(spotlit)
+  const ticks = useTicks()
   const framePath = useRef<SVGPathElement>(null)
   const id = useId().replaceAll(':', '')
   const { edge, centre } = radar
@@ -884,7 +875,7 @@ function RadarGrid({
       }))
     : []
   useOutlineMove(
-    progress,
+    'layout',
     (now) =>
       framePath.current?.setAttribute('d', outlinePath(now, centre.x, centre.y, edge)),
     outline,
@@ -907,10 +898,9 @@ function RadarGrid({
     >
       {ready && (
         <svg
-          ref={progress}
           viewBox={`0 0 ${round(width)} ${round(height)}`}
           {...drawingFrame(chart.plotSize, 'xMidYMid meet')}
-          className='absolute inset-0 size-full overflow-visible [--radar-progress:1] transition-[--radar-progress] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none'
+          className='absolute inset-0 size-full overflow-visible'
         >
           {polygon && (
             <defs>
@@ -1131,7 +1121,7 @@ function RadarValueAxis({
   const chart = useChart()
   const radar = useRadar()
   const layer = useRef<HTMLDivElement>(null)
-  const all = useTicks(layer)
+  const all = useTicks()
   const own = chart.format
   const write = formatterOf(
     chart.locale,

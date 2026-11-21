@@ -1,14 +1,12 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
-  type ChartContextValue,
-  drawingSize,
   type EntrancePhase,
   figureProps,
   ShareTooltipContent,
-  swatchClassName,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -32,13 +30,13 @@ import {
   stepNode,
 } from '@/registry/lib/chart-flows'
 import { categoryBand, type ChartConfig } from '@/registry/lib/chart-math'
+import { drawingSize, swatchClassName, usePointsMove } from '@/registry/lib/chart-root'
 import { useControllable } from '@/registry/lib/controllable'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
   placeholderInkClassName,
 } from '@/registry/lib/placeholder'
-import { registerProgress, usePointsMove } from '@/registry/lib/run-progress'
 import { type CSSProperties, memo, useMemo, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -50,10 +48,10 @@ import { cn } from '@/lib/utils'
  * the nodes come from the flows and stand in columns from the reading
  * start. A node or a flow under the pointer, or a node the keys reach,
  * keeps every way through it bright while the rest step back. New data
- * moves every node and flow from where it is, on one transition of a
- * number, `--sankey-progress`, that writes their shapes each frame, so the
- * feel, reduced motion and a slowed playback time it as they time
- * everything else; a flow that arrives draws along its length.
+ * moves every node and flow from where it is, on the chart's moves, which
+ * write their shapes each frame, so the feel, reduced motion and a slowed
+ * playback time it as they time everything else; a flow that arrives draws
+ * along its length.
  */
 
 interface SankeyChartProps extends Omit<
@@ -112,8 +110,6 @@ const sankeyChartKeys = [
 /** Where each mark's own fields sit in the rows the chart core is given. */
 const MARK_KEY = '\u0000mark'
 const MARK_KIND = '\u0000kind'
-
-const SANKEY_PROGRESS = '--sankey-progress'
 
 /** A node's width, in px. */
 const NODE_WIDTH = 8
@@ -179,7 +175,7 @@ function SankeyChart(props: SankeyChartProps) {
     return chart.messages.flow(nameOf(from), nameOf(to))
   }
 
-  const { chart, root, placeholder, phase } = useCategoryChart(
+  const { chart, placeholder, phase } = useCategoryChart(
     {
       ...props,
       index: MARK_KEY,
@@ -214,7 +210,6 @@ function SankeyChart(props: SankeyChartProps) {
       stack: 'none',
       entrance: entrance !== 'none',
       // What leaves moves with the rest, so the chart waits on the move before letting it go.
-      moveProperty: SANKEY_PROGRESS,
       nice: false,
       bandOf: (at, count) => categoryBand(at, count),
       measure: () => ({ extent: [0, 1] as const }),
@@ -338,7 +333,7 @@ function SankeyChart(props: SankeyChartProps) {
         (nodeBox.get(a.key)?.y0 ?? 0) - (nodeBox.get(b.key)?.y0 ?? 0),
     )
     .map((node) => node.key)
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits above a node's top, or above the middle of a flow.
     pointOf: (at) => {
@@ -480,7 +475,6 @@ function SankeyChart(props: SankeyChartProps) {
   return (
     <CategoryChartFrame
       chart={full}
-      root={root}
       ref={ref}
       slot='sankey-chart'
       description={description}
@@ -580,7 +574,7 @@ interface NodeLabel {
 
 /**
  * Every node, flow and label, drawn in one SVG as large as the plot. Their
- * shapes are written each frame of `--sankey-progress` while new data moves
+ * shapes are written each frame of the chart's move while new data moves
  * them; at rest they are the layout's. What steps back is everything off the
  * way through the node or flow lit, or the node brought forward.
  */
@@ -601,7 +595,6 @@ function SankeyMarks({
   colorOf: (key: string) => string
   labelOf: (key: string) => NodeLabel | null
 }) {
-  registerProgress(SANKEY_PROGRESS)
   const chart = useChart()
   const { spotlit } = useChartActive()
   const svg = useRef<SVGSVGElement>(null)
@@ -618,8 +611,7 @@ function SankeyMarks({
   )
   const shown = useMemo(() => new Set(shapes.map((shape) => shape.key)), [shapes])
   usePointsMove(
-    svg,
-    SANKEY_PROGRESS,
+    'layout',
     shapes,
     layoutSignature(layout),
     shapes,
@@ -668,7 +660,7 @@ function SankeyMarks({
         data-waiting={phase === 'waiting' ? '' : undefined}
         width={size.width}
         height={size.height}
-        className='absolute inset-0 size-full overflow-visible [--sankey-progress:1] transition-none duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-mounted/chart:transition-[--sankey-progress] motion-reduce:group-data-mounted/chart:transition-none'
+        className='absolute inset-0 size-full overflow-visible'
       >
         {linkCategories.map((category) => {
           const shape = byKey.get(category.key)

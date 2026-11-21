@@ -1,10 +1,6 @@
 'use client'
 
-import {
-  type ChartContextValue,
-  forcedSeriesColor,
-  plotLayerClassName,
-} from '@/registry/lib/chart-core'
+import type { ChartContextValue } from '@/registry/lib/chart-core'
 import {
   type Band,
   categoryBand,
@@ -14,6 +10,7 @@ import {
   plotPoint,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
+import { forcedSeriesColor, plotLayerClassName } from '@/registry/lib/chart-root'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,

@@ -1,6 +1,6 @@
 'use client'
 
-import type { ChartPoint } from '@/registry/lib/chart-core'
+import type { ChartPoint } from '@/registry/lib/chart-root'
 import { type ComponentProps, type CSSProperties, memo, type Ref } from 'react'
 
 import { cn } from '@/lib/utils'

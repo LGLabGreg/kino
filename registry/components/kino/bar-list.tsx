@@ -5,12 +5,8 @@ import { Button } from '@/registry/components/kino/button'
 import {
   CategoryChartFrame,
   type CategoryChartProps,
-  ChartNumber,
   type ChartCategory,
-  type ChartFormat,
-  type ChartMessages,
   figureProps,
-  seriesColor,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -23,6 +19,12 @@ import {
   numberOf,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
+import {
+  ChartNumber,
+  type ChartFormat,
+  type ChartMessages,
+  seriesColor,
+} from '@/registry/lib/chart-root'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
 import { useFlow } from '@/registry/lib/flow'
@@ -172,7 +174,7 @@ function BarList(props: BarListProps) {
   } = props
   const dataKey = Object.keys(config)[0] ?? ''
   const { showMore, showLess, ...chartMessages } = messages ?? {}
-  const { chart, root, placeholder, fromPlaceholder, phase } = useCategoryChart(
+  const { chart, placeholder, fromPlaceholder, phase } = useCategoryChart(
     {
       ...props,
       color: undefined,
@@ -182,7 +184,7 @@ function BarList(props: BarListProps) {
       orientation: 'horizontal',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: 'clip-path',
+      cascade: { variable: '--bar-list-cascade', fallback: 0.8 },
       nice: false,
       heightFromData: true,
       bandOf: (at, count) => categoryBand(at, count),
@@ -256,7 +258,6 @@ function BarList(props: BarListProps) {
   return (
     <CategoryChartFrame
       chart={{ ...chart, pointOf: () => null }}
-      root={root}
       ref={ref}
       slot='bar-list'
       description={description}

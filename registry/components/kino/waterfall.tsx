@@ -5,17 +5,6 @@ import { TooltipPopup } from '@/registry/components/kino/tooltip'
 import { Tree, TreeItem } from '@/registry/components/kino/tree'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
-  type ChartFormat,
-  ChartLegendToggles,
-  ChartStyle,
-  forcedSeriesColor,
-  swatchClassName,
-  formatterOf,
-  seriesColor,
-  swatchStyle,
-  useEntered,
-} from '@/registry/lib/chart-core'
-import {
   type ChartConfig,
   fractionOf,
   type Span,
@@ -27,6 +16,17 @@ import {
   valueScale,
   type ValueScale,
 } from '@/registry/lib/chart-math'
+import {
+  type ChartFormat,
+  ChartLegendToggles,
+  ChartStyle,
+  forcedSeriesColor,
+  swatchClassName,
+  formatterOf,
+  seriesColor,
+  swatchStyle,
+  useEntered,
+} from '@/registry/lib/chart-root'
 import { useControllable } from '@/registry/lib/controllable'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {

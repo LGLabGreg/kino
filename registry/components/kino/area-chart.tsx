@@ -1,13 +1,13 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   type CategoryChartProps,
   type ChartContextValue,
   figureProps,
   useCategoryChart,
 } from '@/registry/lib/chart-core'
 import {
-  LINE_PROGRESS,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
@@ -127,17 +127,16 @@ function AreaChart(props: AreaChartProps) {
     ref,
   } = props
   const stackOf = (key: string) => config[key]?.stack ?? ''
-  const { chart, shapes, placeholder, root, phase } = useCategoryChart(props, {
+  const { chart, shapes, placeholder, phase } = useCategoryChart(props, {
     orientation: 'vertical',
     stack,
     entrance: entrance !== 'none',
-    moveProperty: LINE_PROGRESS,
     nice: stack !== 'expand',
     bandOf: pointBand,
     measure: (rows, shown) => areaSpans(rows, Object.keys(config), shown, stack, stackOf),
   })
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // An area's fill fades, so a pattern on it would fade away; its key stays solid.
     patternOf: () => 'solid',
@@ -157,7 +156,6 @@ function AreaChart(props: AreaChartProps) {
   return (
     <LineFamilyFrame
       chart={full}
-      root={root}
       family={{
         name: 'area-chart',
         phase,

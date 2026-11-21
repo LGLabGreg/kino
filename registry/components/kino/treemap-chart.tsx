@@ -10,19 +10,14 @@ import {
 } from '@/registry/components/kino/breadcrumb'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  drawingSize,
   type EntrancePhase,
   figureProps,
-  forcedSeriesColor,
-  labelOnClassName,
-  patternImage,
-  plotLayerClassName,
   ShareTooltipContent,
-  swatchClassName,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -32,6 +27,14 @@ import {
   type ChartConfig,
   type ChartDatum,
 } from '@/registry/lib/chart-math'
+import {
+  drawingSize,
+  forcedSeriesColor,
+  labelOnClassName,
+  patternImage,
+  plotLayerClassName,
+  swatchClassName,
+} from '@/registry/lib/chart-root'
 import {
   centreOf,
   LABEL_PADDING,
@@ -207,7 +210,7 @@ function TreemapChart(props: TreemapChartProps) {
   }
 
   const inView = viewTiles(view)
-  const { chart, root, placeholder, phase } = useCategoryChart(
+  const { chart, placeholder, phase } = useCategoryChart(
     {
       ...props,
       config: groups,
@@ -246,7 +249,6 @@ function TreemapChart(props: TreemapChartProps) {
       entrance: entrance !== 'none',
       // Every tile that arrives or leaves fades, in full and reduced motion alike, so the
       // chart waits on that before letting one go.
-      moveProperty: 'opacity',
       nice: false,
       seriesOfRow: (row) => String(row[TILE_TOP]),
       keyOf: (row) => String(row[TILE_KEY]),
@@ -317,7 +319,7 @@ function TreemapChart(props: TreemapChartProps) {
   const zoomInto = (group: TileNode | null | undefined) =>
     group && group.children.length > 0 ? () => zoomTo(group.path) : null
 
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits above the middle of its tile's top edge.
     pointOf: (at) => {
@@ -409,7 +411,6 @@ function TreemapChart(props: TreemapChartProps) {
     <TreemapContext value={{ tree, view, zoomTo, nameOf }}>
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='treemap-chart'
         description={description}

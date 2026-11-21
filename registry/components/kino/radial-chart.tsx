@@ -2,14 +2,11 @@
 
 import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
-  type ChartContextValue,
-  ChartSvgPattern,
   figureProps,
-  forcedSeriesTextColor,
-  plotLayerClassName,
   shareColor,
   ShareTooltipContent,
   useCategoryChart,
@@ -41,6 +38,11 @@ import {
   turnOf,
   withinSweep,
 } from '@/registry/lib/chart-radial'
+import {
+  ChartSvgPattern,
+  forcedSeriesTextColor,
+  plotLayerClassName,
+} from '@/registry/lib/chart-root'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -368,7 +370,7 @@ function RadialChart(props: RadialChartProps) {
     ref,
   } = props
   registerRadialProperties()
-  const { chart, root, placeholder, phase } = useCategoryChart(
+  const { chart, placeholder, phase } = useCategoryChart(
     {
       ...props,
       // A ring is named by its config's label, as its legend entry is.
@@ -391,7 +393,6 @@ function RadialChart(props: RadialChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: '--radial-value',
       nice: false,
       seriesOfRow: (row) => String(row[props.index]),
       bandOf: (at, count) => categoryBand(at, count),
@@ -511,7 +512,7 @@ function RadialChart(props: RadialChartProps) {
       ? chart.valueText(ring.value)
       : chart.messages.outOf(chart.valueText(ring.value), chart.valueText(ring.top))
 
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits past the outer ring, where the ring's value ends.
     pointOf: (at) => {
@@ -588,7 +589,6 @@ function RadialChart(props: RadialChartProps) {
     >
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='radial-chart'
         description={description}

@@ -2,20 +2,14 @@
 
 import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
-  ChartSvgPattern,
   type CategoryChartProps,
   type ChartCategory,
-  type ChartContextValue,
   shareColor,
   ShareTooltipContent,
   shareValue,
-  drawingFrame,
-  drawingSize,
   figureProps,
-  forcedSeriesTextColor,
-  labelOnClassName,
-  plotLayerClassName,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -38,6 +32,14 @@ import {
   sliceAt,
   sliceDash,
 } from '@/registry/lib/chart-radial'
+import {
+  ChartSvgPattern,
+  drawingFrame,
+  drawingSize,
+  forcedSeriesTextColor,
+  labelOnClassName,
+  plotLayerClassName,
+} from '@/registry/lib/chart-root'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -176,7 +178,7 @@ function DonutChart(props: DonutChartProps) {
   } = props
   const hole = Math.min(0.95, Math.max(0, innerRadius))
   const gap = Math.max(0, sliceGap)
-  const { chart, root, placeholder, phase, room } = useCategoryChart(
+  const { chart, placeholder, phase, room } = useCategoryChart(
     {
       ...props,
       // A slice is named by its config's label, as its legend entry is.
@@ -198,7 +200,6 @@ function DonutChart(props: DonutChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: 'stroke-dasharray',
       round: true,
       nice: false,
       seriesOfRow: (row) => String(row[props.index]),
@@ -220,7 +221,7 @@ function DonutChart(props: DonutChartProps) {
     if (!keys.some((key) => key.dataKey === ring.dataKey)) keys.push(ring)
   }
   const { width, height } = drawingSize(chart.plotSize)
-  const scale = useGrowScale(root, grow, width, height)
+  const scale = useGrowScale(chart.root, grow, width, height)
   const edge = Math.max(0, Math.min(width, height) / 2 - 0.5 - room)
   const outer = edge / scale
   const bands = ringBands(outer, outer * hole, keys.length, RING_GAP)
@@ -263,7 +264,7 @@ function DonutChart(props: DonutChartProps) {
     chart.datumText(category.datum[ring.dataKey])
   const several = rings.length > 1
 
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits on the outer edge of the slice's middle, opening away from the ring.
     pointOf: (at) => {
@@ -340,7 +341,6 @@ function DonutChart(props: DonutChartProps) {
     >
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='donut-chart'
         description={description}

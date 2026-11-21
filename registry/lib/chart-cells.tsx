@@ -3,10 +3,9 @@
 import {
   type ChartAxisName,
   type ChartCategory,
+  type CategoryReaderParts,
   type ChartContextValue,
   type ChartGridAxis,
-  plotLayerClassName,
-  seriesColor,
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
@@ -17,6 +16,7 @@ import {
   gridCellAt,
   numberOf,
 } from '@/registry/lib/chart-math'
+import { plotLayerClassName, seriesColor } from '@/registry/lib/chart-root'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
@@ -82,7 +82,6 @@ const cellGridOptions = {
   orientation: 'vertical',
   stack: 'none',
   entrance: false,
-  moveProperty: 'opacity',
   // The plot holds square cells, so the chart is as tall as its rows and its legend make it.
   heightFromData: true,
   // No cell sits in a band: the grid places them.
@@ -126,13 +125,13 @@ function cellOf(category: ChartCategory): CellAt {
  * axes, the tooltip over a cell's top edge, and the cell under the pointer.
  */
 function cellGridChart(
-  chart: Omit<ChartContextValue, 'pointOf'>,
+  chart: ChartContextValue,
   layout: CellGridLayout,
   columns: number,
   rows: number,
   /** Whether it scrolls sideways once a column would be narrower than a cell can be pointed at, as a year of weeks does, rather than squeeze them. */
   scrolls = false,
-): ChartContextValue {
+): ChartContextValue & Pick<CategoryReaderParts, 'pointOf' | 'pickAt'> {
   const cells = chart.current.map(cellOf)
   const axis = (own: CellGridLayout['x'], name: 'x' | 'y'): ChartGridAxis => ({
     ...own,

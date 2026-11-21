@@ -1,17 +1,11 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   type CategoryChartProps,
   type ChartCategory,
-  type ChartContextValue,
-  type ChartFormat,
   figureProps,
-  forcedSeriesTextColor,
-  formatterOf,
   CategoryChartFrame,
-  drawingSize,
-  plotLayerClassName,
-  seriesColor,
   useCategoryChart,
   useChart,
   useChartActive,
@@ -27,6 +21,14 @@ import {
   type Span,
   type XYValue,
 } from '@/registry/lib/chart-math'
+import {
+  type ChartFormat,
+  forcedSeriesTextColor,
+  formatterOf,
+  drawingSize,
+  plotLayerClassName,
+  seriesColor,
+} from '@/registry/lib/chart-root'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
@@ -239,7 +241,7 @@ function ScatterChart(props: ScatterChartProps) {
   const largest = size ? Math.max(0, ...rows.map((row) => numberOf(row[size]) ?? 0)) : 0
   const radiusOfRow = (row: ChartDatum) =>
     size ? bubbleRadius(numberOf(row[size]), largest) : POINT_RADIUS
-  const { chart, root, placeholder } = useCategoryChart(
+  const { chart, placeholder } = useCategoryChart(
     {
       ...props,
       data: rows,
@@ -249,7 +251,6 @@ function ScatterChart(props: ScatterChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: false,
-      moveProperty: 'opacity',
       nice: true,
       // Every point is one category, but none sits in a band: the XY frame places them.
       bandOf: () => ({ start: 0, size: 0 }),
@@ -312,7 +313,7 @@ function ScatterChart(props: ScatterChartProps) {
     return values
   }
   const { width, height } = drawingSize(chart.plotSize)
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // A shape, not a pattern, tells series apart.
     patternOf: () => 'solid',
@@ -363,7 +364,6 @@ function ScatterChart(props: ScatterChartProps) {
     <ScatterContext value={scatter}>
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='scatter-chart'
         description={description}

@@ -18,9 +18,9 @@ import {
   stepFill,
 } from '@/registry/lib/chart-cells'
 import {
+  type CategoryChartInput,
   type CategoryChartProps,
   CategoryChartFrame,
-  type ChartContextValue,
   figureProps,
   useCategoryChart,
 } from '@/registry/lib/chart-core'
@@ -252,7 +252,7 @@ function HeatmapChart(props: HeatmapChartProps) {
   const edges = stepEdges(scale.domain, scale.ticks)
   const steps = edges.length - 1
   const [emphasis, setEmphasis] = useState<number | null>(null)
-  const { chart, root, placeholder } = useCategoryChart(
+  const { chart, placeholder } = useCategoryChart(
     { ...props, data: layout.rows, index: CELL_NAME },
     { ...cellGridOptions, nice: true, measure: () => ({ extent: scale.domain }) },
   )
@@ -271,7 +271,7 @@ function HeatmapChart(props: HeatmapChartProps) {
     emphasis,
     setEmphasis,
   }
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...cellGridChart(chart, layout, columns, rows, calendar),
     describe: (index) => {
       const category = chart.current[index]
@@ -287,7 +287,6 @@ function HeatmapChart(props: HeatmapChartProps) {
     <CellGridContext value={grid}>
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='heatmap-chart'
         description={description}

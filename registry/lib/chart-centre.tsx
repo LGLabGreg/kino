@@ -1,7 +1,7 @@
 'use client'
 
 import { AnimatedNumber } from '@/registry/components/kino/animated-number'
-import type { ChartFormat } from '@/registry/lib/chart-core'
+import type { ChartFormat } from '@/registry/lib/chart-root'
 import { Swap } from '@/registry/lib/swap'
 import type { ReactNode } from 'react'
 

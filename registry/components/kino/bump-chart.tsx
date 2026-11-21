@@ -1,24 +1,17 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   axisLayerClassName,
   type CategoryChartProps,
-  ChangeText,
   type ChartCategory,
   type ChartContextValue,
-  type ChartMessages,
-  defaultMessages,
   figureProps,
-  forcedSeriesColor,
-  swatchClassName,
   slideLine,
-  swatchStyle,
-  tooltipQuietClassName,
   useCategoryChart,
   useChart,
 } from '@/registry/lib/chart-core'
 import {
-  LINE_PROGRESS,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
@@ -33,15 +26,20 @@ import {
   type Span,
   stepThrough,
 } from '@/registry/lib/chart-math'
+import {
+  ChangeText,
+  type ChartMessages,
+  defaultMessages,
+  forcedSeriesColor,
+  swatchClassName,
+  swatchStyle,
+  tooltipQuietClassName,
+  type MoveRun,
+  useChartMoves,
+} from '@/registry/lib/chart-root'
 import { CutTooltip } from '@/registry/lib/cut'
 import { heightAt, type LinePoint } from '@/registry/lib/line-path'
 import { numberFormatter } from '@/registry/lib/number-format'
-import {
-  progressOf,
-  registerProgress,
-  runProgress,
-  stopProgress,
-} from '@/registry/lib/run-progress'
 import {
   type ComponentProps,
   createContext,
@@ -307,7 +305,7 @@ function BumpChart(props: BumpChartProps) {
   // Every series counts, the hidden ones too, so hiding one never moves the rows.
   const rows = rankCount(ranking.places, keys)
   const said: BumpChartMessages = { ...defaultMessages, ...bumpMessages, ...messages }
-  const { chart, root, placeholder, phase } = useCategoryChart(
+  const { chart, placeholder, phase } = useCategoryChart(
     {
       ...props,
       // The chart places each series on its row; its rank and amount are looked up by period.
@@ -320,7 +318,6 @@ function BumpChart(props: BumpChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: LINE_PROGRESS,
       nice: false,
       bandOf: pointBand,
       measure: () => ({ extent: [0.5, rows + 0.5] as Span }),
@@ -363,7 +360,7 @@ function BumpChart(props: BumpChartProps) {
       .filter(Boolean)
       .join(', ')
   }
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
     patternOf: () => 'solid',
@@ -416,7 +413,6 @@ function BumpChart(props: BumpChartProps) {
     <BumpContext value={bump}>
       <LineFamilyFrame
         chart={full}
-        root={root}
         family={{
           name: 'bump-chart',
           phase,
@@ -701,7 +697,7 @@ function BumpNames({
   )
 }
 
-/** The number a name glides on, from 0 where it was to 1 where it goes, as a line's points do. */
+/** The number a name glides on, from 0 where it was to 1 where it goes, written each frame of the chart's move, as a line's points are. */
 const NAME_PROGRESS = '--bump-name-progress'
 
 /**
@@ -717,17 +713,36 @@ function NameSlide({
   ...props
 }: Omit<ComponentProps<'span'>, 'children'> & { at: number; children: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const move = useRef({ from: at, to: at })
-  useLayoutEffect(() => registerProgress(NAME_PROGRESS), [])
+  const moves = useChartMoves()
+  const glide = useRef<NameGlide>({ from: at, to: at, run: null, stop: () => {} })
   useLayoutEffect(() => {
-    if (ref.current) glideName(ref.current, move.current, at)
-  }, [at])
+    const element = ref.current
+    const was = glide.current
+    if (!element || at === was.to) return
+    // From where it shows now, mid-glide too.
+    const shown =
+      was.from + (was.to - was.from) * (was.run?.running() ? was.run.progress() : 1)
+    was.stop()
+    element.style.setProperty('--name-from', `${shown * 100}cqh`)
+    const write = (progress: number) =>
+      element.style.setProperty(NAME_PROGRESS, String(progress))
+    // On a chart not yet painted, it is there at once.
+    if (!element.closest('[data-mounted]')) {
+      write(1)
+      glide.current = { from: shown, to: at, run: null, stop: () => {} }
+      return
+    }
+    write(0)
+    const { run, stop } = moves.follow('layout', write)
+    glide.current = { from: shown, to: at, run, stop }
+  }, [at, moves])
+  useLayoutEffect(() => () => glide.current.stop(), [])
   return (
     <span
       ref={ref}
       className={cn(
         slideLine.y,
-        '[translate:0_calc(var(--name-from,var(--name-to))+(var(--name-to)-var(--name-from,var(--name-to)))*var(--bump-name-progress,1))] transition-none group-data-mounted/chart:transition-[--bump-name-progress,opacity] duration-(--motion-layout-duration) ease-[var(--motion-layout-easing),var(--motion-layout-fade-easing)] data-gone:opacity-0 motion-reduce:group-data-mounted/chart:transition-opacity motion-reduce:group-data-mounted/chart:ease-(--motion-layout-fade-easing)',
+        '[translate:0_calc(var(--name-from,var(--name-to))+(var(--name-to)-var(--name-from,var(--name-to)))*var(--bump-name-progress,1))] transition-none group-data-mounted/chart:transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-gone:opacity-0',
         className,
       )}
       style={{ '--name-to': `${at * 100}cqh`, ...style } as CSSProperties}
@@ -736,19 +751,12 @@ function NameSlide({
   )
 }
 
-/**
- * Starts a name's glide to `to` from where it shows now, mid-glide too; on
- * a chart not yet painted, it is there at once. Outside the component, as
- * `runProgress` asks.
- */
-function glideName(element: HTMLElement, move: { from: number; to: number }, to: number) {
-  if (to === move.to) return
-  const shown = move.from + (move.to - move.from) * progressOf(element, NAME_PROGRESS)
-  move.from = shown
-  move.to = to
-  element.style.setProperty('--name-from', `${shown * 100}cqh`)
-  if (element.closest('[data-mounted]')) runProgress(element, NAME_PROGRESS, () => {})
-  else stopProgress(element)
+/** A name's glide: from where it was, to where it goes, on its run of the chart's moves. */
+interface NameGlide {
+  from: number
+  to: number
+  run: MoveRun | null
+  stop: () => void
 }
 
 /**

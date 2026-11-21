@@ -7,24 +7,27 @@ import {
   CellGridSizer,
 } from '@/registry/lib/chart-cells'
 import {
+  type CategoryChartInput,
   CategoryChartFrame,
   type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  type ChartPoint,
   figureProps,
-  forcedSeriesColor,
-  patternImage,
-  plotLayerClassName,
   shareColor,
   ShareTooltipContent,
   shareValue,
-  swatchClassName,
   useCategoryChart,
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
 import { categoryBand, gridCellAt } from '@/registry/lib/chart-math'
+import {
+  type ChartPoint,
+  forcedSeriesColor,
+  patternImage,
+  plotLayerClassName,
+  swatchClassName,
+} from '@/registry/lib/chart-root'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { createContext, type CSSProperties, memo, use, useState } from 'react'
 
@@ -143,7 +146,7 @@ function WaffleChart(props: WaffleChartProps) {
   // the tooltip and the table reach it as they reach a share.
   const withRemaining =
     left > 0 ? [...data, { [index]: WAFFLE_REMAINING, [dataKey]: left }] : data
-  const { chart, root, placeholder } = useCategoryChart(
+  const { chart, placeholder } = useCategoryChart(
     {
       ...props,
       data: withRemaining,
@@ -166,7 +169,6 @@ function WaffleChart(props: WaffleChartProps) {
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      moveProperty: 'background-color',
       nice: false,
       heightFromData: true,
       seriesOfRow: (row) => String(row[index]),
@@ -204,7 +206,7 @@ function WaffleChart(props: WaffleChartProps) {
       : chart.datumText(category.datum[dataKey])
   }
 
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // The tooltip sits over the middle of the share's top row of squares.
     pointOf: (at) => {
@@ -278,7 +280,6 @@ function WaffleChart(props: WaffleChartProps) {
     <WaffleContext value={{ rows, columns, squares }}>
       <CategoryChartFrame
         chart={full}
-        root={root}
         ref={ref}
         slot='waffle-chart'
         description={description}

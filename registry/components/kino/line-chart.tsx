@@ -1,13 +1,13 @@
 'use client'
 
 import {
+  type CategoryChartInput,
   type CategoryChartProps,
   type ChartContextValue,
   figureProps,
   useCategoryChart,
 } from '@/registry/lib/chart-core'
 import {
-  LINE_PROGRESS,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
@@ -94,17 +94,16 @@ function LineChart(props: LineChartProps) {
     children,
     ref,
   } = props
-  const { chart, root, placeholder, phase } = useCategoryChart(props, {
+  const { chart, placeholder, phase } = useCategoryChart(props, {
     orientation: 'vertical',
     stack: 'none',
     entrance: entrance !== 'none',
-    moveProperty: LINE_PROGRESS,
     nice: true,
     bandOf: pointBand,
     measure: (rows, shown) => ({ extent: lineExtent(rows, shown, zero) }),
   })
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  const full: ChartContextValue = {
+  const full: CategoryChartInput = {
     ...chart,
     // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
     patternOf: () => 'solid',
@@ -125,7 +124,6 @@ function LineChart(props: LineChartProps) {
   return (
     <LineFamilyFrame
       chart={full}
-      root={root}
       family={{
         name: 'line-chart',
         phase,

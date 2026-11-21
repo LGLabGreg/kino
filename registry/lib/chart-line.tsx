@@ -10,17 +10,11 @@ import {
 import {
   CategoryChartFrame,
   type ChartCategory,
+  type CategoryChartInput,
   type ChartContextValue,
-  drawingFrame,
-  drawingSize,
   type EntrancePhase,
-  forcedSeriesColor,
-  forcedSeriesTextColor,
-  plotLayerClassName,
-  seriesColor,
   useChart,
   useChartActive,
-  useFromRest,
 } from '@/registry/lib/chart-core'
 import {
   type Band,
@@ -28,6 +22,17 @@ import {
   fractionOf,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
+import {
+  drawingFrame,
+  drawingSize,
+  forcedSeriesColor,
+  forcedSeriesTextColor,
+  plotLayerClassName,
+  type MoveRole,
+  seriesColor,
+  useFromRest,
+  usePointsMove,
+} from '@/registry/lib/chart-root'
 import {
   alignLines,
   brightSpan,
@@ -41,11 +46,7 @@ import {
   pointsAt,
 } from '@/registry/lib/line-path'
 import { placeholderBreatheClassName } from '@/registry/lib/placeholder'
-import {
-  registerProgress,
-  registerProperties,
-  usePointsMove,
-} from '@/registry/lib/run-progress'
+import { registerProperties } from '@/registry/lib/run-progress'
 import {
   type ComponentProps,
   createContext,
@@ -145,7 +146,6 @@ function traceVariables(name: LineFamilyName) {
  */
 function LineFamilyFrame({
   chart,
-  root,
   family,
   description,
   empty,
@@ -156,8 +156,7 @@ function LineFamilyFrame({
   ref,
   ...props
 }: Omit<ComponentProps<'figure'>, 'ref'> & {
-  chart: ChartContextValue
-  root: RefObject<HTMLElement | null>
+  chart: CategoryChartInput
   family: Omit<LineFamilyValue, 'litDots'>
   description?: string
   empty?: ReactNode
@@ -173,7 +172,6 @@ function LineFamilyFrame({
     <LineFamilyContext value={{ ...family, litDots }}>
       <CategoryChartFrame
         chart={chart}
-        root={root}
         ref={ref}
         slot={family.name}
         description={description}
@@ -194,12 +192,8 @@ function LineFamilyFrame({
   )
 }
 
-/** The number a series' points move on, from 0 where they were to 1 where they go. */
-const LINE_PROGRESS = '--line-progress'
-
 /** The properties the series move on, so their transitions can run them. Once per page. */
 function registerLineProperties() {
-  registerProgress(LINE_PROGRESS)
   registerProperties([
     ...(['--line-window-from', '--line-window-to'] as const).map((name, at) => ({
       name,
@@ -252,7 +246,6 @@ function drawingOf(
 
 /** The elements a series redraws on each frame of a move. */
 interface LineElements {
-  progress: RefObject<SVGSVGElement | null>
   paths: RefObject<(SVGPathElement | null)[]>
   bridges: RefObject<SVGPathElement | null>
   lone: RefObject<(SVGPathElement | null)[]>
@@ -318,6 +311,7 @@ const SPLIT_BLEED = 12
  * change of size or curve alone redraws at once.
  */
 function useLineMove(
+  role: MoveRole,
   elements: LineElements,
   to: readonly LinePoint[],
   curve: PathCurve,
@@ -327,8 +321,7 @@ function useLineMove(
   start: readonly LinePoint[],
 ) {
   usePointsMove(
-    elements.progress,
-    LINE_PROGRESS,
+    role,
     to,
     to
       .map(
@@ -389,7 +382,7 @@ function LineSeries({
   const { spotlit } = useChartActive()
   const family = useLineFamily()
   const spot = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(spotlit, spot)
+  const fromRest = useFromRest(spotlit)
   const id = useId().replaceAll(':', '')
   const hidden = chart.hidden.includes(dataKey)
   const rising = !chart.entered && family.entrance === 'rise'
@@ -417,7 +410,6 @@ function LineSeries({
   const splitKey = first > 0 ? (to[first - 1]?.key ?? null) : null
   // A forecast from the first category on is the whole line.
   const allForecast = first === 0
-  const progress = useRef<SVGSVGElement>(null)
   const paths = useRef<(SVGPathElement | null)[]>([])
   const bridges = useRef<SVGPathElement>(null)
   const lone = useRef<(SVGPathElement | null)[]>([])
@@ -443,8 +435,9 @@ function LineSeries({
     }))
   }, [to, chart])
   useLineMove(
+    // The entrance draws the lines along their length; every change after moves them.
+    family.phase === 'entering' ? 'draw' : 'layout',
     {
-      progress,
       paths,
       bridges,
       lone,
@@ -578,11 +571,10 @@ function LineSeries({
           )}
           <svg
             {...frame}
-            ref={progress}
             data-entering={family.phase === 'entering' ? '' : undefined}
             data-dim={stepsBack ? '' : undefined}
             className={cn(
-              'absolute inset-0 size-full overflow-visible text-(--line-color) [--line-progress:1] transition-[color,--line-progress] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] forced-colors:data-dim:[--trace-weight:0.5] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
+              'absolute inset-0 size-full overflow-visible text-(--line-color) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] forced-colors:data-dim:[--trace-weight:0.5] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
               forcedSeriesTextColor(slot),
             )}
           >
@@ -786,7 +778,7 @@ function LineLitMarks() {
   const family = useLineFamily()
   const at = useChartActive().spotlit
   const marks = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(at, marks)
+  const fromRest = useFromRest(at)
   // The category last lit, where the marks stay while they fade out.
   const [last, setLast] = useState(at)
   if (at !== null && at !== last) setLast(at)
@@ -932,7 +924,6 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
 }
 
 export {
-  LINE_PROGRESS,
   LineFamilyFrame,
   type LineFamilyName,
   type LineFamilyValue,
