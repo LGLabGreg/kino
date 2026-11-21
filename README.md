@@ -1,6 +1,7 @@
-# Kino
-
-React components with the motion already designed, and docs your agent can read.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/banner-dark.png">
+  <img alt="Kino. Your agent builds it. Kino makes it move. React components with the motion already designed, and docs your agent can read." src=".github/banner-light.png">
+</picture>
 
 [Website](https://kinoui.com) · [Docs](https://kinoui.com/docs) · [Installation](https://kinoui.com/docs/installation)
 
