@@ -165,6 +165,7 @@ function ComposedChart(props: ComposedChartProps) {
     <BarFrameContext
       value={{
         model,
+        kind: barMarks,
         phase,
         fromPlaceholder,
         entrance: entrance === 'draw' ? 'cascade' : entrance,

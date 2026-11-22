@@ -183,6 +183,16 @@ interface ChartMessages {
   ofPrevious: string
   /** How many a funnel lost since the step before. */
   droppedOff: string
+  /** The data table's first column on a bridge, whose categories are steps. */
+  step: string
+  /** A bridge step's change, as a row of its tooltip and a column of the data table. */
+  stepChange: string
+  /** A bridge's total after each step, as a row of its tooltip and a column of the data table. */
+  runningTotal: string
+  /** What a bridge's step says after its name: its change, such as "down 120", and the running total after it. */
+  bridgeStep: (change: string, total: string) => string
+  /** What a bridge's total says after its name, with its value. */
+  bridgeTotal: (total: string) => string
   loading: string
   /** Said when the data arrives, with the chart's `label`. */
   loaded: (label: string) => string
@@ -220,6 +230,11 @@ const defaultMessages: ChartMessages = {
   ofFirst: 'Of the first step',
   ofPrevious: 'Of the step before',
   droppedOff: 'Dropped off',
+  step: 'Step',
+  stepChange: 'Change',
+  runningTotal: 'Running total',
+  bridgeStep: (change, total) => `${change}, running total ${total}`,
+  bridgeTotal: (total) => `${total}, total`,
   loading: 'Loading chart',
   loaded: (label) => `${label} loaded`,
   empty: 'No data for this range',

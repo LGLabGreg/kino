@@ -1,6 +1,15 @@
 'use client'
 
-import { barBand, barMarks, farEnd } from '@/registry/lib/chart-bar-marks'
+import {
+  barBand,
+  barKind,
+  barMarks,
+  type BarReading,
+  bridgeMarks,
+  bridgeSpans,
+  farEnd,
+  runningTotals,
+} from '@/registry/lib/chart-bar-marks'
 import {
   barClip,
   BarFrameContext,
@@ -21,7 +30,9 @@ import {
   useBarFrame,
 } from '@/registry/lib/chart-bars'
 import {
+  type ChartWords,
   figureProps,
+  pickedName,
   seriesWords,
   useChartActive,
   useDeclared,
@@ -33,6 +44,7 @@ import {
   cartesianChartKeys,
   cartesianSignature,
   type CartesianStop,
+  cartesianTable,
   cartesianWords,
   type ChartPartDeclaration,
   type ChartRoomState,
@@ -59,13 +71,23 @@ import {
   type ChartFormat,
   type ChartItem,
   type ChartRootState,
+  forcedSeriesColor,
   formatterOf,
   patternImage,
   plotLayerClassName,
   seriesColor,
+  swatchClassName,
+  tooltipQuietClassName,
 } from '@/registry/lib/chart-root'
 import type { BandGaps } from '@/registry/lib/chart-scale'
-import type { ComponentProps } from 'react'
+import { numberFormatter } from '@/registry/lib/number-format'
+import {
+  type ComponentProps,
+  createContext,
+  type CSSProperties,
+  use,
+  useState,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -75,10 +97,25 @@ import { cn } from '@/lib/utils'
  * plot, so a new value, a new range, a series hidden or the categories
  * sorted is one CSS transition of each bar, which turns back from wherever
  * it is. The category under the pointer stays bright while the rest step
- * back, and the tooltip sits on the end of its bars.
+ * back, and the tooltip sits on the end of its bars. As a bridge, one
+ * series' changes float from the running total before each to the total
+ * after it, joined by thin lines, with totals standing on the axis.
  */
 
 interface BarChartProps extends CartesianChartProps {
+  /**
+   * Bars that stand on the axis, or a bridge: how a start becomes an end,
+   * such as revenue to profit. A bridge's one series holds signed changes,
+   * each floating from the running total before it, and the categories in
+   * `totals` stand on the axis. Rows keep the data's order.
+   */
+  layout?: 'bars' | 'bridge'
+  /**
+   * The categories of a bridge that stand on the axis as totals: at their
+   * value, which the run carries on from, such as an opening balance, or with
+   * none, at the running total, worked out.
+   */
+  totals?: readonly string[]
   /** Upright bars over the categories, or bars lying along them. */
   orientation?: ChartOrientation
   /** How each category's series combine: side by side, stacked, or stacked as shares of their total. */
@@ -105,6 +142,8 @@ interface BarChartProps extends CartesianChartProps {
 
 const barChartKeys = [
   ...cartesianChartKeys,
+  'layout',
+  'totals',
   'orientation',
   'stack',
   'entrance',
@@ -128,6 +167,8 @@ function noMarker() {
  */
 function BarChart(props: BarChartProps) {
   const {
+    layout = 'bars',
+    totals,
     orientation = 'vertical',
     stack = 'none',
     entrance = 'none',
@@ -142,19 +183,35 @@ function BarChart(props: BarChartProps) {
     ref,
   } = props
   const gaps: BandGaps = categoryGap === undefined ? {} : { gap: categoryGap }
+  const isTotal = layout === 'bridge' ? bridgeTotals(props, stack, totals ?? []) : null
+  if (totals !== undefined && !isTotal) {
+    throw new Error('`totals` names the totals of a bridge: give `layout="bridge"` too.')
+  }
+  if (isTotal && props.cascadeFrom !== undefined && props.cascadeFrom !== 'start') {
+    throw new Error(
+      'A bridge builds from its first step, as it reads: leave out `cascadeFrom`.',
+    )
+  }
+  const kind = isTotal ? bridgeMarks(isTotal) : barMarks
+  // A bridge's bars start one after another, each as the one before has nearly landed, so none
+  // hangs in the air before the bar it starts from.
+  const cascadeFallback = isTotal
+    ? Math.min(BRIDGE_STEP_WAIT * Math.max(0, props.data.length - 1), BRIDGE_CASCADE_MOST)
+    : 0.8
   const cartesian = useCartesianChart(props, {
-    kinds: [barMarks],
+    kinds: [kind],
     orientation,
     stack,
     entrance: entrance !== 'none',
     cascade:
       entrance === 'cascade'
-        ? { variable: '--bar-chart-cascade', fallback: 0.8 }
+        ? { variable: '--bar-chart-cascade', fallback: cascadeFallback }
         : undefined,
     gaps,
   })
   const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
   const stops = chart.current
+  const bridge = useBridge(chart, isTotal, totals ?? [])
   // The cascade's order reads the bars against the chart's own value axis.
   const shown = totalled(chart).filter(model.totals)
   const reaches = stops.map((_, at) => farEnd(model.spans, shown, at))
@@ -182,11 +239,12 @@ function BarChart(props: BarChartProps) {
     <BarFrameContext
       value={{
         model,
+        kind,
         phase,
         fromPlaceholder,
         entrance,
         cascade,
-        cascadeSpan: 'var(--bar-chart-cascade, 0.8)',
+        cascadeSpan: `var(--bar-chart-cascade, ${cascadeFallback})`,
         barGap,
       }}
     >
@@ -209,13 +267,231 @@ function BarChart(props: BarChartProps) {
             chart.direction,
           )
         }}
-        words={seriesWords(chart, cartesianWords(chart, own))}
+        words={
+          bridge
+            ? bridgeWords(chart, bridge)
+            : seriesWords(chart, cartesianWords(chart, own))
+        }
         browse={X_BROWSE}
         {...figureProps(props, barChartKeys)}
       >
-        {children}
+        <BridgeContext value={bridge}>{children}</BridgeContext>
       </CartesianChartFrame>
     </BarFrameContext>
+  )
+}
+
+/* The bridge. */
+
+/** What a bridge's bars and words read. */
+interface BridgeValue {
+  /** Its one series. */
+  key: string
+  /** Whether a step, still in the data or just taken out, is a total. */
+  isTotal: (stop: ChartItem) => boolean
+  /** Each step's change, by its place in the data: null for a total or a missing change. */
+  changes: readonly (number | null)[]
+  /** The running total after each step, by its place. */
+  runs: readonly number[]
+  /** Where a step just taken out stood, by its key, so it folds into its start. */
+  left: (key: string) => Span | null
+}
+
+const BridgeContext = createContext<BridgeValue | null>(null)
+
+/** The share of `draw` a bridge's bar waits after the one before starts: by then that one has nearly landed. */
+const BRIDGE_STEP_WAIT = 0.4
+
+/** The most of `draw` a bridge's cascade spreads over, so a long one builds faster rather than slower. */
+const BRIDGE_CASCADE_MOST = 1.6
+
+/** A bridge's colours, each a variable a buyer sets on the chart or above it. */
+const BRIDGE_TONES = {
+  rise: 'var(--bar-chart-rise, var(--chart-1))',
+  fall: 'var(--bar-chart-fall, var(--destructive))',
+  total: 'var(--bar-chart-total, var(--chart-4))',
+} as const
+
+/** The colour of a bridge's step: a total's, or a change's as it rises or falls. */
+function bridgeTone(bridge: BridgeValue, stop: ChartItem, value: number | null) {
+  if (bridge.isTotal(stop)) return BRIDGE_TONES.total
+  return value !== null && value < 0 ? BRIDGE_TONES.fall : BRIDGE_TONES.rise
+}
+
+/**
+ * What a bridge works out from its rows as it renders: each step's change,
+ * the running total after it and whether it joins the next, and where each
+ * step just taken out stood. Null for bars that stand on the axis.
+ */
+function useBridge(
+  chart: CartesianChartValue,
+  isTotal: readonly boolean[] | null,
+  totals: readonly string[],
+): BridgeValue | null {
+  const key = chart.series[0] ?? ''
+  if (isTotal && chart.series.length > 1) {
+    throw new Error(
+      'A bridge draws one series: its changes from a start to an end. Give it one `Bar`, or use `layout="bars"`.',
+    )
+  }
+  const values = chart.current.map((stop) => numberOf(chart.valueOf(key, stop)))
+  const steps = bridgeSpans(values, isTotal ?? [])
+  // Bars that stand on the axis keep nothing.
+  const kept = useLeft(
+    isTotal ? chart.current.map((stop) => stop.key) : [],
+    steps,
+    leavingKeys(chart),
+    (span) => span?.join(',') ?? '',
+  )
+  if (!isTotal) return null
+  return {
+    key,
+    isTotal: (stop) => totals.includes(String(stop.value)),
+    changes: values.map((value, at) => (isTotal[at] ? null : value)),
+    runs: runningTotals(steps),
+    // With no steps left, as while it loads, every step folds onto the axis, as bars do.
+    left: (key) => (chart.current.length > 0 ? (kept(key) ?? null) : null),
+  }
+}
+
+/** The keys of the stops just taken out, while they leave. */
+function leavingKeys(chart: CartesianChartValue) {
+  return chart.stops.filter((stop) => stop.leaving).map((stop) => stop.key)
+}
+
+/**
+ * What each key last had, for the keys just taken out: kept from the render
+ * before, while they leave, and let go once they have left. `signature`
+ * writes a value, so a render that changes none keeps what it has.
+ */
+function useLeft<T>(
+  keys: readonly string[],
+  values: readonly T[],
+  leaving: readonly string[],
+  signature: (value: T | undefined) => string,
+) {
+  const said = keys.map((key, at) => `${key}=${signature(values[at])}`).join('\u0000')
+  const now = new Map(keys.map((key, at) => [key, values[at]]))
+  const [state, setState] = useState({
+    said,
+    now,
+    gone: new Map<string, T | undefined>(),
+  })
+  let gone = state.gone
+  if (state.said !== said) {
+    gone = new Map([...state.gone, ...state.now])
+    for (const key of keys) gone.delete(key)
+    setState({ said, now, gone })
+  } else if ([...gone.keys()].some((key) => !leaving.includes(key))) {
+    // The data changes a render before its keys are marked leaving, so only a render after it lets them go.
+    gone = new Map([...gone].filter(([key]) => leaving.includes(key)))
+    setState({ ...state, gone })
+  }
+  return (key: string) => gone.get(key)
+}
+
+/** How a bridge writes a change: with its sign, so a rise reads `+120`. */
+function signedWriter(locale: Intl.LocalesArgument, format: ChartFormat | undefined) {
+  if (typeof format === 'function') {
+    return (value: number) => (value > 0 ? `+${format(value)}` : format(value))
+  }
+  const formatter = numberFormatter(locale, {
+    ...format,
+    signDisplay: 'exceptZero',
+  })
+  return (value: number) => formatter.format(value)
+}
+
+/**
+ * A bridge's words: each step's change in words, so its sign never rests on
+ * colour, and the running total after it, or a total's value; the tooltip's
+ * change and running total; and a data table of both.
+ */
+function bridgeWords(chart: CartesianChartValue, bridge: BridgeValue): ChartWords {
+  const { messages, valueText } = chart
+  const signed = signedWriter(chart.locale, chart.format)
+  const run = (stop: ChartItem) => valueText(bridge.runs[stop.index] ?? 0)
+  const change = (stop: ChartItem) => bridge.changes[stop.index] ?? null
+  return {
+    describe: (stop) => {
+      const name = pickedName(chart.stopText(stop), chart.selected === stop.key, messages)
+      if (bridge.isTotal(stop)) return `${name}, ${messages.bridgeTotal(run(stop))}`
+      const value = change(stop)
+      const said =
+        value === null
+          ? messages.noValue
+          : messages.change(value, valueText(Math.abs(value)))
+      return `${name}, ${messages.bridgeStep(said, run(stop))}`
+    },
+    tooltip: (stop) => (
+      <BridgeTooltipContent
+        chart={chart}
+        name={chart.stopText(stop)}
+        tone={bridgeTone(bridge, stop, change(stop))}
+        rows={
+          bridge.isTotal(stop)
+            ? [[messages.total, run(stop)]]
+            : [
+                [
+                  messages.stepChange,
+                  change(stop) === null ? messages.noValue : signed(change(stop) ?? 0),
+                ],
+                [messages.runningTotal, run(stop)],
+              ]
+        }
+      />
+    ),
+    table: {
+      ...cartesianTable(chart, [messages.stepChange, messages.runningTotal], (stop) => {
+        const value = change(stop)
+        return [
+          bridge.isTotal(stop)
+            ? messages.total
+            : value === null
+              ? messages.noValue
+              : signed(value),
+          run(stop),
+        ]
+      }),
+      header: messages.step,
+    },
+  }
+}
+
+/** A bridge step's tooltip: its name keyed by its colour, then its change and the running total after it, or a total's value. */
+function BridgeTooltipContent({
+  chart,
+  name,
+  tone,
+  rows,
+}: {
+  chart: CartesianChartValue
+  name: string
+  /** The step's colour, which keys it to its bar. */
+  tone: string
+  rows: readonly (readonly [string, string])[]
+}) {
+  return (
+    // The tooltip sits outside the chart, so it carries the chart's id, as every chart's does.
+    <div data-chart={chart.id} className='grid min-w-36 gap-1'>
+      <div className='flex items-center gap-2'>
+        <span
+          aria-hidden
+          className={cn(swatchClassName, forcedSeriesColor(0))}
+          style={{ '--swatch': tone } as CSSProperties}
+        />
+        <span className='font-medium'>{name}</span>
+      </div>
+      {rows.map(([term, value]) => (
+        <div key={term} className='flex items-center gap-4'>
+          <span className={cn(tooltipQuietClassName, 'flex-1')}>{term}</span>
+          {/* A value with a unit reads in its own order whatever the page's direction. */}
+          <span dir='auto' className='font-medium tabular-nums'>
+            {value}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -230,6 +506,7 @@ function barPlace(
   bar: BarFrameValue,
   stop: CartesianStop,
   key: string,
+  bridge: BridgeValue | null,
 ): BarPlace {
   const { model } = bar
   const bars = chart.series.filter((k) => model.markOf(k) === 'bar')
@@ -244,6 +521,17 @@ function barPlace(
     (k) => chart.rowOf(k, stop) !== null,
   )
   const { scale, baseline: zero } = model.valueAxisOf(key)
+  if (bridge) {
+    // A step folds into where it starts: the running total before it.
+    const span = stop.leaving ? bridge.left(stop.key) : model.spans[key]?.[stop.index]
+    const start = span
+      ? scale.place(span[0])
+      : stop.leaving
+        ? zero
+        : scale.place(bridge.runs[stop.index] ?? 0)
+    if (!span || stop.leaving || !chart.entered) return { band, from: start, to: start }
+    return { band, from: start, to: scale.place(span[1]) }
+  }
   const span = stop.leaving ? null : model.spans[key]?.[stop.index]
   if (!span || !chart.entered) return { band, from: zero, to: zero }
   return { band, from: scale.place(span[0]), to: scale.place(span[1]) }
@@ -276,12 +564,16 @@ function isOutermost(
   })
 }
 
-/** What a bar's label reads: its value, its range, or nothing for a missing value. */
-function labelText(raw: unknown, write: (value: number) => string) {
-  const range = rangeOf(raw)
-  if (range) return `${write(range[0])} – ${write(range[1])}`
-  const number = numberOf(raw)
-  return number === null ? '' : write(number)
+/** What a bar's label says it reads: its value, its range, or a change with its sign; nothing for none. */
+function readingText(
+  reading: BarReading | undefined,
+  write: (value: number) => string,
+  signed: (value: number) => string,
+) {
+  if (!reading) return ''
+  const { value } = reading
+  if (typeof value !== 'number') return `${write(value[0])} – ${write(value[1])}`
+  return reading.signed ? signed(value) : write(value)
 }
 
 type BarProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
@@ -336,6 +628,12 @@ function Bar(props: BarProps) {
   const chart = useCartesian()
   const { spotlit } = useChartActive()
   const bar = useBarFrame()
+  const bridge = use(BridgeContext)
+  if (bridge && negativeColor !== undefined) {
+    throw new Error(
+      'A bridge colours its falls with `--bar-chart-fall`, not `negativeColor`: set the variable on the chart.',
+    )
+  }
   const position = labelPosition(label)
   const { orientation } = chart
   const write = formatterOf(chart.locale, labelFormat ?? chart.format)
@@ -374,7 +672,7 @@ function Bar(props: BarProps) {
             {/* A live plot's rows that leave have scrolled out already, so only the rows still in it draw.
               A bar stands only where its series has a row. */}
             {rowStops(chart, live ? chart.current : chart.stops, dataKey).map((stop) => {
-              const place = liveBand(barPlace(chart, bar, stop, dataKey), live)
+              const place = liveBand(barPlace(chart, bar, stop, dataKey, bridge), live)
               const row = chart.rowOf(dataKey, stop)
               const raw = row?.[dataKey]
               const value = numberOf(raw)
@@ -382,19 +680,27 @@ function Bar(props: BarProps) {
               const below = range ? range[1] < range[0] : value !== null && value < 0
               const own =
                 (row && color?.(row, stop.index)) ??
-                (below && negativeColor ? negativeColor : undefined)
+                (bridge
+                  ? bridgeTone(bridge, stop, value)
+                  : below && negativeColor
+                    ? negativeColor
+                    : undefined)
               const clip = barClip(chart, place, isOutermost(chart, bar, stop, dataKey))
               const at = Math.min(stop.index, PLACEHOLDER_COUNT - 1)
-              // A bar that arrives grows out of the placeholder in its place, or up from zero.
+              // A bar that arrives grows out of the placeholder in its place, or up from zero; a
+              // bridge's, up from where it starts.
+              const start = bridge ? place.from : zero
               const from = bar.fromPlaceholder
                 ? placeholderClip(chart, at, placeholderValues(PLACEHOLDER_COUNT)[at]!)
-                : barClip(chart, { band: place.band, from: zero, to: zero }, true)
+                : barClip(chart, { band: place.band, from: start, to: start }, true)
               const missing =
                 !stop.leaving &&
                 chart.entered &&
                 !chart.hidden.includes(dataKey) &&
                 value === null &&
-                range === null
+                range === null &&
+                // A bridge's total with no value stands at the running total.
+                !bridge?.isTotal(stop)
               const delay = cascadeDelay(bar, stop.index)
               return (
                 <BarShape
@@ -408,7 +714,8 @@ function Bar(props: BarProps) {
                   images={images}
                   slot={slot}
                   track={track ? trackClip(chart, place.band) : undefined}
-                  missing={missing ? missingMark(chart, place.band, zero) : undefined}
+                  // A bridge's missing change sits at the running total, which carries on past it.
+                  missing={missing ? missingMark(chart, place.band, start) : undefined}
                 />
               )
             })}
@@ -423,6 +730,7 @@ function Bar(props: BarProps) {
             dataKey={dataKey}
             position={position}
             write={write}
+            signed={signedWriter(chart.locale, labelFormat ?? chart.format)}
             dimmed={dimmed}
           />
         </div>
@@ -472,10 +780,15 @@ Bar.declare = ({
   ...(labelPosition(label) === 'outside'
     ? {
         room: (chart: ChartRoomState) => {
-          const write = formatterOf(chart.locale, labelFormat ?? chart.format)
+          const format = labelFormat ?? chart.format
+          const write = formatterOf(chart.locale, format)
+          const signed = signedWriter(chart.locale, format)
+          const readings = barKind(chart.kinds).reads(
+            chart.rows.map((row) => row[dataKey]),
+          )
           return outsideRoom(
             chart,
-            chart.rows.map((row) => labelText(row[dataKey], write)),
+            readings.map((reading) => readingText(reading, write, signed)),
           )
         },
       }
@@ -498,24 +811,41 @@ function BarLabels({
   dataKey,
   position,
   write,
+  signed,
   dimmed,
 }: {
   dataKey: string
   position: BarLabelPosition
   write: (value: number) => string
+  /** How a bridge's change is written, with its sign. */
+  signed: (value: number) => string
   dimmed: (stop: CartesianStop) => boolean
 }) {
   const chart = useCartesian()
   const bar = useBarFrame()
+  const bridge = use(BridgeContext)
+  const readings = bar.kind.reads(
+    chart.current.map((stop) => chart.valueOf(dataKey, stop)),
+  )
+  const texts = readings.map((reading) => readingText(reading, write, signed))
+  // A label taken out keeps what it read as it fades, since its place in the data has gone.
+  const kept = useLeft(
+    chart.current.map((stop) => stop.key),
+    texts,
+    leavingKeys(chart),
+    (text) => text ?? '',
+  )
   if (chart.hidden.includes(dataKey)) return null
   return (
     <>
       {rowStops(chart, chart.stops, dataKey).map((stop) => {
-        const place = barPlace(chart, bar, stop, dataKey)
+        const place = barPlace(chart, bar, stop, dataKey, bridge)
         const span = bar.model.spans[dataKey]?.[stop.index]
-        const text = labelText(chart.valueOf(dataKey, stop), write)
+        const text = (stop.leaving ? kept(stop.key) : texts[stop.index]) ?? ''
         const outermost = isOutermost(chart, bar, stop, dataKey)
+        // Until the chart has entered, its bars haven't risen, so their labels wait unseen.
         const shown =
+          chart.entered &&
           !stop.leaving &&
           span !== null &&
           span !== undefined &&
@@ -601,7 +931,11 @@ function BarTotals(props: BarTotalsProps) {
           <BarLabel
             key={stop.key}
             {...labelPlace(chart, place, 'outside')}
-            shown={!stop.leaving && labelFits(chart, place, write(total), 'outside')}
+            shown={
+              chart.entered &&
+              !stop.leaving &&
+              labelFits(chart, place, write(total), 'outside')
+            }
             dim={spotlit !== null && spotlit !== stop.index}
           >
             {chart.stack === 'expand' ? '' : write(total)}
@@ -627,20 +961,34 @@ BarTotals.declare = ({ format }: BarTotalsProps): ChartPartDeclaration => ({
 })
 
 /**
- * The steps of a waterfall from each change in `values`: each runs from
- * where the last one ended, as the `[from, to]` a bar takes, so a running
- * total reads as it builds. With `total`, a last step runs from zero to the
- * sum.
+ * Whether each row of a bridge is a total: its category is in `totals`.
+ * Throws on what a bridge can't be: on times, stacked, or with a total no
+ * row has.
  */
-function waterfall(values: readonly number[], total = false): Span[] {
-  const steps: Span[] = []
-  let at = 0
-  for (const value of values) {
-    steps.push([at, at + value])
-    at += value
+function bridgeTotals(
+  props: Pick<BarChartProps, 'data' | 'index' | 'indexType'>,
+  stack: ChartStack,
+  totals: readonly string[],
+): boolean[] {
+  if (props.indexType === 'time') {
+    throw new Error(
+      'A bridge steps through named changes, not times: leave out `indexType="time"`.',
+    )
   }
-  if (total) steps.push([0, at])
-  return steps
+  if (stack !== 'none') {
+    throw new Error(
+      'A bridge doesn’t stack: its one series runs from each step to the next.',
+    )
+  }
+  const names = props.data.map((row) => String(row[props.index]))
+  const unknown =
+    props.data.length > 0 ? totals.find((name) => !names.includes(name)) : undefined
+  if (unknown !== undefined) {
+    throw new Error(
+      `\`totals\` names "${unknown}", which no row's \`${props.index}\` has. Name a total by its category.`,
+    )
+  }
+  return names.map((name) => totals.includes(name))
 }
 
 export {
@@ -650,5 +998,5 @@ export {
   type BarLabelPosition,
   type BarProps,
   BarTotals,
-  waterfall,
+  bridgeTotals,
 }

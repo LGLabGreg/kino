@@ -1,5 +1,6 @@
 'use client'
 
+import type { BarMarkKind } from '@/registry/lib/chart-bar-marks'
 import type { EntrancePhase } from '@/registry/lib/chart-base'
 import type { CartesianModel } from '@/registry/lib/chart-frame'
 import {
@@ -35,6 +36,8 @@ const PLACEHOLDER_COUNT = 7
 interface BarFrameValue {
   /** The frame the bars stand in: each series' spans, a hidden one where it would sit, so it shrinks into place and grows back out of it, and the axis it is read against. */
   model: CartesianModel
+  /** Its bars' kind of mark, which says what each bar's label reads. */
+  kind: BarMarkKind
   phase: EntrancePhase
   /** The chart was loading, so its bars grow out of the placeholder. */
   fromPlaceholder: boolean
@@ -62,7 +65,9 @@ interface BarLayout {
 
 /** What a chart's labels are fitted to: its bars' layout, the plot's size and its text, and how many stops share it. */
 type BarLabelLayout = BarLayout &
-  Pick<ChartRootState, 'plotSize' | 'textWidth'> & { current: readonly unknown[] }
+  Pick<ChartRootState, 'plotSize' | 'textWidth'> & {
+    current: readonly unknown[]
+  }
 
 /** Where a bar stands: the band it takes and the span of the value axis it covers, as fractions. */
 interface BarPlace {
@@ -324,15 +329,20 @@ const BarLabel = memo(function BarLabel({
         } as CSSProperties
       }
     >
+      {/* A value with a sign or a unit reads in its own order whatever the page's direction. */}
       <span
+        dir='auto'
         className={cn(
           'absolute w-max font-medium whitespace-nowrap tabular-nums transition-none duration-(--motion-enter-duration) ease-(--motion-enter-fade-easing) group-data-mounted/chart:transition-[opacity,color]',
+          // Past the bar, it hides the grid under it in the colour of the surface the chart is on.
           outside
-            ? 'bg-background/85'
+            ? 'bg-(--chart-surface,var(--card))/85'
             : 'bg-background/85 text-foreground rounded-(--control-radius-xs) px-1',
           !shown && 'opacity-0',
           placeClass,
         )}
+        // In a cascade it fades in as its bar starts to rise.
+        style={{ transitionDelay: delay }}
       >
         {children}
       </span>
@@ -459,7 +469,7 @@ function barClipPath(
     orientation === 'vertical' ? [insets.left, insets.right] : [insets.top, insets.bottom]
   const size = Math.max(0, 1 - start - end)
   const centre = start + size / 2
-  const half = `min(${round(size * 50)}${across}, var(--bar-chart-max-thickness, 4rem) / 2)`
+  const half = halfThickness(size, across)
   const near = `calc(${round(centre * 100)}${across} - ${half})`
   const farAcross = `calc(${round((1 - centre) * 100)}${across} - ${half})`
   const opposite = {
@@ -483,6 +493,11 @@ function barClipPath(
   // an inset with no `round` and one with, and a corner of 0px drops the `round`.
   const radii = corners.map((rounded) => (rounded ? radius : '0.01px'))
   return `inset(${edges.join(' ')} round ${radii.join(' ')})`
+}
+
+/** Half a bar's thickness across `size` of the plot, in `unit`, as CSS: capped at `--bar-chart-max-thickness`. */
+function halfThickness(size: number, unit: 'cqw' | 'cqh') {
+  return `min(${round(size * 50)}${unit}, var(--bar-chart-max-thickness, 4rem) / 2)`
 }
 
 /** A fraction written to four decimals, enough for a plot thousands of px long. */

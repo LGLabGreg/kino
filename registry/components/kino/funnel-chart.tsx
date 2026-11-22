@@ -539,8 +539,13 @@ function Funnel(props: FunnelProps) {
                 key={stop.key}
                 {...labelPlace(chart, top, 'outside')}
                 // A hidden series' labels fade as its bars sink.
+                // Until the chart has entered, its bars haven't risen, so their labels wait unseen.
                 shown={
-                  !stop.leaving && !chart.hidden.includes(dataKey) && text !== '' && fits
+                  chart.entered &&
+                  !stop.leaving &&
+                  !chart.hidden.includes(dataKey) &&
+                  text !== '' &&
+                  fits
                 }
                 dim={dimmed(stop)}
                 entering={funnel.phase === 'entering'}
@@ -572,7 +577,9 @@ Funnel.declare = ({
   series: { key: dataKey, mark: 'bar' },
   ...(label === 'none'
     ? {}
-    : { room: (chart: ChartRoomState) => funnelRoom(chart, dataKey, label, rate) }),
+    : {
+        room: (chart: ChartRoomState) => funnelRoom(chart, dataKey, label, rate),
+      }),
 })
 
 /** The share a step's label writes: of the first step, or of the step before. */

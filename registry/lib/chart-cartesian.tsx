@@ -127,6 +127,8 @@ type ChartRoomState = Pick<
   stack: ChartStack
   orientation: ChartOrientation
   rows: readonly ChartDatum[]
+  /** The kinds of mark the chart draws, as its options give them. */
+  kinds: CartesianChartOptions['kinds']
 }
 
 /**
@@ -530,6 +532,7 @@ function useCartesianChart(
     rows: drawn,
     stack: options.stack,
     orientation: options.orientation,
+    kinds: options.kinds,
   }
   // A part with rows of its own works its room out from them.
   const room = Math.max(

@@ -2,8 +2,11 @@ import type { MarkKind, SeriesSpans } from '@/registry/lib/chart-frame'
 import {
   type ChartStack,
   hiddenSpans,
+  numberOf,
+  rangeOf,
   reachOf,
   seriesSpans,
+  type Span,
   spanExtent,
   stacksOf,
 } from '@/registry/lib/chart-math'
@@ -16,9 +19,33 @@ import { type Band, bandAt } from '@/registry/lib/chart-scale'
  * its own place and comes back to it.
  */
 
-const barMarks: MarkKind = {
+/** What a bar's label reads: a value or a range, `signed` for a change written with its sign; null for none. */
+type BarReading = { value: number | Span; signed: boolean } | null
+
+/** Bars, which also say what each bar's label reads. */
+interface BarMarkKind extends MarkKind {
+  /** What each of a series' bars reads, from its values in the data's order. */
+  reads: (values: readonly unknown[]) => readonly BarReading[]
+}
+
+/** The chart's kind of bar: the one that says what its bars read. */
+function barKind(kinds: readonly MarkKind[]): BarMarkKind {
+  const kind = kinds.find((kind): kind is BarMarkKind => 'reads' in kind)
+  if (!kind) throw new Error('A `Bar` sits in a chart that draws bars.')
+  return kind
+}
+
+const barMarks: BarMarkKind = {
   mark: 'bar',
   stacks: true,
+  // Each bar reads its own value, or its range.
+  reads: (values) =>
+    values.map((raw) => {
+      const range = rangeOf(raw)
+      if (range) return { value: range, signed: false }
+      const value = numberOf(raw)
+      return value === null ? null : { value, signed: false }
+    }),
   spans: ({ count, valueOf, series, shown, stack, stackOf }) => {
     const spans = seriesSpans(count, valueOf, shown, stack, stackOf)
     return {
@@ -31,6 +58,77 @@ const barMarks: MarkKind = {
   },
   // The far end of the row's bars: the tallest, or the stack's top.
   reach: (spans, shown, index, scale) => scale.place(farEnd(spans, shown, index)),
+}
+
+/**
+ * A bridge's bars: each change runs from the running total before it to the
+ * total after, and each row `isTotal` marks stands on the axis
+ * (`bridgeSpans`). Bridges never stack. A hidden series sinks into where
+ * each of its bars starts, so it leaves from there and comes back to it.
+ */
+function bridgeMarks(isTotal: readonly boolean[]): BarMarkKind {
+  return {
+    mark: 'bar',
+    stacks: false,
+    // A change reads with its sign, and a total reads the running total, given or worked out.
+    reads: (values) => {
+      const changes = values.map(numberOf)
+      const runs = runningTotals(bridgeSpans(changes, isTotal))
+      return changes.map((value, at) => {
+        if (isTotal[at]) return { value: runs[at] ?? 0, signed: false }
+        return value === null ? null : { value, signed: true }
+      })
+    },
+    spans: ({ count, valueOf, series, shown }) => {
+      const spans: Record<string, (Span | null)[]> = {}
+      for (const key of series) {
+        const own = bridgeSpans(
+          Array.from({ length: count }, (_, at) => numberOf(valueOf(key, at))),
+          isTotal,
+        )
+        spans[key] = shown.includes(key)
+          ? own
+          : own.map((span) => span && [span[0], span[0]])
+      }
+      const reached = Object.fromEntries(shown.map((key) => [key, spans[key] ?? []]))
+      return { spans, extent: shown.length === 0 ? null : spanExtent(reached) }
+    },
+    // The far end of the row's bar: its top, or below zero, its foot.
+    reach: (spans, shown, index, scale) => scale.place(farEnd(spans, shown, index)),
+  }
+}
+
+/**
+ * The `[from, to]` of each bar of a bridge, in the data's order: a change
+ * runs from the running total before it to the total after it, and a row
+ * `isTotal` marks stands on zero, at its own value when it has one, which
+ * the run carries on from, or else at the running total. A missing change
+ * has no bar, and the run carries on past it.
+ */
+function bridgeSpans(
+  values: readonly (number | null)[],
+  isTotal: readonly boolean[],
+): (Span | null)[] {
+  let run = 0
+  return values.map((value, at) => {
+    if (isTotal[at]) {
+      run = value ?? run
+      return [0, run]
+    }
+    if (value === null) return null
+    const span: Span = [run, run + value]
+    run += value
+    return span
+  })
+}
+
+/** The running total after each bar of a bridge's `spans`: where its bar ends, or, for a missing change, where the one before ended. */
+function runningTotals(spans: readonly (Span | null)[]): number[] {
+  let run = 0
+  return spans.map((span) => {
+    if (span) run = span[1]
+    return run
+  })
 }
 
 /** How far the bars of row `index` reach from zero: the highest above it, or, with none above, the lowest below. */
@@ -89,4 +187,14 @@ function slotBand(
   }
 }
 
-export { barBand, barMarks, farEnd, slotBand }
+export type { BarMarkKind, BarReading }
+export {
+  barBand,
+  barKind,
+  barMarks,
+  bridgeMarks,
+  bridgeSpans,
+  farEnd,
+  runningTotals,
+  slotBand,
+}
