@@ -15,6 +15,7 @@ import {
   frameRest,
   frameTop,
   LineFamilyFrame,
+  LinePlaceholder,
   LineSeries,
   type LineSeriesProps,
 } from '@/registry/lib/chart-line'
@@ -115,8 +116,7 @@ function AreaChart(props: AreaChartProps) {
       }}
       description={description}
       empty={empty}
-      placeholder={placeholder}
-      fill
+      placeholder={placeholder && <LinePlaceholder name='area-chart' fill />}
       className={className}
       ref={ref}
       {...figureProps(props, areaChartKeys)}

@@ -14,6 +14,7 @@ import {
   frameRest,
   frameTop,
   LineFamilyFrame,
+  LinePlaceholder,
   LineSeries,
   type LineSeriesProps,
 } from '@/registry/lib/chart-line'
@@ -98,8 +99,7 @@ function LineChart(props: LineChartProps) {
       }}
       description={description}
       empty={empty}
-      placeholder={placeholder}
-      fill={false}
+      placeholder={placeholder && <LinePlaceholder name='line-chart' fill={false} />}
       className={className}
       ref={ref}
       {...figureProps(props, lineChartKeys)}

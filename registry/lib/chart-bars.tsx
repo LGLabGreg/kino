@@ -1,6 +1,7 @@
 'use client'
 
-import type { ChartContextValue } from '@/registry/lib/chart-core'
+import type { ChartContextValue, EntrancePhase } from '@/registry/lib/chart-core'
+import type { CartesianModel } from '@/registry/lib/chart-frame'
 import {
   type ChartOrientation,
   physicalStart,
@@ -13,7 +14,7 @@ import {
   placeholderBreatheClassName,
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
-import { type CSSProperties, memo, type ReactNode } from 'react'
+import { createContext, type CSSProperties, memo, type ReactNode, use } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -25,6 +26,29 @@ import { cn } from '@/lib/utils'
  */
 
 const PLACEHOLDER_COUNT = 7
+
+/** What a chart's bars stand in, which every `Bar` reads: the Bar chart's and the Composed chart's. */
+interface BarFrameValue {
+  /** The frame the bars stand in: each series' spans, a hidden one where it would sit, so it shrinks into place and grows back out of it, and the axis it is read against. */
+  model: CartesianModel
+  phase: EntrancePhase
+  /** The chart was loading, so its bars grow out of the placeholder. */
+  fromPlaceholder: boolean
+  entrance: 'rise' | 'cascade' | 'none'
+  /** How far through the cascade each category's bars start, by its place in the data. */
+  cascade: readonly number[]
+  /** The share of `draw` a cascade's bars start over, as CSS: its chart's variable, with its default. */
+  cascadeSpan: string
+  barGap: number
+}
+
+const BarFrameContext = createContext<BarFrameValue | null>(null)
+
+function useBarFrame() {
+  const bar = use(BarFrameContext)
+  if (!bar) throw new Error('`Bar` goes inside a `BarChart` or a `ComposedChart`.')
+  return bar
+}
 
 /** Where a bar stands: the band it takes and the span of the value axis it covers, as fractions. */
 interface BarPlace {
@@ -458,6 +482,9 @@ function round(value: number): number {
 
 export {
   barClip,
+  BarFrameContext,
+  type BarFrameValue,
+  useBarFrame,
   barClipPath,
   barInsets,
   BarLabel,

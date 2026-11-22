@@ -448,6 +448,48 @@ function ChartLegendToggle({
 }
 
 /**
+ * A series' key beside words that name it, such as a value axis's title:
+ * its colour and pattern in a square, or its marks' shape, as the legend's
+ * pressed toggle draws it, and in forced colours, the series' system colour.
+ */
+function SeriesKey({
+  series,
+  slot,
+  pattern,
+  marker,
+}: {
+  series: string
+  /** The series' place, for its colour in forced colours. */
+  slot: number
+  pattern: ChartPattern
+  /** The shape its marks take, as `markerOf` gives it, in place of a square. */
+  marker?: string
+}) {
+  return marker ? (
+    <svg
+      aria-hidden
+      viewBox='-1.2 -1.2 2.4 2.4'
+      className={cn(
+        'size-3 shrink-0 overflow-visible fill-(--swatch)',
+        forcedMarkerFills[slot % forcedMarkerFills.length],
+      )}
+      style={{ '--swatch': seriesColor(series) } as CSSProperties}
+    >
+      <path d={marker} />
+    </svg>
+  ) : (
+    <span
+      aria-hidden
+      className={cn(
+        'size-2.5 shrink-0 rounded-[calc(var(--control-radius-xs)/2.5)] bg-(--swatch)',
+        forcedSeriesColor(slot),
+      )}
+      style={swatchStyle(series, pattern)}
+    />
+  )
+}
+
+/**
  * A toggle for each of `series`, as every chart's legend draws them: one
  * pressed off hides its series, and pointing at or focusing one that shows
  * brings it forward.
@@ -510,6 +552,15 @@ const forcedMarkerColors = [
   'forced-colors:stroke-[LinkText] forced-colors:group-data-pressed/legend:fill-[LinkText]',
   'forced-colors:stroke-[GrayText] forced-colors:group-data-pressed/legend:fill-[GrayText]',
   'forced-colors:stroke-[VisitedText] forced-colors:group-data-pressed/legend:fill-[VisitedText]',
+] as const
+
+/** The series' system colours for a marker that stands alone, beside an axis's title or in the tooltip. */
+const forcedMarkerFills = [
+  'forced-colors:fill-[CanvasText]',
+  'forced-colors:fill-[Highlight]',
+  'forced-colors:fill-[LinkText]',
+  'forced-colors:fill-[GrayText]',
+  'forced-colors:fill-[VisitedText]',
 ] as const
 
 /**
@@ -728,11 +779,16 @@ function ChangeText({
   className?: string
 }) {
   if (change === null) return null
+  const size = format
+    ? format(Math.abs(change))
+    : percent(locale).format(Math.abs(change))
+  // A change too small to write as more than zero takes no arrow, which would say it moved.
+  const moved = /[1-9]/.test(size)
   return (
     // Sign and number read left to right in either direction, as a number does.
     <span dir='ltr' className={cn('text-[0.625rem] tabular-nums', className)}>
-      {change > 0 ? '▲ ' : change < 0 ? '▼ ' : ''}
-      {format ? format(Math.abs(change)) : percent(locale).format(Math.abs(change))}
+      {moved && change > 0 ? '▲ ' : moved && change < 0 ? '▼ ' : ''}
+      {size}
     </span>
   )
 }
@@ -1777,6 +1833,7 @@ function ChartFrame({
 }
 
 export {
+  SeriesKey,
   type ChartFocusProps,
   type ChartFocusValue,
   ChartFrame,

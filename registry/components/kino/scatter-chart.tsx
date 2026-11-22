@@ -14,7 +14,6 @@ import {
   useChart,
   useChartActive,
   useDeclared,
-  plotOffset,
   plotFraction,
 } from '@/registry/lib/chart-core'
 import {
@@ -24,6 +23,7 @@ import {
   type XYValue,
 } from '@/registry/lib/chart-math'
 import { pointMarks } from '@/registry/lib/chart-point-marks'
+import { markerAt, type PlacedPoint, PointSeries } from '@/registry/lib/chart-points'
 import {
   type ChartFormat,
   forcedSeriesTextColor,
@@ -41,10 +41,8 @@ import {
   type ComponentProps,
   createContext,
   type CSSProperties,
-  memo,
   use,
   useMemo,
-  useState,
 } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -107,29 +105,6 @@ const POINT_RADIUS = 5
 
 /** The smallest and largest bubble's radius, in px. */
 const BUBBLE_RADIUS = { min: 4, max: 22 } as const
-
-/**
- * The shapes each series' points take, in series order, as SVG paths in a
- * box 2 across: shapes of about the same weight, told apart at a glance and
- * in grey.
- */
-const markers = [
-  // A circle.
-  'M1,0A1,1,0,1,1,-1,0A1,1,0,1,1,1,0Z',
-  // A square.
-  'M-0.85,-0.85H0.85V0.85H-0.85Z',
-  // A triangle, pointing up, centred on its height.
-  'M0,-0.975L1.126,0.975H-1.126Z',
-  // A diamond.
-  'M0,-1.15L1.15,0L0,1.15L-1.15,0Z',
-  // A plus.
-  'M-0.36,-1H0.36V-0.36H1V0.36H0.36V1H-0.36V0.36H-1V-0.36H-0.36Z',
-] as const
-
-/** The shape of the series at `slot`: the five in turn. */
-function markerAt(slot: number): string {
-  return markers[slot % markers.length]!
-}
 
 /**
  * A bubble's radius in px for `value` among sizes up to `largest`: its
@@ -464,142 +439,40 @@ type ScatterProps = Omit<ComponentProps<'div'>, 'children'> & {
 }
 
 function Scatter(props: ScatterProps) {
-  const { dataKey, className, ...rest } = props
+  const { dataKey, ...rest } = props
   useDeclared('Scatter', Scatter.declare(props))
   const chart = useChart()
   const scatter = useScatter()
   const { spotlit } = useChartActive()
+  if (chart.status === 'empty') return null
+  const placed = (category: ChartCategory): PlacedPoint => ({
+    key: category.key,
+    ...pointPlace(chart, scatter.valueOf(category)),
+    radius: scatter.radiusOf(category),
+    depth: scatter.depthOf(category.key),
+    leaving: category.leaving,
+  })
   const litNow = spotlit === null ? undefined : chart.current[spotlit]
   const lit =
     litNow !== undefined && !litNow.leaving && scatter.seriesOf(litNow) === dataKey
-      ? litNow
+      ? { ...placed(litNow), depth: 0 }
       : undefined
-  // The last point lit, kept while its copy fades as the series comes back, so it never blinks.
-  const [held, setHeld] = useState<string | null>(null)
-  if (lit && lit.key !== held) setHeld(lit.key)
-  if (chart.status === 'empty') return null
-  const slot = chart.series.indexOf(dataKey)
-  const marker = scatter.markerOf(dataKey)
-  const shownLit = chart.current.find(
-    (category) => category.key === held && !category.leaving,
-  )
-  const dim = spotlit !== null || (chart.emphasis !== null && chart.emphasis !== dataKey)
-  const style = { '--point-color': seriesColor(dataKey) } as CSSProperties
   return (
-    <>
-      <div
-        data-slot='scatter-chart-series'
-        data-series={dataKey}
-        data-dim={dim ? '' : undefined}
-        aria-hidden
-        className={cn(
-          plotLayerClassName,
-          'z-10 transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(var(--scatter-chart-dim,0.3))]',
-          className,
-        )}
-        style={style}
-        {...rest}
-      >
-        {chart.categories.map((category) => {
-          if (scatter.seriesOf(category) !== dataKey) return null
-          const place = pointPlace(chart, scatter.valueOf(category))
-          return (
-            <ScatterPoint
-              key={category.key}
-              x={place.x}
-              y={place.y}
-              radius={scatter.radiusOf(category)}
-              marker={marker}
-              slot={slot}
-              depth={scatter.depthOf(category.key)}
-              leaving={category.leaving}
-            />
-          )
-        })}
-      </div>
-      {shownLit && (
-        <div
-          data-slot='scatter-chart-lit'
-          data-off={lit === undefined ? '' : undefined}
-          aria-hidden
-          className={cn(
-            plotLayerClassName,
-            'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
-          )}
-          style={style}
-        >
-          <ScatterPoint
-            key={shownLit.key}
-            {...pointPlace(chart, scatter.valueOf(shownLit))}
-            radius={scatter.radiusOf(shownLit)}
-            marker={marker}
-            slot={slot}
-            depth={0}
-            leaving={false}
-            still
-          />
-        </div>
-      )}
-    </>
+    <PointSeries
+      name='scatter-chart'
+      dataKey={dataKey}
+      points={chart.categories
+        .filter((category) => scatter.seriesOf(category) === dataKey)
+        .map(placed)}
+      lit={lit}
+      seriesIndex={chart.series.indexOf(dataKey)}
+      marker={scatter.markerOf(dataKey)}
+      dim={spotlit !== null || (chart.emphasis !== null && chart.emphasis !== dataKey)}
+      around={(marks) => marks}
+      {...rest}
+    />
   )
 }
-
-/**
- * One point: placed by `x` and `y`, fractions of the plot from its left
- * and top, and drawn as the series' shape at `radius` px. It glides to a
- * new place, grows in as it arrives and shrinks away as it leaves; a
- * `still` one, the lit point's copy, is simply there. Memoised, so lighting
- * a point redraws none of them.
- */
-const ScatterPoint = memo(function ScatterPoint({
-  x,
-  y,
-  radius,
-  marker,
-  slot,
-  depth,
-  leaving,
-  still = false,
-}: {
-  x: number
-  y: number
-  radius: number
-  marker: string
-  slot: number
-  depth: number
-  leaving: boolean
-  still?: boolean
-}) {
-  return (
-    <span
-      data-slot='scatter-chart-point'
-      data-leaving={leaving ? '' : undefined}
-      data-still={still ? '' : undefined}
-      className={cn(
-        // A point that leaves goes on the exit role, faster than it came and with no bounce.
-        'group/point absolute top-0 left-0 size-0 text-(--point-color) [translate:var(--point-at)] transition-none group-data-mounted/chart:transition-[translate,opacity] duration-(--motion-layout-duration) ease-[var(--motion-layout-easing),var(--motion-layout-fade-easing)] group-data-mounted/chart:starting:opacity-0 data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-[var(--motion-exit-easing),var(--motion-exit-fade-easing)] data-still:transition-none! motion-reduce:group-data-mounted/chart:transition-[opacity] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:data-leaving:ease-(--motion-exit-fade-easing)',
-        forcedSeriesTextColor(slot),
-      )}
-      style={
-        {
-          '--point-at': `${plotOffset(x, 'cqw')} ${plotOffset(y, 'cqh')}`,
-          zIndex: depth,
-        } as CSSProperties
-      }
-    >
-      <svg aria-hidden width={1} height={1} className='absolute overflow-visible'>
-        <path
-          d={marker}
-          vectorEffect='non-scaling-stroke'
-          // The page's colour around each shape keeps overlapping points apart. Under reduced
-          // motion a leaving shape keeps its size, so it fades out as an arriving one fades in.
-          className='stroke-background fill-current [stroke-width:1.5] [transform:scale(var(--point-radius))] transition-none group-data-mounted/chart:transition-[transform] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-mounted/chart:starting:[transform:scale(0)] group-data-leaving/point:[transform:scale(0)] group-data-leaving/point:duration-(--motion-exit-duration) group-data-leaving/point:ease-(--motion-exit-easing) group-data-still/point:transition-none! motion-reduce:group-data-mounted/chart:transition-none motion-reduce:group-data-leaving/point:[transform:scale(var(--point-radius))] forced-colors:stroke-[Canvas]'
-          style={{ '--point-radius': radius } as CSSProperties}
-        />
-      </svg>
-    </span>
-  )
-})
 
 /** The placeholder's points, as fractions of the plot from its left and top: a loose rising cloud. */
 const PLACEHOLDER_POINTS = [

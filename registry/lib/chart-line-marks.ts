@@ -1,6 +1,6 @@
 import type { MarkKind, SeriesSpans } from '@/registry/lib/chart-frame'
 import { type ChartDatum, numberOf, type Span } from '@/registry/lib/chart-math'
-import type { Band, LinearScale } from '@/registry/lib/chart-scale'
+import { type Band, bandCentre, type LinearScale } from '@/registry/lib/chart-scale'
 import type { LinePoint } from '@/registry/lib/line-path'
 
 /*
@@ -83,7 +83,8 @@ function seriesPoints(
     const span = flat ? null : own
     return {
       key: category.key,
-      x: category.band.start,
+      // At the band's centre, so a line runs through the middle of the bars beside it.
+      x: bandCentre(category.band),
       y: span ? 1 - scale.place(span[1]) : rest,
       ...(withBase ? { base: span ? 1 - scale.place(span[0]) : rest } : {}),
       defined: own !== null,

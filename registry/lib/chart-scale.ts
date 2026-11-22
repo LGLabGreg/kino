@@ -311,14 +311,15 @@ function spreadAlong(
   values: readonly number[],
   gaps: BandGaps | null,
   alone: number,
+  steady = false,
 ): { domain: Span; size: number } {
   const first = values[0]
   const last = values.at(-1)
   if (first === undefined || last === undefined) return { domain: [0, 1], size: 0 }
-  let least = Number.POSITIVE_INFINITY
-  for (let at = 1; at < values.length; at += 1)
-    least = Math.min(least, values[at]! - values[at - 1]!)
-  const step = values.length > 1 ? least : alone
+  const apart = values.slice(1).map((value, at) => value - values[at]!)
+  // The closest two keep bars apart; on a window that scrolls, the usual gap does, so one late
+  // row doesn't thin every bar while it crosses the plot.
+  const step = apart.length === 0 ? alone : steady ? middleOf(apart) : Math.min(...apart)
   if (gaps === null) {
     return {
       domain: values.length > 1 ? [first, last] : [first - alone, first + alone],
@@ -329,6 +330,222 @@ function spreadAlong(
   const room = step * (outer + (1 - gap) / 2)
   const domain: Span = [first - room, last + room]
   return { domain, size: (step * (1 - gap)) / (domain[1] - domain[0]) }
+}
+
+/** The middle of `values`, or the mean of the two in the middle. */
+function middleOf(values: readonly number[]): number {
+  const sorted = values.toSorted((a, b) => a - b)
+  const half = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[half]! : (sorted[half - 1]! + sorted[half]!) / 2
+}
+
+/** A value axis to line up with another: what its marks reach, and its ends where they are given. */
+interface AlignInput {
+  /** What the axis's marks and reference lines reach, zero among them when it keeps zero. */
+  extent: Span
+  domain?: readonly [DomainEnd, DomainEnd]
+  /** Ticks between whole numbers, such as 0.5; off for counts. */
+  allowDecimals?: boolean
+}
+
+/** What each step the first axis widens by costs, against how well the marks fill both axes. */
+const WIDEN_COST = 0.1
+
+/** The round steps a second axis may take, within each power of ten. */
+const ALIGN_STEPS = [1, 2, 2.5, 5] as const
+
+/** The round thinnings a short aligned axis may take, as every so many of its steps. */
+const ALIGN_THINNING = [2, 5, 10, 20, 50, 100] as const
+
+/**
+ * Two value axes whose ticks fall on the same gridlines: `primary`, as fitted
+ * on its own, and a second axis that shows `second`. The second takes the
+ * first's number of steps, in a round step of its own, and where both hold
+ * zero, their zeros line up; where one must reach further below or above
+ * zero, both widen there by whole steps. Of the ways that fit, the one whose
+ * marks fill both axes best wins, less a tenth for each step the first axis
+ * widens by, then the one with fewer steps. An end
+ * given stays as given. Null where they can't line up: the first axis isn't
+ * a run of even round ticks with one at each end, or the ends given rule
+ * out every way.
+ */
+function alignScales(
+  primary: {
+    scale: LinearScale
+    extent: Span
+    domain?: readonly [DomainEnd, DomainEnd]
+  },
+  second: AlignInput,
+): { primary: LinearScale; second: LinearScale } | null {
+  const { ticks: marked } = primary.scale
+  const [first, last] = [marked[0], marked.at(-1)]
+  if (first === undefined || last === undefined || marked.length < 2) return null
+  const step = marked[1]! - first
+  const steps = marked.length - 1
+  const [low, high] = primary.scale.domain
+  const even = marked.every((tick, at) => near(tick, first + at * step))
+  if (!even || step <= 0 || !near(low, first) || !near(high, last)) return null
+
+  const [givenLow, givenHigh] = second.domain ?? ['auto', 'auto']
+  let [from, to] = second.extent
+  if (givenLow !== 'auto') from = givenLow
+  if (givenHigh !== 'auto') to = givenHigh
+  if (from === to) to = from + 1
+  const whole = second.allowDecimals === false
+  const fill = (extent: Span, span: number) =>
+    span <= 0 ? 0 : Math.min(1, (extent[1] - extent[0]) / span)
+
+  // Both hold zero at a tick: below it and above it, each axis takes whole steps.
+  const zeroAt = -low / step
+  if (low <= 0 && high >= 0 && near(zeroAt, Math.round(zeroAt)) && from <= 0 && to >= 0) {
+    const below = Math.round(zeroAt)
+    const above = steps - below
+    const primaryLowGiven = (primary.domain?.[0] ?? 'auto') !== 'auto'
+    const primaryHighGiven = (primary.domain?.[1] ?? 'auto') !== 'auto'
+    const most = Math.max(steps * 2, 10)
+    let best: { down: number; up: number; size: number; score: number } | null = null
+    for (let down = below; down <= (primaryLowGiven ? below : most); down += 1) {
+      for (let up = above; up <= (primaryHighGiven ? above : most - down); up += 1) {
+        if (down + up < 1) continue
+        // A given end away from zero sets the step; one at zero only holds that side at none.
+        const sizes =
+          givenHigh !== 'auto' && givenHigh !== 0
+            ? up > 0
+              ? [givenHigh / up]
+              : []
+            : givenLow !== 'auto' && givenLow !== 0
+              ? down > 0
+                ? [-givenLow / down]
+                : []
+              : roundSteps((to - from) / (down + up), whole)
+        for (const size of sizes) {
+          if (!(size > 0)) continue
+          if (givenLow !== 'auto' && !near(-down * size, givenLow)) continue
+          if (givenHigh !== 'auto' && !near(up * size, givenHigh)) continue
+          if (down * size < -from - size * 1e-9 || up * size < to - size * 1e-9) continue
+          // Each step the first axis widens by costs a tenth: it keeps its own steps where the
+          // second fits them at all well.
+          const score =
+            Math.min(
+              fill(primary.extent, (down + up) * step),
+              fill([from, to], (down + up) * size),
+            ) -
+            (down + up - steps) * WIDEN_COST
+          if (
+            !best ||
+            score > best.score + 1e-9 ||
+            (near(score, best.score) && down + up < best.down + best.up)
+          ) {
+            best = { down, up, size, score }
+          }
+        }
+      }
+    }
+    if (!best) return null
+    return {
+      primary: evenScale(-best.down, best.up, step, true),
+      second: evenScale(-best.down, best.up, best.size, true),
+    }
+  }
+
+  // Otherwise the second axis's lowest tick sits on the first's, and it climbs as many steps.
+  let best: { start: number; size: number; score: number } | null = null
+  const sizes =
+    givenLow !== 'auto' && givenHigh !== 'auto'
+      ? [(givenHigh - givenLow) / steps]
+      : roundSteps((to - from) / steps, whole)
+  for (const size of sizes) {
+    if (!(size > 0)) continue
+    const start =
+      givenLow !== 'auto'
+        ? givenLow / size
+        : givenHigh !== 'auto'
+          ? givenHigh / size - steps
+          : Math.floor(from / size + 1e-9)
+    // A given low end stays where it was given, so it must fall on a step.
+    if (!near(start, Math.round(start))) continue
+    if (givenHigh !== 'auto' && !near((start + steps) * size, givenHigh)) continue
+    if (start * size > from + size * 1e-9 || (start + steps) * size < to - size * 1e-9)
+      continue
+    const score = fill([from, to], steps * size)
+    if (!best || score > best.score + 1e-9) best = { start, size, score }
+  }
+  if (!best) return null
+  return {
+    primary: evenScale(first / step, first / step + steps, step, false),
+    second: evenScale(
+      Math.round(best.start),
+      Math.round(best.start) + steps,
+      best.size,
+      false,
+    ),
+  }
+}
+
+/** Whether two values are the same but for floating-point error. */
+function near(a: number, b: number) {
+  return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b))
+}
+
+/** The round steps near `raw`, smallest first: 1, 2, 2.5 and 5 in the powers of ten around it, whole ones only when `whole`. */
+function roundSteps(raw: number, whole: boolean): number[] {
+  const power = Math.floor(Math.log10(Math.max(raw, Number.MIN_VALUE)))
+  const out: number[] = []
+  for (let exponent = power - 1; exponent <= power + 1; exponent += 1) {
+    for (const base of ALIGN_STEPS) {
+      const size = exponent < 0 ? base / 10 ** -exponent : base * 10 ** exponent
+      if (whole && !Number.isInteger(size)) continue
+      out.push(size)
+    }
+  }
+  return out
+}
+
+/**
+ * The scale from tick `from` to tick `to`, counted in steps of `size` from
+ * zero. On a short axis it shows every so many ticks, both ends and, with
+ * `zero`, zero among them where a thinning keeps them all; where only the
+ * ends and zero would show, every second, fifth or tenth tick from zero
+ * shows instead when that is more. The choice rests only on the steps below
+ * and above zero, or with no zero, on the count of steps from the lowest,
+ * so two axes lined up this way thin out alike.
+ */
+function evenScale(from: number, to: number, size: number, zero: boolean): LinearScale {
+  const at = (count: number) => {
+    const value = count * size
+    // A step such as 0.1 adds up to 0.30000000000000004; twelve figures hold every real tick.
+    return Number(value.toPrecision(12)) + 0
+  }
+  const [low, high] = [Math.round(from), Math.round(to)]
+  const counts: number[] = []
+  for (let count = low; count <= high; count += 1) counts.push(count)
+  const marked = counts.map(at)
+  // Every so many steps lands on both ends, and on zero where it holds, when it divides each side.
+  const span = zero ? greatestDivisor(-low, high) : high - low
+  const anchor = zero ? 0 : low
+  const every = (step: number) => counts.filter((count) => (count - anchor) % step === 0)
+  return linearOver([at(low), at(high)], marked, (most) => {
+    const room = Math.max(2, most)
+    let shown = [...new Set([low, ...(zero ? [0] : []), high])]
+    for (let step = 1; step <= span; step += 1) {
+      if (span % step !== 0 || every(step).length > room) continue
+      shown = every(step)
+      break
+    }
+    // Where keeping the ends leaves only them, a round thinning that shows more wins, its far end left off.
+    for (const step of ALIGN_THINNING) {
+      const thinned = every(step)
+      if (thinned.length > room) continue
+      if (thinned.length > shown.length) shown = thinned
+      break
+    }
+    return shown.map(at)
+  })
+}
+
+/** The largest whole number that divides both `a` and `b`, which may be 0. */
+function greatestDivisor(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : greatestDivisor(b, a % b)
 }
 
 interface TimeScaleOptions {
@@ -357,7 +574,7 @@ function timeScale(
   { timeZone, firstDay = 1, bands, window = null }: TimeScaleOptions,
 ): TimeScale {
   const unit = timeUnitOf(times, timeZone)
-  const spread = spreadAlong(times, bands, unitLength(unit))
+  const spread = spreadAlong(times, bands, unitLength(unit), window !== null)
   const domain: Span = window ? [window.from, window.from + window.length] : spread.domain
   const [low, high] = domain
   const span = high - low
@@ -604,6 +821,7 @@ function scaleSignature(scale: ChartScale): string {
 }
 
 export {
+  alignScales,
   type Band,
   type BandGaps,
   bandAt,

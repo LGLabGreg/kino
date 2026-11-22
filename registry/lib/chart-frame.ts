@@ -9,6 +9,7 @@ import {
   type XYValue,
 } from '@/registry/lib/chart-math'
 import {
+  alignScales,
   type Band,
   type BandGaps,
   bandScale,
@@ -87,6 +88,12 @@ interface ValueAxisOptions {
   zero?: boolean
   /** The value marks grow from, held inside the range; zero by default. */
   base?: number
+  /**
+   * On an axis other than the chart's own, its ticks on the own axis's
+   * gridlines, with the zeros lined up (`alignScales`); on by default. Off
+   * fits it to its series alone.
+   */
+  align?: boolean
 }
 
 /** What runs along the x axis: the rows' categories in order, a number of each row's, or a time. */
@@ -130,8 +137,10 @@ interface CartesianInput {
   kinds: readonly [MarkKind, ...MarkKind[]]
   stack: ChartStack
   x: CartesianX
-  /** The chart's own value axis, `'value'`; any other a series names fits what it reaches. */
+  /** The chart's own value axis, `'value'`. */
   y: ValueAxisOptions
+  /** Every other value axis a series names, by its id; one not here fits what it reaches. */
+  axes?: Readonly<Record<string, ValueAxisOptions>>
   references: readonly ChartReference[]
   /** The px kept past the ends of the chart's own value axis, `length` px long, for labels beyond the bars. */
   room: { px: number; length: number }
@@ -149,6 +158,8 @@ interface CartesianModel {
   markOf: (key: string) => ChartMark
   /** The id of the value axis a series is read against. */
   axisOf: (key: string) => string
+  /** Whether a series adds to its category's total: a mark that stacks, read against the chart's own value axis. */
+  totals: (key: string) => boolean
   /** The scale of the value axis a series is read against, and where its marks grow from on it, as a fraction of it. */
   valueAxisOf: (key: string) => { scale: LinearScale; baseline: number }
   /** The stack a series stacks in, which only its own kind of mark on its axis shares. */
@@ -165,6 +176,20 @@ interface CartesianModel {
    */
   point: (index: number) => { value: XYValue; place: XYValue } | null
 }
+
+/**
+ * Where each kind of mark's layers stack on the plot, whatever order their
+ * parts are written in: areas at the back, then bars, lines and points, so
+ * a fill never covers a bar and a line or a point is never hidden by one.
+ * Reference areas sit behind them all, and reference lines and labels
+ * above.
+ */
+const markLayer = {
+  area: 'z-6',
+  bar: 'z-8',
+  line: 'z-10',
+  point: 'z-12',
+} as const satisfies Record<ChartMark, string>
 
 /** The id of the chart's own value axis, which a series reads unless it names another. */
 const VALUE_AXIS = 'value'
@@ -230,8 +255,10 @@ function cartesianModel(input: CartesianInput): CartesianModel {
       extents.set(group.axis, [...(extents.get(group.axis) ?? []), out.extent])
   }
 
-  const fit = (axis: string): LinearScale => {
-    const options = axis === VALUE_AXIS ? y : {}
+  const optionsOf = (axis: string): ValueAxisOptions =>
+    axis === VALUE_AXIS ? y : (input.axes?.[axis] ?? {})
+  const fit = (axis: string): { scale: LinearScale; extent: Span } => {
+    const options = optionsOf(axis)
     const reached = extents.get(axis) ?? []
     let extent: Span = reached.length
       ? [Math.min(...reached.map((e) => e[0])), Math.max(...reached.map((e) => e[1]))]
@@ -243,23 +270,62 @@ function cartesianModel(input: CartesianInput): CartesianModel {
     )
     if (axis === VALUE_AXIS)
       extent = extentWithRoom(extent, input.room.px, input.room.length)
-    const onAxis = shown.filter((key) => axisOf(key) === axis)
-    return linearScale(extent, {
+    const scale = linearScale(extent, {
       domain: options.domain,
       tickCount: options.tickCount,
       tickValues: options.tickValues,
       nice: options.nice ?? stack !== 'expand',
-      allowDecimals:
-        options.allowDecimals ?? (stack === 'expand' || !allWhole(rows, onAxis)),
+      allowDecimals: allowDecimalsOn(axis),
     })
+    return { scale, extent }
   }
-  const value = fit(VALUE_AXIS)
-  const scales: CartesianModel['y'] = {
-    ...Object.fromEntries(
-      axes.filter((axis) => axis !== VALUE_AXIS).map((axis) => [axis, fit(axis)]),
-    ),
-    value,
+  const allowDecimalsOn = (axis: string) =>
+    optionsOf(axis).allowDecimals ??
+    (stack === 'expand' ||
+      !allWhole(
+        rows,
+        shown.filter((key) => axisOf(key) === axis),
+      ))
+  const ownAxis = fit(VALUE_AXIS)
+  const others = axes.filter((axis) => axis !== VALUE_AXIS)
+  const fitted = new Map(others.map((axis) => [axis, fit(axis)]))
+  const scales: Record<string, LinearScale> & { value: LinearScale } = {
+    ...Object.fromEntries(others.map((axis) => [axis, fitted.get(axis)!.scale])),
+    value: ownAxis.scale,
   }
+  // Each other axis's ticks fall on the own axis's gridlines; once one has widened the own axis,
+  // every axis lines up again with it held, so they all share its gridlines.
+  // An axis lines up only with what shows: one whose series are all hidden, or any while the own
+  // axis shows nothing, keeps its own fit.
+  const showing = (axis: string) => shown.some((key) => axisOf(key) === axis)
+  const aligned = showing(VALUE_AXIS)
+    ? others.filter((axis) => (optionsOf(axis).align ?? true) && showing(axis))
+    : []
+  for (const hold of [false, true]) {
+    for (const axis of aligned) {
+      const second = fitted.get(axis)!
+      const out = alignScales(
+        {
+          scale: scales.value,
+          extent: ownAxis.extent,
+          // Shares of a whole always run to the whole, so the own axis never widens past it.
+          domain:
+            hold || stack === 'expand'
+              ? [scales.value.domain[0], scales.value.domain[1]]
+              : y.domain,
+        },
+        {
+          extent: second.extent,
+          domain: optionsOf(axis).domain,
+          allowDecimals: allowDecimalsOn(axis),
+        },
+      )
+      if (!out) continue
+      scales.value = out.primary
+      scales[axis] = out.second
+    }
+  }
+  const value = scales.value
   const baselines: CartesianModel['baselines'] = {
     ...Object.fromEntries(
       Object.entries(scales).map(([axis, scale]) => [
@@ -293,6 +359,8 @@ function cartesianModel(input: CartesianInput): CartesianModel {
     baselines,
     markOf,
     axisOf,
+    totals: (key) =>
+      axisOf(key) === VALUE_AXIS && (kindOf.get(markOf(key))?.stacks ?? false),
     valueAxisOf: (key) => {
       const axis = axisOf(key)
       const scale = scales[axis]
@@ -410,6 +478,7 @@ export {
   cartesianModel,
   type CartesianX,
   type ChartReference,
+  markLayer,
   type MarkKind,
   type SeriesSpans,
   VALUE_AXIS,

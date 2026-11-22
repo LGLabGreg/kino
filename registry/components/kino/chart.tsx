@@ -43,6 +43,7 @@ import {
   plotLayerClassName,
   tooltipTriggerId,
   useChartFocus,
+  SeriesKey,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
 import { bandCentre, tickLadder, timeLadder } from '@/registry/lib/chart-scale'
@@ -355,6 +356,7 @@ function ValueAxis({
   ...props
 }: AxisProps & { side: AxisSide; axis?: ChartAxis }) {
   const chart = useChart()
+  const { markerOf } = useChartRootValue()
   const { stack, locale, status, direction } = chart
   const id = useId()
   const frame = numberAxis(chart, axis)
@@ -376,15 +378,45 @@ function ValueAxis({
         ? { style: 'percent' }
         : typeof own === 'function'
           ? own
-          : { maximumFractionDigits: 1, ...own, notation: 'compact' }),
+          : // Shortened to 1.5K, never rounded to 2K: a whole-number format's ticks still differ.
+            {
+              ...own,
+              minimumFractionDigits: 0,
+              maximumFractionDigits: Math.max(1, own?.maximumFractionDigits ?? 1),
+              notation: 'compact',
+            }),
   )
   const layer = useRef<HTMLSpanElement>(null)
-  const ticks = status === 'ready' ? all : []
+  // Beside another value axis, one that holds a single series is titled with it and its key, so
+  // which axis reads which series never rests on colour.
+  const onAxis = chart.series.filter((key) => chart.frame.axisOf(key) === axis)
+  // An axis whose series are all hidden reads nothing, so its ticks fade until one shows again.
+  const reads = axis === 'x' || onAxis.some((key) => !chart.hidden.includes(key))
+  const ticks = status === 'ready' && reads ? all : []
+  const keyed =
+    axis !== 'x' && Object.keys(chart.frame.y).length > 1 && onAxis.length === 1
+      ? onAxis[0]
+      : undefined
+  const title = label ?? frame.label ?? (keyed && (chart.config[keyed]?.label ?? keyed))
   const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [write(tick.value)]))
   return (
     <AxisFrame
       side={side}
-      label={label ?? frame.label}
+      label={
+        keyed && title ? (
+          <span className='inline-flex items-center gap-1.5'>
+            <SeriesKey
+              series={keyed}
+              slot={chart.series.indexOf(keyed)}
+              pattern={chart.patternOf(keyed)}
+              marker={markerOf(keyed) ?? undefined}
+            />
+            {title}
+          </span>
+        ) : (
+          title
+        )
+      }
       slot='chart-value-axis'
       aria-hidden
       className={className}

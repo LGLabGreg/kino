@@ -16,9 +16,13 @@ import {
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
-import type { CartesianModel } from '@/registry/lib/chart-frame'
+import { type CartesianModel, markLayer } from '@/registry/lib/chart-frame'
 import { seriesPoints } from '@/registry/lib/chart-line-marks'
-import { type ChartLive, ChartLiveLayer } from '@/registry/lib/chart-live-clock'
+import {
+  type ChartLive,
+  ChartLiveLayer,
+  LIVE_SPAN,
+} from '@/registry/lib/chart-live-clock'
 import type { ReadingDirection } from '@/registry/lib/chart-math'
 import {
   forcedSeriesColor,
@@ -87,7 +91,7 @@ import { cn } from '@/lib/utils'
  */
 
 /** Which chart a series belongs to, which names the variables it reads. */
-type LineFamilyName = 'line-chart' | 'area-chart' | 'bump-chart'
+type LineFamilyName = 'line-chart' | 'area-chart' | 'bump-chart' | 'composed-chart'
 
 interface LineFamilyValue {
   name: LineFamilyName
@@ -183,7 +187,6 @@ function LineFamilyFrame({
   description,
   empty,
   placeholder,
-  fill,
   className,
   children,
   ref,
@@ -193,10 +196,8 @@ function LineFamilyFrame({
   family: Omit<LineFamilyValue, 'litDots'>
   description?: string
   empty?: ReactNode
-  /** Whether the placeholder shows, while the data loads. */
-  placeholder: boolean
-  /** Whether the placeholder is filled, as the areas are. */
-  fill: boolean
+  /** What shows while the data loads, such as a `LinePlaceholder`; nothing once it has. */
+  placeholder: ReactNode
   ref?: Ref<HTMLElement>
 }) {
   const litDots = useRef(new Map<string, HTMLElement>())
@@ -215,7 +216,7 @@ function LineFamilyFrame({
           'grid-cols-[minmax(0.375rem,auto)_minmax(0,1fr)_minmax(0.375rem,auto)] **:data-[slot=chart-columns]:before:absolute **:data-[slot=chart-columns]:before:inset-y-0 **:data-[slot=chart-columns]:before:-inset-x-1.5',
           className,
         )}
-        placeholder={placeholder && <LinePlaceholder name={family.name} fill={fill} />}
+        placeholder={placeholder}
         {...props}
       >
         {children}
@@ -584,7 +585,8 @@ function LineSeries({
       aria-hidden
       className={cn(
         plotLayerClassName,
-        'z-10 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-hidden:opacity-0',
+        fill ? markLayer.area : markLayer.line,
+        'transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-hidden:opacity-0',
         className,
       )}
       style={
@@ -856,13 +858,6 @@ function litWindow(
   return { from: `${share(left) * 100}%`, to: `${share(right) * 100}%` }
 }
 
-/**
- * How many plots wide a live series' masked parts are: a mask hides what is
- * past its own box, and the layer they move in draws rows up to two plots
- * past its start before the anchor moves on.
- */
-const LIVE_SPAN = 3
-
 /** A masked part of a series: the plot, or on a live plot, `LIVE_SPAN` plots on from its start. */
 function masked(live: boolean) {
   return live ? 'absolute inset-y-0 start-0 w-[300%]' : 'absolute inset-0'
@@ -985,7 +980,8 @@ function LineLitMarks() {
   const shownAt = at ?? last
   const category = shownAt === null ? undefined : chart.current[shownAt]
   if (chart.status !== 'ready' || !category || !chart.entered) return null
-  const x = chart.direction === 'rtl' ? 1 - category.band.start : category.band.start
+  const centre = bandCentre(category.band)
+  const x = chart.direction === 'rtl' ? 1 - centre : centre
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
   const move =
     'absolute top-0 left-0 transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-none motion-reduce:transition-none'
@@ -1127,9 +1123,11 @@ export {
   framePoints,
   frameRest,
   frameTop,
+  EntranceWipe,
   LineFamilyFrame,
   type LineFamilyName,
   type LineFamilyValue,
+  LinePlaceholder,
   LineSeries,
   type LineSeriesProps,
   useLineFamily,

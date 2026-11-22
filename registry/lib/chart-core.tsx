@@ -45,8 +45,10 @@ import {
   type ChartRootState,
   type ChartRootValue,
   forcedSeriesColor,
+  formatterOf,
   percent,
   type PlotPoint,
+  SeriesKey,
   swatchClassName,
   swatchStyle,
   tooltipQuietClassName,
@@ -55,6 +57,7 @@ import {
   useChartGroup,
   useChartMoves,
   useChartRoot,
+  useChartRootValue,
   useLeaving,
 } from '@/registry/lib/chart-root'
 import {
@@ -171,6 +174,8 @@ interface ChartFrame {
   baselines: Readonly<Record<string, number>> & { value: number }
   /** The id of the value axis a series is read against. */
   axisOf: (key: string) => string
+  /** Whether a series adds to its category's total, as the tooltip's total row sums it: one that stacks on the chart's own value axis. */
+  totals: (key: string) => boolean
   /**
    * Whether its range waits for the plot's size, because a part keeps room
    * in px past the value axis's end, as labels past the bars do: until the
@@ -255,6 +260,16 @@ interface ChartContextValue extends ChartRootState {
   datumText: (value: unknown) => string
   /** How a series' value on a category is written in the tooltip, the data table and what is read out: `datumText` of it by default. */
   seriesText: (category: ChartCategory, key: string) => string
+  /**
+   * How much a series' value changed since `before`, as a share of it, which
+   * the tooltip and what is read out give; none for a series written as a
+   * percent, whose change as a share of a share would read as points.
+   */
+  seriesChange: (
+    category: ChartCategory,
+    before: ChartCategory,
+    key: string,
+  ) => number | null
   categoryText: (value: unknown) => string
   /** The category under the pointer or the focus, for a chart you control: the root's own props. */
   activeProps: Pick<
@@ -394,7 +409,14 @@ interface ChartPartDeclaration {
 /** What a part's room is worked out from: the chart before its scales are made, and the rows it draws. */
 type ChartRoomState = Pick<
   ChartContextValue,
-  'series' | 'hidden' | 'stack' | 'orientation' | 'locale' | 'format' | 'textWidth'
+  | 'series'
+  | 'config'
+  | 'hidden'
+  | 'stack'
+  | 'orientation'
+  | 'locale'
+  | 'format'
+  | 'textWidth'
 > & { rows: readonly ChartDatum[] }
 
 /** A component that tells the chart about itself as it renders. */
@@ -892,9 +914,8 @@ function columnLabel(
   const values = chart.series
     .filter((key) => !chart.hidden.includes(key))
     .map((key) => {
-      const value = category.datum[key]
       const name = chart.config[key]?.label
-      const change = before ? changeSince(value, before.datum[key]) : null
+      const change = before ? chart.seriesChange(category, before, key) : null
       const said =
         change === null
           ? ''
@@ -1163,11 +1184,22 @@ function useCategoryValue(
     }
   }, [entering, moves, figure, cascade, cascadeFallback])
 
-  const datumText = (value: unknown) => {
+  const textOf = (value: unknown, write: (value: number) => string) => {
     const range = rangeOf(value)
-    if (range) return `${valueText(range[0])} – ${valueText(range[1])}`
+    if (range) return `${write(range[0])} – ${write(range[1])}`
     const number = numberOf(value)
-    return number === null ? messages.noValue : valueText(number)
+    return number === null ? messages.noValue : write(number)
+  }
+  const datumText = (value: unknown) => textOf(value, valueText)
+  // A series reads in its value axis's own format, where it has one.
+  const writers = new Map<string, (value: number) => string>()
+  const writerOf = (key: string) => {
+    const axis = frame.axisOf(key)
+    const own = frame.y[axis]?.format
+    if (own === undefined) return valueText
+    const made = writers.get(axis) ?? formatterOf(state.locale, own)
+    writers.set(axis, made)
+    return made
   }
   const chart: ChartContextValue = {
     ...state,
@@ -1181,7 +1213,13 @@ function useCategoryValue(
     xyOf,
     inset: options.inset ?? 0,
     datumText,
-    seriesText: (category, key) => datumText(category.datum[key]),
+    seriesText: (category, key) => textOf(category.datum[key], writerOf(key)),
+    seriesChange: (category, before, key) => {
+      const own = frame.y[frame.axisOf(key)]?.format ?? format
+      return typeof own === 'object' && own.style === 'percent'
+        ? null
+        : changeSince(category.datum[key], before.datum[key])
+    },
     categoryText: categoryFormat,
     activeProps: { activeIndex, defaultActiveIndex, onActiveIndexChange },
     selected,
@@ -1261,6 +1299,7 @@ function useCategoryChart<Shapes>(
     y: { [VALUE_AXIS]: { scale, previous: previousY[VALUE_AXIS] ?? scale } },
     baselines: { [VALUE_AXIS]: baselineOf(scale) },
     axisOf: () => VALUE_AXIS,
+    totals: () => true,
     // A part's room is registered once it has mounted, by which time the plot is measured.
     measuring: false,
     live: null,
@@ -1341,6 +1380,17 @@ function localeTag(locale: Intl.LocalesArgument): string | undefined {
   return undefined
 }
 
+/** A value axis other than the chart's own: how it fits what its series reach, and how it writes and titles its values. */
+interface NamedValueAxis extends Pick<
+  ValueAxisOptions,
+  'domain' | 'tickCount' | 'zero' | 'align' | 'allowDecimals'
+> {
+  /** How its values are written, on the axis, in the tooltip, the table and what is read out; the chart's `format` by default. */
+  format?: ChartFormat
+  /** What it measures, which titles it unless its `ChartYAxis` is given a `label`. */
+  label?: string
+}
+
 interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
   /** The kinds of mark the chart draws, its own first: a series that names no mark is drawn as that. */
   kinds: readonly [MarkKind, ...MarkKind[]]
@@ -1351,6 +1401,8 @@ interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
   }
   /** The chart's own value axis, beside the root's `domain`, `tickCount`, `tickValues` and `allowDecimals`. */
   y?: Pick<ValueAxisOptions, 'nice' | 'zero' | 'base'> & { label?: string }
+  /** Every other value axis a series names, by its id: how it fits, writes and titles its values. */
+  axes?: Readonly<Record<string, NamedValueAxis>>
   /** Gaps between the bands of categories, when its bars stand in them. */
   gaps?: BandGaps
 }
@@ -1452,6 +1504,7 @@ function useCartesianChart(
       allowDecimals,
       ...options.y,
     },
+    axes: options.axes,
     references,
     room: { px: room, length: valueLength },
   })
@@ -1470,7 +1523,12 @@ function useCartesianChart(
       ...Object.fromEntries(
         Object.entries(model.y).map(([axis, scale]) => [
           axis,
-          { scale, previous: previousY[axis] ?? scale },
+          {
+            scale,
+            previous: previousY[axis] ?? scale,
+            format: options.axes?.[axis]?.format,
+            label: options.axes?.[axis]?.label,
+          },
         ]),
       ),
       value: {
@@ -1481,6 +1539,7 @@ function useCartesianChart(
     },
     baselines: model.baselines,
     axisOf: model.axisOf,
+    totals: model.totals,
     measuring: room > 0 && valueLength <= 0 && drawn.length > 0,
     live: clock.live,
   }
@@ -1884,6 +1943,7 @@ function ChartTooltipContent({
   hideLabel?: boolean
 }) {
   const chart = useChart()
+  const { markerOf } = useChartRootValue()
   const total = own ?? use(ChartTooltipTotal)
   const {
     id,
@@ -1904,13 +1964,14 @@ function ChartTooltipContent({
   if (!category) return null
   const before = ordered ? current[index - 1] : undefined
   const shown = series.filter((key) => !hidden.includes(key))
-  const sum = shown.reduce((all, key) => all + (numberOf(category.datum[key]) ?? 0), 0)
+  // Only what stacks adds up, never a line or a point beside it or a series on another axis.
+  const summed = shown.filter((key) => chart.frame.totals(key))
+  const sum = summed.reduce((all, key) => all + (numberOf(category.datum[key]) ?? 0), 0)
   return (
     // The tooltip sits outside the chart, so it carries the chart's id for its colours.
     <div data-chart={id} className={cn('grid min-w-36 gap-1', className)} {...props}>
       {!hideLabel && <div className='font-medium'>{categoryText(category.value)}</div>}
       {shown.map((key) => {
-        const value = category.datum[key]
         return (
           // The series brought forward reads in full colour; the rest stay as they are, legible.
           <div
@@ -1918,18 +1979,28 @@ function ChartTooltipContent({
             data-lit={emphasis === key ? '' : undefined}
             className='group/row flex items-center gap-2'
           >
-            <span
-              aria-hidden
-              className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
-              style={swatchStyle(key, patternOf(key))}
-            />
+            {/* A series drawn in a shape of its own, such as a line or points, keys it by that shape, as the legend does. */}
+            {markerOf(key) ? (
+              <SeriesKey
+                series={key}
+                slot={series.indexOf(key)}
+                pattern={patternOf(key)}
+                marker={markerOf(key) ?? undefined}
+              />
+            ) : (
+              <span
+                aria-hidden
+                className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
+                style={swatchStyle(key, patternOf(key))}
+              />
+            )}
             <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
               {config[key]?.label ?? key}
               {isForecast(chart, key, index) && ` · ${messages.forecast}`}
             </span>
             {before && (
               <ChangeText
-                change={changeSince(value, before.datum[key])}
+                change={chart.seriesChange(category, before, key)}
                 locale={locale}
                 className={tooltipQuietClassName}
               />
@@ -1941,7 +2012,7 @@ function ChartTooltipContent({
           </div>
         )
       })}
-      {total && shown.length > 1 && (
+      {total && summed.length > 1 && (
         <div className='border-background/20 mt-0.5 flex items-center gap-2 border-t pt-1 forced-colors:border-[CanvasText]'>
           <span className='text-background/75 flex-1 forced-colors:text-[CanvasText]'>
             {messages.total}
@@ -2108,6 +2179,7 @@ function ShareTooltipContent({
 
 export {
   type LiveChartProps,
+  type NamedValueAxis,
   axisLayerClassName,
   axisSlide,
   categoryReader,

@@ -17,6 +17,7 @@ import {
   frameRest,
   frameTop,
   LineFamilyFrame,
+  LinePlaceholder,
   LineSeries,
   type LineSeriesProps,
   useLineFamily,
@@ -425,8 +426,7 @@ function BumpChart(props: BumpChartProps) {
         }}
         description={description}
         empty={empty}
-        placeholder={placeholder}
-        fill={false}
+        placeholder={placeholder && <LinePlaceholder name='bump-chart' fill={false} />}
         // Each rank's row is at least `--bump-chart-row` tall; the chart is as tall as its rows,
         // unless a height of yours spreads them.
         className={cn(

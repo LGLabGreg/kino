@@ -406,6 +406,14 @@ function useLiveClock({
   }
 }
 
+/**
+ * How many plots wide a live layer's own boxes are, such as a series' masked
+ * parts or its bars' clips: a mask or a clip hides what is past its own box,
+ * and the layer they move in draws rows up to two plots past its start
+ * before the anchor moves on.
+ */
+const LIVE_SPAN = 3
+
 /** How far a layer reaches past the plot, on each side, and its moving box's insets within it. */
 const reaches = {
   // Past its top, bottom and end by the room the frame keeps for a dot there.
@@ -467,4 +475,4 @@ function ChartLiveLayer({
   )
 }
 
-export { type ChartLive, ChartLiveLayer, useLiveClock }
+export { type ChartLive, ChartLiveLayer, LIVE_SPAN, useLiveClock }
