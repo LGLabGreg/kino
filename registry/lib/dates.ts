@@ -281,6 +281,22 @@ export function today(timeZone?: string, now: number = Date.now()): string {
   return `${pad(value('year'), 4)}-${pad(value('month'), 2)}-${pad(value('day'), 2)}`
 }
 
+/**
+ * The date `days` days before today in the visitor's own time zone, as
+ * `addDays(today(), -days)` gives it, written to be inlined in a script that
+ * runs before the first paint, such as the consent script's check of a
+ * saved choice: it references nothing outside itself.
+ */
+export function daysAgoInline(days: number): string {
+  const day = new Date()
+  day.setDate(day.getDate() - days)
+  return [
+    String(day.getFullYear()).padStart(4, '0'),
+    String(day.getMonth() + 1).padStart(2, '0'),
+    String(day.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
 /** The browser's own locale, which a field uses when it is given none. */
 export function browserLocale(): string {
   return new Intl.DateTimeFormat().resolvedOptions().locale
