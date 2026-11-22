@@ -6,15 +6,11 @@ import { Tree, TreeItem } from '@/registry/components/kino/tree'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
   type ChartConfig,
-  fractionOf,
   type Span,
   labelBox,
   labelLength,
   labelsMeet,
   labelStep,
-  tickCountFor,
-  valueScale,
-  type ValueScale,
 } from '@/registry/lib/chart-math'
 import {
   type ChartFormat,
@@ -27,6 +23,7 @@ import {
   swatchStyle,
   useEntered,
 } from '@/registry/lib/chart-root'
+import { type LinearScale, linearScale, tickCountFor } from '@/registry/lib/chart-scale'
 import { useControllable } from '@/registry/lib/controllable'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {
@@ -112,7 +109,7 @@ interface WaterfallContextValue {
   id: string
   config: ChartConfig
   kinds: readonly string[]
-  scale: ValueScale
+  scale: LinearScale
   write: (value: number) => string
   hidden: readonly string[]
   setHidden: (hidden: string[]) => void
@@ -227,7 +224,7 @@ function Waterfall({
   // The trace's own length is the axis's end, so its bars use the whole track.
   const scale = useMemo(
     () =>
-      valueScale([0, duration], {
+      linearScale([0, duration], {
         domain: [0, duration],
         tickCount: tickCountFor(TICKS, width, TICK_SPACING),
       }),
@@ -601,7 +598,7 @@ function WaterfallAxis() {
   }, [setTrackWidth])
 
   const shown = pill.state === 'shown'
-  const pillAt = pill.at === null ? null : fractionOf(pill.at, scale.domain)
+  const pillAt = pill.at === null ? null : scale.place(pill.at)
   const pillText = pill.at === null ? '' : write(pill.at)
   const roomOf = (text: string) => labelLength(text)
   // Every few ticks keep a label when they all would crowd.
@@ -614,7 +611,7 @@ function WaterfallAxis() {
     shown &&
     pillAt !== null &&
     tickCovered(
-      fractionOf(tick, scale.domain),
+      scale.place(tick),
       roomOf(write(tick)),
       pillAt,
       roomOf(pillText),
@@ -647,7 +644,7 @@ function WaterfallAxis() {
                 key={tick}
                 data-covered={covered(tick) || at % every !== 0 ? '' : undefined}
                 className='px-0.5 tabular-nums transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-covered:opacity-0'
-                style={placeAt(fractionOf(tick, scale.domain))}
+                style={placeAt(scale.place(tick))}
               >
                 <bdi>{write(tick)}</bdi>
               </span>
@@ -687,7 +684,7 @@ function WaterfallGrid() {
               key={tick}
               data-edge={tick === scale.domain[0] ? '' : undefined}
               className='border-border absolute inset-y-0 border-s border-dashed data-edge:border-solid forced-colors:border-[GrayText]'
-              style={{ insetInlineStart: `${fractionOf(tick, scale.domain) * 100}%` }}
+              style={{ insetInlineStart: `${scale.place(tick) * 100}%` }}
             />
           ))}
         </div>
@@ -776,10 +773,7 @@ function WaterfallSpan({
   const barRef = useRef<HTMLSpanElement>(null)
   const failed = error !== undefined && error !== false && error !== null
   const slot = kind === undefined ? -1 : kinds.indexOf(kind)
-  const [from, to] = [
-    fractionOf(start, scale.domain),
-    fractionOf(start + duration, scale.domain),
-  ]
+  const [from, to] = [scale.place(start), scale.place(start + duration)]
   // A span that comes as its parent opens draws in the order it ran inside the parent; one that
   // comes with its parent (the trace arriving) draws in the order it ran in the trace, so no
   // span draws ahead of its parent.

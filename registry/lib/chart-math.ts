@@ -1,11 +1,11 @@
-import { nice, ticks } from 'd3-array'
+import type { Band } from '@/registry/lib/chart-scale'
 import type { ReactNode } from 'react'
 
 /*
  * The arithmetic every chart with categories shares: which values a series
- * spans once it is stacked, the range the value axis shows and its ticks,
- * where each category sits along its axis, which key steps where, and which
- * category names fit. Everything here is a pure function of the data and the
+ * spans once it is stacked, where a mark sits on the plot, which key steps
+ * where, and which category names fit. The scales themselves, the range an
+ * axis shows and its ticks, are in the chart scale lib. Everything here is a pure function of the data and the
  * chart's options, so the parts that draw only place what it returns. What
  * one kind of chart alone works out, such as a bar's clip, lives in its file.
  */
@@ -24,7 +24,14 @@ export interface ChartSeries {
   pattern?: ChartPattern
   /** When the chart stacks, the series with the same `stack` stack together, beside the other stacks. */
   stack?: string
+  /** What the series is drawn as; the chart's own mark by default. */
+  mark?: ChartMark
+  /** The value axis the series is read against, by its id; `'value'`, the chart's own, by default. */
+  axis?: string
 }
+
+/** What a series is drawn as on a cartesian chart. */
+export type ChartMark = 'bar' | 'line' | 'area' | 'point'
 
 /** Every key is a series the chart draws, in the order written, which is also the order they stack in. */
 export type ChartConfig = Record<string, ChartSeries>
@@ -156,23 +163,6 @@ export function spanExtent(spans: Record<string, readonly (Span | null)[]>): Spa
   return [low, high]
 }
 
-/** `extent` stretched to take in `values` too, such as a reference line's. */
-export function extentWith(extent: Span, values: readonly number[]): Span {
-  return [Math.min(extent[0], ...values), Math.max(extent[1], ...values)]
-}
-
-/**
- * `extent` stretched so `room` px are left past each end that has values on
- * it, along an axis `length` px long, for labels that sit beyond the bars.
- */
-export function extentWithRoom(extent: Span, room: number, length: number): Span {
-  const [low, high] = extent
-  const ends = (high > 0 ? 1 : 0) + (low < 0 ? 1 : 0)
-  if (room <= 0 || ends === 0 || length <= room * ends) return extent
-  const grow = ((high - low) * room) / (length - room * ends)
-  return [low < 0 ? low - grow : low, high > 0 ? high + grow : high]
-}
-
 /**
  * How far from zero the spans of `keys` in row `index` reach: the highest
  * value above zero, or with `below`, the lowest below it. Zero when none do.
@@ -192,103 +182,6 @@ export function reachOf(
   return far
 }
 
-/** One end of the value axis: a value of its own, or `'auto'` to fit the data. */
-export type DomainEnd = number | 'auto'
-
-export interface ValueScale {
-  /** The values at the axis's two ends. */
-  domain: Span
-  /** The values a tick and a grid line mark. */
-  ticks: number[]
-}
-
-export interface ValueScaleOptions {
-  domain?: readonly [DomainEnd, DomainEnd]
-  /** About how many ticks to mark. */
-  tickCount?: number
-  /**
-   * About how many ticks the ends round out to, when it differs from
-   * `tickCount`: the count asked for, so an axis that marks fewer ticks
-   * once it is measured narrow keeps the range it showed before.
-   */
-  domainTickCount?: number
-  /** Round the ends left to fit the data out to the next tick. */
-  nice?: boolean
-  /** Ticks between whole numbers, such as 0.5; off for counts. */
-  allowDecimals?: boolean
-  /** The ticks to mark, in place of round ones; the ends left to fit reach them. */
-  tickValues?: readonly number[]
-}
-
-/**
- * The range the value axis shows and the values it marks. An end left to fit
- * the data is rounded out to the next tick, so the tallest bar never touches
- * the edge; an end given stays exactly as given. With no range to show (no
- * data, or every value zero), it shows 0 to 1. With `nice` off, the ends stay
- * where the data reaches, as shares stacked to fill the axis do.
- */
-export function valueScale(
-  extent: Span,
-  {
-    domain = ['auto', 'auto'],
-    tickCount = 5,
-    domainTickCount = tickCount,
-    nice: rounded = true,
-    allowDecimals = true,
-    tickValues,
-  }: ValueScaleOptions = {},
-): ValueScale {
-  const reach = tickValues?.length ? extentWith(extent, tickValues) : extent
-  let low = domain[0] === 'auto' ? reach[0] : domain[0]
-  let high = domain[1] === 'auto' ? reach[1] : domain[1]
-  if (low === high) {
-    if (domain[1] === 'auto') high = low + 1
-    else low = high - 1
-  }
-  if (rounded && !tickValues?.length) {
-    const [niceLow, niceHigh] = nice(low, high, domainTickCount)
-    if (domain[0] === 'auto') low = niceLow
-    if (domain[1] === 'auto') high = niceHigh
-    if (!allowDecimals) {
-      if (domain[0] === 'auto') low = Math.floor(low)
-      if (domain[1] === 'auto') high = Math.ceil(high)
-    }
-  }
-  if (tickValues?.length) {
-    return {
-      domain: [low, high],
-      ticks: [...tickValues]
-        .filter((tick) => tick >= low && tick <= high)
-        .toSorted((a, b) => a - b),
-    }
-  }
-  return {
-    domain: [low, high],
-    ticks: wholeTicks(low, high, tickCount, allowDecimals),
-  }
-}
-
-/**
- * About how many ticks an axis `length` px long has room for, at most
- * `count`: each at least `spacing` px from the next, and never fewer than
- * two. Before the axis is measured, `count`.
- */
-export function tickCountFor(count: number, length: number, spacing: number): number {
-  if (length <= 0) return count
-  return Math.max(2, Math.min(count, Math.floor(length / spacing)))
-}
-
-/** d3's round ticks, or with `allowDecimals` off, only the whole ones, at least a step of 1 apart. */
-function wholeTicks(low: number, high: number, count: number, allowDecimals: boolean) {
-  const round = ticks(low, high, count)
-  if (allowDecimals) return round
-  const whole = round.filter((tick) => Number.isInteger(tick))
-  if (whole.length >= 2) return whole
-  const out: number[] = []
-  for (let tick = Math.ceil(low); tick <= Math.floor(high); tick += 1) out.push(tick)
-  return out
-}
-
 /** Whether every value in `data` under `keys` is a whole number, so its ticks should be too. */
 export function allWhole(data: readonly ChartDatum[], keys: readonly string[]): boolean {
   return data.every((row) =>
@@ -299,36 +192,6 @@ export function allWhole(data: readonly ChartDatum[], keys: readonly string[]): 
       return value === null || Number.isInteger(value)
     }),
   )
-}
-
-/** Where `value` sits between the axis's ends, from 0 at its start to 1 at its end, held inside them. */
-export function fractionOf(value: number, [low, high]: Span): number {
-  if (high === low) return 0
-  return Math.min(1, Math.max(0, (value - low) / (high - low)))
-}
-
-/** A stretch of an axis, as fractions of its length, measured from where reading starts. */
-export interface Band {
-  start: number
-  size: number
-}
-
-/** How much room categories leave, each a share of one category's step, as in d3's band scale. */
-export interface BandGaps {
-  /** Between two categories. */
-  gap?: number
-  /** Before the first and after the last. */
-  outer?: number
-}
-
-/** The band of the category at `index` among `count`, in reading order. */
-export function categoryBand(
-  index: number,
-  count: number,
-  { gap = 0.3, outer = 0.15 }: BandGaps = {},
-): Band {
-  const step = 1 / Math.max(1, count - gap + outer * 2)
-  return { start: step * (outer + index), size: step * (1 - gap) }
 }
 
 /** The physical start of `band` from the left, or from the top for an axis that runs down. */
@@ -429,20 +292,6 @@ export function alongCategories(
 }
 
 /**
- * Which category is under the pointer: `at` is the pointer's place along the
- * category axis as a fraction from the reading start, and `centres` each
- * category's centre the same way, in order. The nearest category, the next
- * one from halfway between two; past the ends, the first or last.
- */
-export function indexAt(at: number, centres: readonly number[]): number | null {
-  if (centres.length === 0) return null
-  let index = 0
-  while (index < centres.length - 1 && at >= (centres[index]! + centres[index + 1]!) / 2)
-    index += 1
-  return index
-}
-
-/**
  * The column a category's trigger fills, so the columns meet: from halfway
  * to the category before to halfway to the next, and out to the ends for the
  * first and last, as fractions from the physical left, or the top.
@@ -462,11 +311,6 @@ export function columnOf(
   return orientation === 'vertical' && direction === 'rtl'
     ? { start: 1 - end, size }
     : { start, size }
-}
-
-/** The centre of `band`, as a fraction from the reading start. */
-export function bandCentre(band: Band): number {
-  return band.start + band.size / 2
 }
 
 /**

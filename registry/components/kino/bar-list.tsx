@@ -13,9 +13,7 @@ import {
 } from '@/registry/lib/chart-core'
 import {
   cascadeAt,
-  categoryBand,
   type ChartDatum,
-  fractionOf,
   numberOf,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
@@ -25,6 +23,7 @@ import {
   type ChartMessages,
   seriesColor,
 } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
 import { useFlow } from '@/registry/lib/flow'
@@ -187,7 +186,7 @@ function BarList(props: BarListProps) {
       cascade: { variable: '--bar-list-cascade', fallback: 0.8 },
       nice: false,
       heightFromData: true,
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       measure: (rows) => ({
         extent: [
           0,
@@ -214,7 +213,7 @@ function BarList(props: BarListProps) {
     const category = chart.current[at]!
     const value = values[at] ?? null
     const fraction =
-      value === null || value <= 0 ? 0 : fractionOf(value, chart.scale.domain)
+      value === null || value <= 0 ? 0 : chart.frame.y.value.scale.place(value)
     const zero = barListClip(0, chart.direction)
     const startAt = PLACEHOLDER_LENGTHS[Math.min(rank, PLACEHOLDER_LENGTHS.length - 1)]!
     return {

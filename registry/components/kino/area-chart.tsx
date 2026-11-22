@@ -1,32 +1,25 @@
 'use client'
 
+import { areaMarks } from '@/registry/lib/chart-area-marks'
 import {
   type CategoryChartInput,
   type CategoryChartProps,
-  type ChartContextValue,
+  type ChartPartDeclaration,
   figureProps,
-  useCategoryChart,
+  useCartesianChart,
+  useDeclared,
 } from '@/registry/lib/chart-core'
 import {
+  framePoints,
+  frameRest,
+  frameTop,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
-  pointBand,
-  zeroY,
 } from '@/registry/lib/chart-line'
-import {
-  type ChartDatum,
-  type ChartStack,
-  fractionOf,
-  hiddenSpans,
-  plotPoint,
-  rangeOf,
-  reachOf,
-  seriesSpans,
-  type Span,
-  spanExtent,
-} from '@/registry/lib/chart-math'
-import type { LineCurve, LinePoint } from '@/registry/lib/line-path'
+import { lineMarks } from '@/registry/lib/chart-line-marks'
+import { type ChartStack, plotPoint, rangeOf } from '@/registry/lib/chart-math'
+import type { LineCurve } from '@/registry/lib/line-path'
 
 /*
  * The Area chart: the Line chart's lines with the area under each filled,
@@ -35,7 +28,8 @@ import type { LineCurve, LinePoint } from '@/registry/lib/line-path'
  * shares, and its fill from the area fill lib, which the Sparkline shares.
  * Each area's line and baseline move together, so a new range stretches
  * the area, a hidden series folds into the one below it, and the areas
- * above settle onto what is left.
+ * above settle onto what is left. A series the config draws as a `line`,
+ * such as last year's to compare with, is a `Line` among the areas.
  */
 
 interface AreaChartProps extends CategoryChartProps {
@@ -56,68 +50,12 @@ interface AreaChartProps extends CategoryChartProps {
 const areaChartKeys = ['stack', 'entrance']
 
 /**
- * The rows as the areas draw them: stacked, a missing value counts as
- * nothing, so the areas above it stay whole; side by side it leaves a gap.
- */
-function stackedRows(
-  rows: readonly ChartDatum[],
-  series: readonly string[],
-  stack: ChartStack,
-): readonly ChartDatum[] {
-  if (stack === 'none') return rows
-  return rows.map((row) => {
-    const out = { ...row }
-    for (const key of series) {
-      if (typeof out[key] !== 'number' && !rangeOf(out[key])) out[key] = 0
-    }
-    return out
-  })
-}
-
-/** Each series' span in every row, the hidden ones collapsed in their place, and the values the shown ones reach. */
-function areaSpans(
-  rows: readonly ChartDatum[],
-  series: readonly string[],
-  shown: readonly string[],
-  stack: ChartStack,
-  stackOf: (key: string) => string,
-) {
-  const drawn = stackedRows(rows, series, stack)
-  const spans = seriesSpans(drawn, shown, stack, stackOf)
-  return {
-    spans: { ...spans, ...hiddenSpans(drawn, series, shown, stack, stackOf) },
-    extent: spanExtent(spans),
-  }
-}
-
-/** An area's points for the categories shown: its line at the top of its span, its baseline at the bottom, or both along zero when `flat`. */
-function areaPoints(
-  chart: ChartContextValue,
-  spans: readonly (Span | null)[],
-  flat: boolean,
-): LinePoint[] {
-  const zero = zeroY(chart)
-  return chart.current.map((category) => {
-    const span = spans[category.index] ?? null
-    const place = (value: number) => 1 - fractionOf(value, chart.scale.domain)
-    return {
-      key: category.key,
-      x: category.band.start,
-      y: flat || !span ? zero : place(span[1]),
-      base: flat || !span ? zero : place(span[0]),
-      defined: span !== null,
-    }
-  })
-}
-
-/**
  * The chart's root: it lays out the frame its parts draw in, places each
  * category along the plot from edge to edge, and fits the value axis to the
  * areas, always from zero, since an area's size is its value.
  */
 function AreaChart(props: AreaChartProps) {
   const {
-    config,
     stack = 'none',
     entrance = 'none',
     description,
@@ -126,16 +64,12 @@ function AreaChart(props: AreaChartProps) {
     children,
     ref,
   } = props
-  const stackOf = (key: string) => config[key]?.stack ?? ''
-  const { chart, shapes, placeholder, phase } = useCategoryChart(props, {
+  const { chart, model, placeholder, phase } = useCartesianChart(props, {
+    kinds: [areaMarks, lineMarks],
     orientation: 'vertical',
     stack,
     entrance: entrance !== 'none',
-    nice: stack !== 'expand',
-    bandOf: pointBand,
-    measure: (rows, shown) => areaSpans(rows, Object.keys(config), shown, stack, stackOf),
   })
-  const shown = chart.series.filter((key) => !chart.hidden.includes(key))
   const full: CategoryChartInput = {
     ...chart,
     // An area's fill fades, so a pattern on it would fade away; its key stays solid.
@@ -144,15 +78,16 @@ function AreaChart(props: AreaChartProps) {
     pointOf: (at) => {
       const category = chart.current[at]
       if (!category) return null
-      const top = chart.entered ? reachOf(shapes.spans, shown, category.index) : 0
+      const along = chart.entered ? model.reach(category.index) : null
       return plotPoint(
         category.band,
-        fractionOf(top, chart.scale.domain),
+        along ?? model.baselines.value,
         'vertical',
         chart.direction,
       )
     },
   }
+  const isLine = (key: string) => model.markOf(key) === 'line'
   return (
     <LineFamilyFrame
       chart={full}
@@ -160,18 +95,22 @@ function AreaChart(props: AreaChartProps) {
         name: 'area-chart',
         phase,
         entrance,
-        pointsOf: (key, rising) => areaPoints(full, shapes.spans[key] ?? [], rising),
-        topOf: (key, category) => {
-          const span = shapes.spans[key]?.[category.index]
-          return span ? 1 - fractionOf(span[1], chart.scale.domain) : null
-        },
+        // A hidden area folds into the one below it; a hidden line lies flat, as the Line chart's.
+        pointsOf: (key, rising) =>
+          framePoints(
+            full,
+            model,
+            key,
+            rising || (isLine(key) && chart.hidden.includes(key)),
+            !isLine(key),
+          ),
+        topOf: (key, category) => frameTop(model, key, category),
         // A value given as a range is marked at both ends.
-        bottomOf: (key, category) => {
-          const span = shapes.spans[key]?.[category.index]
-          return span && rangeOf(category.datum[key])
-            ? 1 - fractionOf(span[0], chart.scale.domain)
-            : null
-        },
+        bottomOf: (key, category) =>
+          !isLine(key) && rangeOf(category.datum[key])
+            ? frameTop(model, key, category, true)
+            : null,
+        restOf: (key) => frameRest(model, key),
       }}
       description={description}
       empty={empty}
@@ -195,8 +134,13 @@ type AreaProps = Omit<LineSeriesProps, 'forecastFrom' | 'connectNulls' | 'dashed
  * that glides with the axis's pill.
  */
 function Area(props: AreaProps) {
+  useDeclared('Area', Area.declare(props))
   return <LineSeries {...props} fill />
 }
+
+Area.declare = ({ dataKey }: AreaProps): ChartPartDeclaration => ({
+  series: { key: dataKey, mark: 'area' },
+})
 
 export {
   Area,
@@ -204,6 +148,4 @@ export {
   type AreaChartProps,
   type AreaProps,
   type LineCurve as AreaCurve,
-  areaPoints,
-  areaSpans,
 }

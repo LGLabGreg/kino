@@ -5,25 +5,27 @@ import {
   axisLayerClassName,
   type CategoryChartProps,
   type ChartCategory,
-  type ChartContextValue,
+  type ChartPartDeclaration,
   figureProps,
   slideLine,
-  useCategoryChart,
+  useCartesianChart,
   useChart,
+  useDeclared,
 } from '@/registry/lib/chart-core'
 import {
+  framePoints,
+  frameRest,
+  frameTop,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
-  pointBand,
   useLineFamily,
 } from '@/registry/lib/chart-line'
+import { lineMarks } from '@/registry/lib/chart-line-marks'
 import {
   type ChartDatum,
-  fractionOf,
   numberOf,
   plotPoint,
-  type Span,
   stepThrough,
 } from '@/registry/lib/chart-math'
 import {
@@ -37,6 +39,7 @@ import {
   type MoveRun,
   useChartMoves,
 } from '@/registry/lib/chart-root'
+import type { LinearScale } from '@/registry/lib/chart-scale'
 import { CutTooltip } from '@/registry/lib/cut'
 import { heightAt, type LinePoint } from '@/registry/lib/line-path'
 import { numberFormatter } from '@/registry/lib/number-format'
@@ -251,8 +254,8 @@ function nearestLine(
 }
 
 /** Where a row sits, as a fraction of the plot from its top: its middle. */
-function rowOf(place: number, scale: { domain: Span }) {
-  return fractionOf(place, scale.domain)
+function rowOf(place: number, scale: LinearScale) {
+  return 1 - scale.place(place)
 }
 
 /** What the Bump chart's own parts read: each series' rank and amount in a period, and its words. */
@@ -305,22 +308,23 @@ function BumpChart(props: BumpChartProps) {
   // Every series counts, the hidden ones too, so hiding one never moves the rows.
   const rows = rankCount(ranking.places, keys)
   const said: BumpChartMessages = { ...defaultMessages, ...bumpMessages, ...messages }
-  const { chart, placeholder, phase } = useCategoryChart(
+  const { chart, model, placeholder, phase } = useCartesianChart(
     {
       ...props,
       // The chart places each series on its row; its rank and amount are looked up by period.
       data: ranking.places,
-      domain: [0.5, rows + 0.5],
+      // Rank 1 at the top: the axis runs from the last row's bottom edge up to the first's top.
+      domain: [rows + 0.5, 0.5],
       tickValues: Array.from({ length: rows }, (_, at) => at + 1),
       messages,
     },
     {
+      kinds: [lineMarks],
       orientation: 'vertical',
       stack: 'none',
       entrance: entrance !== 'none',
-      nice: false,
-      bandOf: pointBand,
-      measure: () => ({ extent: [0.5, rows + 0.5] as Span }),
+      // The lines grow from the bottom row's edge, so one drawn in rises from below every rank.
+      y: { nice: false, zero: false, base: rows + 0.5 },
     },
   )
   const byPeriod = useMemo(() => {
@@ -338,7 +342,8 @@ function BumpChart(props: BumpChartProps) {
     messages: said,
   }
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  const pointsOf = (key: string) => bumpPoints(chart, key)
+  // A period a series has no rank in leaves a gap; a hidden line fades where it is.
+  const pointsOf = (key: string) => framePoints(chart, model, key, false, false)
   const labelOf = (key: string) => {
     const label = config[key]?.label
     return typeof label === 'string' ? label : key
@@ -368,11 +373,8 @@ function BumpChart(props: BumpChartProps) {
     pointOf: (at) => {
       const category = chart.current[at]
       if (!category) return null
-      const top = Math.min(
-        ...shown.map((key) => numberOf(category.datum[key]) ?? Infinity),
-      )
-      const row = Number.isFinite(top) ? rowOf(top, chart.scale) : 0
-      return plotPoint(category.band, 1 - row, 'vertical', chart.direction)
+      const along = model.reach(category.index) ?? 1
+      return plotPoint(category.band, along, 'vertical', chart.direction)
     },
     seriesAt: (point) =>
       nearestLine(
@@ -418,10 +420,8 @@ function BumpChart(props: BumpChartProps) {
           phase,
           entrance,
           pointsOf,
-          topOf: (key, category) => {
-            const place = numberOf(category.datum[key])
-            return place === null ? null : rowOf(place, chart.scale)
-          },
+          topOf: (key, category) => frameTop(model, key, category),
+          restOf: (key) => frameRest(model, key),
         }}
         description={description}
         empty={empty}
@@ -441,22 +441,6 @@ function BumpChart(props: BumpChartProps) {
       </LineFamilyFrame>
     </BumpContext>
   )
-}
-
-/** A series' points for the periods shown, each on its row; a period it has no rank in leaves a gap. */
-function bumpPoints(
-  chart: Pick<ChartContextValue, 'current' | 'scale'>,
-  key: string,
-): LinePoint[] {
-  return chart.current.map((category) => {
-    const place = numberOf(category.datum[key])
-    return {
-      key: category.key,
-      x: category.band.start,
-      y: place === null ? 1 : rowOf(place, chart.scale),
-      defined: place !== null,
-    }
-  })
 }
 
 /**
@@ -542,8 +526,13 @@ type BumpProps = Omit<
  * another item is brought forward, it steps back.
  */
 function Bump({ dots = true, ...props }: BumpProps) {
+  useDeclared('Bump', Bump.declare(props))
   return <LineSeries {...props} curve='bump' dots={dots} />
 }
+
+Bump.declare = ({ dataKey }: BumpProps): ChartPartDeclaration => ({
+  series: { key: dataKey, mark: 'line' },
+})
 
 /**
  * Each item's name at one end of its line: its rank in the first period
@@ -562,12 +551,13 @@ function BumpNames({
     series,
     hidden,
     config,
-    scale,
+    frame,
     status,
     emphasis,
     setEmphasis,
     entered,
   } = useChart()
+  const { scale } = frame.y.value
   const { rankOf, rankText } = useBump()
   const family = useLineFamily()
   const period = side === 'start' ? current[0] : current.at(-1)

@@ -15,7 +15,7 @@ import {
   useChartActive,
   useRegistry,
 } from '@/registry/lib/chart-core'
-import { categoryBand, type ChartPattern } from '@/registry/lib/chart-math'
+import type { ChartPattern } from '@/registry/lib/chart-math'
 import {
   foldPoint,
   insideLabelFits,
@@ -40,6 +40,7 @@ import {
   labelOnClassName,
   plotLayerClassName,
 } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -114,6 +115,8 @@ interface DonutContextValue {
   /** The rings, outermost first: the chart's own, then each `DonutChartRing`'s. */
   rings: readonly DonutRing[]
   addRing: (ring: DonutRingKey) => () => void
+  /** Keeps `px` beside the ring while its labels sit outside it; returns what lets it go. */
+  addRoom: (px: number) => () => void
   innerRadius: number
   /** The outer ring's radius at rest, in px. */
   outer: number
@@ -178,7 +181,7 @@ function DonutChart(props: DonutChartProps) {
   } = props
   const hole = Math.min(0.95, Math.max(0, innerRadius))
   const gap = Math.max(0, sliceGap)
-  const { chart, placeholder, phase, room } = useCategoryChart(
+  const { chart, placeholder, phase, room, addRoom } = useCategoryChart(
     {
       ...props,
       // A slice is named by its config's label, as its legend entry is.
@@ -203,7 +206,7 @@ function DonutChart(props: DonutChartProps) {
       round: true,
       nice: false,
       seriesOfRow: (row) => String(row[props.index]),
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       measure: () => ({ extent: [0, 1] as const }),
     },
   )
@@ -330,6 +333,7 @@ function DonutChart(props: DonutChartProps) {
       value={{
         rings,
         addRing: added.add,
+        addRoom,
         innerRadius: hole,
         outer,
         edge,
@@ -692,7 +696,7 @@ function DonutChartLabels({
   const chart = useChart()
   const { spotlit } = useChartActive()
   const donut = useDonutChart()
-  const { addRoom } = chart
+  const { addRoom } = donut
   const ring = donut.rings[0]!
   const percent = numberFormatter(chart.locale, {
     style: 'percent',

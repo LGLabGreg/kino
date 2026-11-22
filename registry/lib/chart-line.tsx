@@ -16,15 +16,10 @@ import {
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
+import type { CartesianModel } from '@/registry/lib/chart-frame'
+import { seriesPoints } from '@/registry/lib/chart-line-marks'
+import type { ReadingDirection } from '@/registry/lib/chart-math'
 import {
-  type Band,
-  bandCentre,
-  fractionOf,
-  type ReadingDirection,
-} from '@/registry/lib/chart-math'
-import {
-  drawingFrame,
-  drawingSize,
   forcedSeriesColor,
   forcedSeriesTextColor,
   plotLayerClassName,
@@ -33,6 +28,7 @@ import {
   useFromRest,
   usePointsMove,
 } from '@/registry/lib/chart-root'
+import { bandCentre } from '@/registry/lib/chart-scale'
 import {
   alignLines,
   brightSpan,
@@ -72,7 +68,10 @@ import { cn } from '@/lib/utils'
  * one CSS transition of a number, `--line-progress`, so the feel, reduced
  * motion and a slowed playback time it as they time everything else. A frame
  * of that transition redraws the paths straight in the page, so nothing
- * re-renders while a line moves.
+ * re-renders while a line moves. Its paths are drawn in fractions of the
+ * plot, in an SVG one unit square stretched over it, with strokes that keep
+ * their width, so the server draws the lines the browser does and a plot
+ * that changes size never redraws them.
  *
  * When a category is lit, every series steps back but for a window around
  * it, which glides with the axis's pill, and a dot on each series marks it.
@@ -102,6 +101,8 @@ interface LineFamilyValue {
   topOf: (key: string, category: ChartCategory) => number | null
   /** Where a second lit dot marks the bottom of a value given as a range, as `topOf` does its top; null for a single value. */
   bottomOf?: (key: string, category: ChartCategory) => number | null
+  /** Where a series lies flat, such as one that arrives on an empty chart, as a fraction of the plot from its top: its axis's baseline. */
+  restOf: (key: string) => number
 }
 
 /** The key the lit dot on the bottom of a series' range goes by among the lit dots. */
@@ -117,15 +118,44 @@ function useLineFamily() {
   return family
 }
 
-/** Where a category's point sits along the plot: the first at the reading start, the last at the end. */
-function pointBand(index: number, count: number): Band {
-  return { start: count <= 1 ? 0.5 : index / (count - 1), size: 0 }
+/**
+ * A series' points through the categories shown, read against its own value
+ * axis, as fractions of the plot: an area's baseline too `withBase`, and all
+ * along its axis's baseline when it lies `flat`.
+ */
+function framePoints(
+  chart: ChartContextValue,
+  model: CartesianModel,
+  key: string,
+  flat: boolean,
+  withBase: boolean,
+): LinePoint[] {
+  const { scale, baseline } = model.valueAxisOf(key)
+  return seriesPoints(
+    chart.current,
+    model.spans[key] ?? [],
+    scale,
+    baseline,
+    flat,
+    withBase,
+  )
 }
 
-/** Where the value axis's zero sits, as a fraction of the plot from its top: its bottom when zero is below the axis. */
-function zeroY(chart: ChartContextValue) {
-  const [low, high] = chart.scale.domain
-  return 1 - fractionOf(Math.max(low, Math.min(0, high)), chart.scale.domain)
+/** Where a series' span on `category` ends, its value's far end or with `near` its near end, as a fraction of the plot from its top; null with no value. */
+function frameTop(
+  model: CartesianModel,
+  key: string,
+  category: ChartCategory,
+  near = false,
+): number | null {
+  const span = model.spans[key]?.[category.index]
+  const { scale } = model.valueAxisOf(key)
+  return span ? 1 - scale.place(near ? span[0] : span[1]) : null
+}
+
+/** Where a series lies flat, as a fraction of the plot from its top: on its axis's baseline. */
+function frameRest(model: CartesianModel, key: string): number {
+  return 1 - model.valueAxisOf(key).baseline
 }
 
 /** The variables a series draws with, read from its chart's own. */
@@ -219,30 +249,37 @@ interface LineDrawing {
   lone: string
   /** The fill under the line, for an area; empty for a bare line. */
   area: string
-  /** Where the fill is strongest, in px from the plot's top. */
+  /** Where the fill is strongest, as a fraction of the plot from its top. */
   peak: number
-  /** Where the dashed forecast starts, in px from the reading start, or null with none. */
+  /** Where the dashed forecast starts, as a fraction of the plot from the reading start, or null with none. */
   split: number | null
 }
 
+/** What a series draws through `points`, in fractions of the plot, for an SVG of `unitFrame`. */
 function drawingOf(
   points: readonly LinePoint[],
   curve: PathCurve,
-  size: { width: number; height: number },
   splitKey: string | null,
   fill: boolean,
 ): LineDrawing {
   const split =
     splitKey === null ? null : (points.find((point) => point.key === splitKey)?.x ?? null)
   return {
-    line: pathThrough(points, curve, size.width, size.height),
-    bridges: bridgesThrough(points, size.width, size.height),
-    lone: lonePointsThrough(points, size.width, size.height),
-    area: fill ? areaPathThrough(points, curve, size.width, size.height) : '',
-    peak: fill ? fillPeak(points) * size.height : 0,
-    split: split === null ? null : split * size.width,
+    line: pathThrough(points, curve, 1, 1),
+    bridges: bridgesThrough(points, 1, 1),
+    lone: lonePointsThrough(points, 1, 1),
+    area: fill ? areaPathThrough(points, curve, 1, 1) : '',
+    peak: fill ? fillPeak(points) : 0,
+    split,
   }
 }
+
+/**
+ * The frame of a series' SVGs: one unit square, stretched over the plot,
+ * so a path drawn in fractions of it fills it at any size. Every stroke in
+ * it keeps its width with `non-scaling-stroke`, dashes and round caps too.
+ */
+const unitFrame = { viewBox: '0 0 1 1', preserveAspectRatio: 'none' } as const
 
 /** The elements a series redraws on each frame of a move. */
 interface LineElements {
@@ -302,20 +339,19 @@ function paint(
   }
 }
 
-/** How far past the plot's edges a series' clips reach, in px, so its caps and dots aren't cut. */
-const SPLIT_BLEED = 12
+/** How far past the plot's edges a series' clips reach, as a share of the plot, so its caps aren't cut. */
+const SPLIT_BLEED = 1
 
 /**
  * Moves a series' elements to `to` whenever it changes: from wherever they
  * are, even halfway through a move, on the frames of `--line-progress`. A
- * change of size or curve alone redraws at once.
+ * change of curve alone redraws at once.
  */
 function useLineMove(
   role: MoveRole,
   elements: LineElements,
   to: readonly LinePoint[],
   curve: PathCurve,
-  size: { width: number; height: number },
   splitKey: string | null,
   fill: boolean,
   start: readonly LinePoint[],
@@ -330,12 +366,12 @@ function useLineMove(
       )
       .join('|'),
     start,
-    `${size.width}|${size.height}|${curve}|${splitKey}|${fill}`,
+    `${curve}|${splitKey}|${fill}`,
     {
       align: (from, next) => alignLines(from, next, curve),
       at: pointsAt,
       draw: (points, moving) =>
-        paint(elements, drawingOf(points, curve, size, splitKey, fill), points, moving),
+        paint(elements, drawingOf(points, curve, splitKey, fill), points, moving),
     },
   )
 }
@@ -397,15 +433,6 @@ function LineSeries({
     // `pointsOf` is made again whenever the chart's data, scale or shown series change.
     [pointsOf, dataKey, rising, loading, drawn, fill],
   )
-  const { addForecast } = chart
-  // The tooltip, the slider and the table say which values are projected.
-  useLayoutEffect(
-    () =>
-      forecastFrom === undefined
-        ? undefined
-        : addForecast({ series: dataKey, from: forecastFrom }),
-    [addForecast, dataKey, forecastFrom],
-  )
   const first = to.findIndex((point) => point.key === forecastFrom)
   const splitKey = first > 0 ? (to[first - 1]?.key ?? null) : null
   // A forecast from the first category on is the whole line.
@@ -423,17 +450,17 @@ function LineSeries({
   const steppedFill = { path: steppedFillPath, gradient: steppedFillGradient }
   const litFill = { path: litFillPath, gradient: litFillGradient }
   const dotElements = useRef(new Map<string, HTMLElement>())
-  const plotSize = drawingSize(chart.plotSize)
-  const frame = drawingFrame(chart.plotSize, 'none')
-  // Where a series that arrives on an empty chart starts: flat along zero.
-  const start = useMemo(() => {
-    const zero = zeroY(chart)
-    return to.map((point) => ({
-      ...point,
-      y: zero,
-      ...(point.base === undefined ? {} : { base: zero }),
-    }))
-  }, [to, chart])
+  const rest = family.restOf(dataKey)
+  // Where a series that arrives on an empty chart starts: flat along its baseline.
+  const start = useMemo(
+    () =>
+      to.map((point) => ({
+        ...point,
+        y: rest,
+        ...(point.base === undefined ? {} : { base: rest }),
+      })),
+    [to, rest],
+  )
   useLineMove(
     // The entrance draws the lines along their length; every change after moves them.
     family.phase === 'entering' ? 'draw' : 'layout',
@@ -451,14 +478,13 @@ function LineSeries({
     },
     to,
     curve,
-    plotSize,
     splitKey,
     fill,
     start,
   )
   const drawing = useMemo(
-    () => drawingOf(to, curve, plotSize, splitKey, fill),
-    [to, curve, plotSize, splitKey, fill],
+    () => drawingOf(to, curve, splitKey, fill),
+    [to, curve, splitKey, fill],
   )
   if (!drawn) return null
   const slot = chart.series.indexOf(dataKey)
@@ -549,7 +575,7 @@ function LineSeries({
           {fill && (
             <div className='absolute inset-0 [mask-image:linear-gradient(to_right,black_calc(var(--line-window-from)-var(--trace-fade)),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-from),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-to),black_calc(var(--line-window-to)+var(--trace-fade)))]'>
               <svg
-                {...frame}
+                {...unitFrame}
                 data-dim={stepsBack ? '' : undefined}
                 // A wash steps back in strength as well as colour, or it reads as strong as the lit one.
                 className={cn(
@@ -557,12 +583,12 @@ function LineSeries({
                   forcedSeriesTextColor(slot),
                 )}
               >
-                <g transform={mirror(chart.direction, plotSize.width)}>
+                <g transform={mirror(chart.direction)}>
                   <AreaFill
                     id={`${id}-fill`}
                     path={drawing.area}
                     peak={drawing.peak}
-                    height={plotSize.height}
+                    height={1}
                     elements={steppedFill}
                   />
                 </g>
@@ -570,7 +596,7 @@ function LineSeries({
             </div>
           )}
           <svg
-            {...frame}
+            {...unitFrame}
             data-entering={family.phase === 'entering' ? '' : undefined}
             data-dim={stepsBack ? '' : undefined}
             className={cn(
@@ -588,7 +614,7 @@ function LineSeries({
                     x={-SPLIT_BLEED}
                     y={-SPLIT_BLEED}
                     width={splitAt + SPLIT_BLEED}
-                    height={plotSize.height + SPLIT_BLEED * 2}
+                    height={1 + SPLIT_BLEED * 2}
                   />
                 </clipPath>
                 <clipPath id={`${id}-dashed`}>
@@ -598,13 +624,13 @@ function LineSeries({
                     }}
                     x={splitAt}
                     y={-SPLIT_BLEED}
-                    width={plotSize.width + SPLIT_BLEED}
-                    height={plotSize.height + SPLIT_BLEED * 2}
+                    width={1 + SPLIT_BLEED}
+                    height={1 + SPLIT_BLEED * 2}
                   />
                 </clipPath>
               </defs>
             )}
-            <g transform={mirror(chart.direction, plotSize.width)}>{strokes(false)}</g>
+            <g transform={mirror(chart.direction)}>{strokes(false)}</g>
           </svg>
           {/* The line again in its own colour, seen only through the window around the lit
               category, while the rest of the line steps back. */}
@@ -615,14 +641,14 @@ function LineSeries({
               'absolute inset-0 text-(--line-color) [mask-image:linear-gradient(to_right,transparent_calc(var(--line-window-from)-var(--trace-fade)),black_var(--line-window-from),black_var(--line-window-to),transparent_calc(var(--line-window-to)+var(--trace-fade)))] opacity-(--line-window-shown)',
             )}
           >
-            <svg {...frame} className='absolute inset-0 size-full overflow-visible'>
-              <g transform={mirror(chart.direction, plotSize.width)}>
+            <svg {...unitFrame} className='absolute inset-0 size-full overflow-visible'>
+              <g transform={mirror(chart.direction)}>
                 {fill && (
                   <AreaFill
                     id={`${id}-fill-lit`}
                     path={drawing.area}
                     peak={drawing.peak}
-                    height={plotSize.height}
+                    height={1}
                     elements={litFill}
                   />
                 )}
@@ -648,9 +674,9 @@ function LineSeries({
   )
 }
 
-/** The transform that runs a plot `width` px wide from the right, in right to left. */
-function mirror(direction: ReadingDirection, width: number) {
-  return direction === 'rtl' ? `translate(${width} 0) scale(-1 1)` : undefined
+/** The transform that runs a series' unit frame from the right, in right to left. */
+function mirror(direction: ReadingDirection) {
+  return direction === 'rtl' ? 'translate(1 0) scale(-1 1)' : undefined
 }
 
 /**
@@ -880,8 +906,6 @@ function placeholderPoints(filled = false): LinePoint[] {
  * data arrives.
  */
 function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }) {
-  const chart = useChart()
-  const plotSize = drawingSize(chart.plotSize)
   const id = useId().replaceAll(':', '')
   const points = placeholderPoints(fill)
   return (
@@ -902,19 +926,19 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
       >
         {/* The line is already a faint tint, so its fill is drawn stronger under it. */}
         <svg
-          {...drawingFrame(chart.plotSize, 'none')}
+          {...unitFrame}
           className='absolute inset-0 size-full overflow-visible [--trace-fill-top:0.6] [--trace-fill-bottom:0.15]'
         >
           {fill && (
             <AreaFill
               id={`${id}-fill`}
-              path={areaPathThrough(points, 'monotone', plotSize.width, plotSize.height)}
-              peak={fillPeak(points) * plotSize.height}
-              height={plotSize.height}
+              path={areaPathThrough(points, 'monotone', 1, 1)}
+              peak={fillPeak(points)}
+              height={1}
             />
           )}
           <path
-            d={pathThrough(points, 'monotone', plotSize.width, plotSize.height)}
+            d={pathThrough(points, 'monotone', 1, 1)}
             className='fill-none stroke-current [stroke-width:var(--trace-width)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]'
           />
         </svg>
@@ -924,12 +948,13 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
 }
 
 export {
+  framePoints,
+  frameRest,
+  frameTop,
   LineFamilyFrame,
   type LineFamilyName,
   type LineFamilyValue,
   LineSeries,
   type LineSeriesProps,
-  pointBand,
   useLineFamily,
-  zeroY,
 }

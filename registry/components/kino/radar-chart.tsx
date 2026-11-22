@@ -15,12 +15,9 @@ import {
   useTicks,
 } from '@/registry/lib/chart-core'
 import {
-  categoryBand,
   type ChartDatum,
-  fractionOf,
   numberOf,
   type Span,
-  tickCountFor,
   stepThrough,
 } from '@/registry/lib/chart-math'
 import {
@@ -49,6 +46,7 @@ import {
   useFromRest,
   usePointsMove,
 } from '@/registry/lib/chart-root'
+import { bandAt, type LinearScale, tickCountFor } from '@/registry/lib/chart-scale'
 import {
   createHighlight,
   type Highlight,
@@ -280,7 +278,7 @@ function RadarChart(props: RadarChartProps) {
       entrance: entrance !== 'none',
       round: true,
       nice: !ownScales,
-      bandOf: categoryBand,
+      bandOf: bandAt,
       measure: (rows, shown) => ({
         extent: ownScales ? ([0, 1] as const) : radarExtent(rows, shown),
       }),
@@ -317,7 +315,7 @@ function RadarChart(props: RadarChartProps) {
   const fractionAt = (category: ChartCategory, key: string) => {
     const value = numberOf(category.datum[key])
     if (value === null) return null
-    if (!ownScales) return fractionOf(value, chart.scale.domain)
+    if (!ownScales) return chart.frame.y.value.scale.place(value)
     const top = numberOf(category.datum[maxKey])
     return top === null || top <= 0 ? 0 : Math.min(1, Math.max(0, value / top))
   }
@@ -883,7 +881,7 @@ function RadarGrid({
     `${round(edge)}:${round(centre.x)}:${round(centre.y)}`,
   )
   const { width, height } = drawingSize(chart.plotSize)
-  const { scale, previousScale } = chart
+  const { scale, previous: previousScale } = chart.frame.y.value
   const line =
     'fill-none stroke-border [stroke-dasharray:3_3] [stroke-width:1px] [vector-effect:non-scaling-stroke] forced-colors:stroke-[GrayText]'
   const turning =
@@ -912,7 +910,7 @@ function RadarGrid({
             </defs>
           )}
           {ticks.map(({ value: tick, leaving }) => {
-            const place = fractionOf(tick, scale.domain)
+            const place = scale.place(tick)
             if (place <= 0 && !leaving) return null
             const ring = {
               'data-leaving': leaving ? '' : undefined,
@@ -920,7 +918,7 @@ function RadarGrid({
               style: {
                 transformOrigin: `${round(centre.x)}px ${round(centre.y)}px`,
                 '--ring-to': round(place * 1e4) / 1e4,
-                '--ring-from': round(fractionOf(tick, previousScale.domain) * 1e4) / 1e4,
+                '--ring-from': round(previousScale.place(tick) * 1e4) / 1e4,
               } as CSSProperties,
             }
             return polygon ? (
@@ -1134,8 +1132,8 @@ function RadarValueAxis({
   const ticks = chart.status === 'ready' ? all : []
   const { edge, centre } = radar
   const { width, height } = drawingSize(chart.plotSize)
-  const place = (tick: number, scale: Span) =>
-    `0.25rem calc(${round(centre.y - fractionOf(tick, scale) * edge)} / ${round(height)} * 100cqh - 50%)`
+  const place = (tick: number, scale: LinearScale) =>
+    `0.25rem calc(${round(centre.y - scale.place(tick) * edge)} / ${round(height)} * 100cqh - 50%)`
   return (
     <div
       ref={layer}
@@ -1145,7 +1143,7 @@ function RadarValueAxis({
       {...props}
     >
       {ticks.map(({ value: tick, leaving }) =>
-        fractionOf(tick, chart.scale.domain) <= 0 && !leaving ? null : (
+        chart.frame.y.value.scale.place(tick) <= 0 && !leaving ? null : (
           <span
             key={tick}
             data-leaving={leaving ? '' : undefined}
@@ -1157,8 +1155,8 @@ function RadarValueAxis({
             style={
               {
                 left: `${round((centre.x / width) * 100)}%`,
-                '--tick-to': place(tick, chart.scale.domain),
-                '--tick-from': place(tick, chart.previousScale.domain),
+                '--tick-to': place(tick, chart.frame.y.value.scale),
+                '--tick-from': place(tick, chart.frame.y.value.previous),
               } as CSSProperties
             }
           >

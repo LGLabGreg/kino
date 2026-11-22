@@ -9,21 +9,23 @@ import {
   type ChartAxisName,
   type ChartCategory,
   type ChartContextValue,
+  type ChartPartDeclaration,
   ChartTooltipContent,
   ChartTooltipTotal,
-  scalesOf,
+  numberAxis,
   slideLine,
+  TICK_SPACING,
   tickMove,
   useChart,
   useChartActive,
+  useDeclared,
   useTicks,
   stickTo,
-  valuePlace,
 } from '@/registry/lib/chart-core'
+import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   axisNames,
   type ChartSummary,
-  fractionOf,
   numberOf,
   physicalStart,
   summaryOf,
@@ -39,6 +41,7 @@ import {
   useChartFocus,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
+import { tickLadder } from '@/registry/lib/chart-scale'
 import { type ChartTarget, indexOfKey, sameTarget } from '@/registry/lib/chart-state'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {
@@ -89,10 +92,12 @@ function ChartGrid({ className, ...props }: Omit<ComponentProps<'div'>, 'childre
     >
       <GridLines
         layer={valueLayer}
-        axis='value'
+        axis={VALUE_AXIS}
         line={chart.orientation === 'vertical' ? 'y' : 'x'}
       />
-      {chart.xy && <GridLines layer={xLayer} axis='x' line='x' />}
+      {chart.frame.x.scale.kind === 'linear' && (
+        <GridLines layer={xLayer} axis='x' line='x' />
+      )}
     </div>
   )
 }
@@ -108,15 +113,28 @@ function GridLines({
   line: 'x' | 'y'
 }) {
   const chart = useChart()
-  const { scale, previousScale } = scalesOf(chart, axis)
-  const ticks = useTicks(axis)
+  const frame = numberAxis(chart, axis)
+  const ladder = frame && tickLadder(frame.scale, tickSpacing[line])
+  const ticks = useTicks(axis, ladder?.ticks)
+  const id = useId()
+  if (!frame || !ladder) return null
+  const { scale, previous } = frame
   return (
-    <div ref={layer} className='absolute inset-0 [container-type:size]'>
+    <div ref={layer} data-ticks={id} className='absolute inset-0 [container-type:size]'>
+      {chart.status === 'ready' && (
+        <TickSteps
+          id={id}
+          ladder={ladder}
+          before={tickLadder(previous, tickSpacing[line])}
+          line={line}
+        />
+      )}
       {chart.status === 'ready' &&
         ticks.map(({ value: tick, leaving }) => (
           <div
             key={tick}
             data-leaving={leaving ? '' : undefined}
+            data-tick={tick}
             // The line at the axis's start sits on the plot's edge, unless the chart keeps an inset.
             data-edge={tick === scale.domain[0] && !chart.inset ? '' : undefined}
             className={cn(
@@ -127,8 +145,8 @@ function GridLines({
             )}
             style={axisSlide(
               line,
-              valuePlace(tick, scale),
-              valuePlace(tick, previousScale),
+              scale.place(tick),
+              previous.place(tick),
               chart.direction,
             )}
           />
@@ -137,12 +155,56 @@ function GridLines({
   )
 }
 
+/** How far apart ticks stand at least, by the way they stack: values one over another, or side by side. */
+const tickSpacing = { y: TICK_SPACING.upright, x: TICK_SPACING.across } as const
+
+/**
+ * The ticks that show at each length of a short axis, `line` the way its
+ * ticks stack, by container queries, so they are right from the first
+ * paint. The range stays the one the chart's tick count rounds to. A tick
+ * leaving keeps what `before`, the ladder it left, showed, so one never
+ * shown never shows as it goes; one the ladder hides fades as it slides.
+ */
+function TickSteps({
+  id,
+  ladder,
+  before,
+  line,
+}: {
+  id: string
+  ladder: ReturnType<typeof tickLadder>
+  before: ReturnType<typeof tickLadder>
+  line: 'x' | 'y'
+}) {
+  const size = line === 'y' ? 'height' : 'width'
+  const gone = before.ticks.filter((tick) => !ladder.ticks.includes(tick))
+  const rules = [
+    ...ladder.steps.map((step) => [step, ladder.ticks] as const),
+    ...before.steps.map((step) => [step, gone] as const),
+  ].flatMap(([{ from, to, shown }, ticks]) => {
+    const hidden = ticks
+      .filter((tick) => !shown.includes(tick))
+      .map((tick) => `[data-ticks='${id}'] [data-tick='${tick}']`)
+    if (hidden.length === 0) return []
+    const query = [
+      from > 0 && `(${size} >= ${from}px)`,
+      to !== null && `(${size} < ${to}px)`,
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    return [`@container ${query} { ${hidden.join(',')} { opacity: 0 } }`]
+  })
+  if (rules.length === 0) return null
+  // oxlint-disable-next-line react/no-danger -- the rules are worked out from the chart's own ticks
+  return <style dangerouslySetInnerHTML={{ __html: rules.join(' ') }} />
+}
+
 interface AxisProps extends Omit<ComponentProps<'div'>, 'children'> {
   /** How the values on a value axis are written; the chart's `format`, shortened, by default. */
   format?: ChartFormat
   /** How the categories on a category axis are written; the chart's `categoryFormat` by default. */
   categoryFormat?: (value: unknown) => string
-  /** The axis's title, such as its unit. */
+  /** The axis's title, such as its unit; what it measures, where the chart says, by default. */
   label?: ReactNode
 }
 
@@ -154,17 +216,31 @@ type AxisSide = 'start' | 'end' | 'top' | 'bottom'
  */
 function ChartYAxis({
   side = 'start',
+  axis = VALUE_AXIS,
   format,
   categoryFormat,
   ...props
-}: AxisProps & { side?: 'start' | 'end' }) {
-  const { orientation, xy, grid } = useChart()
-  // A grid of cells names its rows down the side.
-  if (grid) return <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
-  return orientation === 'vertical' ? (
-    <ValueAxis side={side} format={format} label={xy?.labels?.y} {...props} />
+}: AxisProps & {
+  side?: 'start' | 'end'
+  /** The value axis it shows, by the id series name in the config; the chart's own by default. */
+  axis?: string
+}) {
+  const { orientation, grid } = useChart()
+  const values = !grid && orientation === 'vertical'
+  if (!values) categoriesOnly('ChartYAxis', axis)
+  return values ? (
+    <ValueAxis side={side} format={format} axis={axis} {...props} />
   ) : (
+    // A grid of cells names its rows down the side, and lying bars their categories.
     <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
+  )
+}
+
+/** Throws for a value axis named on an axis that shows something else, which would show none of it. */
+function categoriesOnly(part: string, axis: ChartAxis) {
+  if (axis === VALUE_AXIS) return
+  throw new Error(
+    `\`${part}\` shows no value axis here, so it can't show \`${axis}\`. Name it on the axis the values run along.`,
   )
 }
 
@@ -175,22 +251,25 @@ function ChartYAxis({
  */
 function ChartXAxis({
   side = 'bottom',
+  axis = VALUE_AXIS,
   format,
   categoryFormat,
   ...props
-}: AxisProps & { side?: 'top' | 'bottom' }) {
-  const { orientation, xy, grid } = useChart()
-  // A grid of cells names its columns along it.
-  if (grid) return <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
-  // On a chart whose x is a value, each axis is titled with what it measures unless given a label.
-  if (xy)
-    return (
-      <ValueAxis side={side} format={format} axis='x' label={xy.labels?.x} {...props} />
-    )
-  return orientation === 'vertical' ? (
-    <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
+}: AxisProps & {
+  side?: 'top' | 'bottom'
+  /** On lying bars, the value axis it shows, by the id series name in the config; the chart's own by default. */
+  axis?: string
+}) {
+  const { orientation, grid, frame } = useChart()
+  const numbers = !grid && frame.x.scale.kind === 'linear'
+  const values = !grid && !numbers && orientation === 'horizontal'
+  if (!values) categoriesOnly('ChartXAxis', axis)
+  if (numbers) return <ValueAxis side={side} format={format} axis='x' {...props} />
+  return values ? (
+    <ValueAxis side={side} format={format} axis={axis} {...props} />
   ) : (
-    <ValueAxis side={side} format={format} {...props} />
+    // A grid of cells names its columns along it, and upright bars their categories.
+    <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
   )
 }
 
@@ -258,34 +337,42 @@ function AxisFrame({
 function ValueAxis({
   side,
   format,
-  axis = 'value',
+  axis = VALUE_AXIS,
   label,
   className,
   ...props
 }: AxisProps & { side: AxisSide; axis?: ChartAxis }) {
   const chart = useChart()
   const { stack, locale, status, direction } = chart
-  const { scale, previousScale } = scalesOf(chart, axis)
-  // The chart's own format, shortened; an XY frame's x axis follows the format it was given.
-  const own = axis === 'x' ? (chart.xy?.format ?? chart.format) : chart.format
+  const id = useId()
+  const frame = numberAxis(chart, axis)
+  const across = side === 'start' || side === 'end'
+  const ladder = frame && tickLadder(frame.scale, tickSpacing[across ? 'y' : 'x'])
+  const all = useTicks(axis, ladder?.ticks)
+  if (!frame || !ladder) {
+    throw new Error(
+      `The chart has no value axis \`${axis}\`: no series in its config names it.`,
+    )
+  }
+  const { scale, previous } = frame
+  // The axis's own format, shortened, or the chart's.
+  const own = frame.format ?? chart.format
   const write = formatterOf(
     locale,
     format ??
-      (stack === 'expand' && axis === 'value'
+      (stack === 'expand' && axis === VALUE_AXIS
         ? { style: 'percent' }
         : typeof own === 'function'
           ? own
           : { maximumFractionDigits: 1, ...own, notation: 'compact' }),
   )
   const layer = useRef<HTMLSpanElement>(null)
-  const all = useTicks(axis)
   const ticks = status === 'ready' ? all : []
   const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [write(tick.value)]))
-  const across = side === 'start' || side === 'end'
   return (
     <AxisFrame
       side={side}
-      label={label}
+      label={label ?? frame.label}
       slot='chart-value-axis'
       aria-hidden
       className={className}
@@ -309,16 +396,25 @@ function ValueAxis({
             </span>
           ))}
         </span>
-        <span ref={layer} className={axisLayerClassName}>
+        <span ref={layer} data-ticks={id} className={axisLayerClassName}>
+          {status === 'ready' && (
+            <TickSteps
+              id={id}
+              ladder={ladder}
+              before={tickLadder(previous, tickSpacing[across ? 'y' : 'x'])}
+              line={across ? 'y' : 'x'}
+            />
+          )}
           {ticks.map(({ value: tick, leaving }) => (
             <span
               key={tick}
               data-leaving={leaving ? '' : undefined}
+              data-tick={tick}
               className={cn(tickMove, slideLine[across ? 'y' : 'x'])}
               style={axisSlide(
                 across ? 'y' : 'x',
-                valuePlace(tick, scale),
-                valuePlace(tick, previousScale),
+                scale.place(tick),
+                previous.place(tick),
                 direction,
               )}
             >
@@ -692,19 +788,53 @@ const NAMES_SAMPLE_FROM = 120
 const NAMES_SAMPLE_UP_TO = 2560
 
 /** The value a reference line marks: worked out from the data, or the number given. */
-function useReferenceValue(value: number | ChartSummary | undefined, axis: ChartAxis) {
-  const { current, series, hidden, stack, xy } = useChart()
+function referenceValue(
+  chart: ChartContextValue,
+  value: number | ChartSummary | undefined,
+  axis: ChartAxis,
+) {
   if (value === undefined || typeof value === 'number') return value ?? null
-  const shown = series.filter((key) => !hidden.includes(key))
-  // An XY frame's points each have a value on either axis.
-  const values = xy
-    ? xy.points.map((point) => (axis === 'x' ? point.x : point.y))
-    : stack === 'none'
-      ? current.flatMap((category) => shown.map((key) => category.datum[key]))
-      : current.map((category) =>
-          shown.reduce((sum, key) => sum + (numberOf(category.datum[key]) ?? 0), 0),
-        )
+  const { current, series, hidden, stack, frame } = chart
+  const onX = axis === 'x'
+  // Only the series read against the axis the line marks.
+  const shown = series.filter(
+    (key) => !hidden.includes(key) && frame.axisOf(key) === axis,
+  )
+  // Points placed by both values each have a value on either axis.
+  const values =
+    frame.x.scale.kind === 'linear'
+      ? current.map((category) => {
+          const point = chart.xyOf(category.index)?.value
+          return point ? (onX ? point.x : point.y) : null
+        })
+      : stack === 'none'
+        ? current.flatMap((category) => shown.map((key) => category.datum[key]))
+        : current.map((category) =>
+            shown.reduce((sum, key) => sum + (numberOf(category.datum[key]) ?? 0), 0),
+          )
   return summaryOf(values, value)
+}
+
+/** The axis a reference's values are on: the chart's own value axis unless it names another. */
+function referenceOn(axis: ChartAxis | undefined): ChartAxis {
+  return axis ?? VALUE_AXIS
+}
+
+/**
+ * The frame's axis a reference marks: `'x'` on a chart whose x is a
+ * number, or the value axis named, which an x of categories means too.
+ */
+function referenceAxis(chart: ChartContextValue, given: ChartAxis | undefined) {
+  const axis = referenceOn(given)
+  const onX = axis === 'x' && chart.frame.x.scale.kind === 'linear'
+  const id = onX ? 'x' : axis === 'x' ? VALUE_AXIS : axis
+  const frame = numberAxis(chart, id)
+  if (!frame) {
+    throw new Error(
+      `The chart has no value axis \`${axis}\` for its reference: no series in its config names it.`,
+    )
+  }
+  return { id, onX, ...frame }
 }
 
 /** A reference's name, which crossfades as it changes while the line slides. */
@@ -752,34 +882,35 @@ function ReferenceLabel({
  * `axis='x'`, on a chart whose x is a value too, such as a scatter, it marks
  * a value on the x axis.
  */
-function ChartReferenceLine({
-  value,
-  category,
-  axis = 'value',
-  label,
-  labelPosition = 'end',
-  className,
-  ...props
-}: Omit<ComponentProps<'div'>, 'children'> & {
+type ChartReferenceLineProps = Omit<ComponentProps<'div'>, 'children'> & {
   value?: number | ChartSummary
   /** The key of the category to mark, in place of a value. */
   category?: string
-  /** The axis `value` is on: the value axis, or the x axis of a chart whose x is a value too. */
+  /**
+   * The axis `value` is on: the chart's value axis, another value axis by
+   * the id its series name in the config, or `'x'` on a chart whose x is a
+   * number too.
+   */
   axis?: ChartAxis
   label?: ReactNode | ((value: number) => ReactNode)
   labelPosition?: 'start' | 'end'
-}) {
+}
+
+function ChartReferenceLine(props: ChartReferenceLineProps) {
+  const {
+    value,
+    category,
+    axis,
+    label,
+    labelPosition = 'end',
+    className,
+    ...rest
+  } = props
+  useDeclared('ChartReferenceLine', ChartReferenceLine.declare(props))
   const chart = useChart()
   const { orientation, direction, status, current } = chart
-  const onX = axis === 'x' && chart.xy !== undefined
-  const { scale, previousScale } = scalesOf(chart, onX ? 'x' : 'value')
-  const addReference = onX && chart.xy ? chart.xy.addReference : chart.addReference
-  const marked = useReferenceValue(value, onX ? 'x' : 'value')
-  useLayoutEffect(
-    () =>
-      marked === null || typeof value !== 'number' ? undefined : addReference(marked),
-    [addReference, marked, value],
-  )
+  const { id, onX, scale, previous } = referenceAxis(chart, axis)
+  const marked = referenceValue(chart, value, id)
   // Which way the line runs: a value on an x axis, or a category along one, makes a line
   // down the plot, whose label sits above it.
   const along =
@@ -811,7 +942,7 @@ function ChartReferenceLine({
         <div
           data-slot='chart-reference-line'
           className={cn(plotLayerClassName, 'z-15', className)}
-          {...props}
+          {...rest}
         >
           <div
             className={cn(tickMove, slideLine[line])}
@@ -859,22 +990,15 @@ function ChartReferenceLine({
       <div
         data-slot='chart-reference-line'
         className={cn(plotLayerClassName, 'z-15', className)}
-        {...props}
+        {...rest}
       >
         <div
           className={cn(tickMove, slideLine[line])}
           style={
             {
-              ...axisSlide(
-                line,
-                valuePlace(marked, scale),
-                valuePlace(marked, previousScale),
-                direction,
-              ),
+              ...axisSlide(line, scale.place(marked), previous.place(marked), direction),
               '--line-x': plotOffset(
-                direction === 'rtl'
-                  ? 1 - valuePlace(marked, scale)
-                  : valuePlace(marked, scale),
+                direction === 'rtl' ? 1 - scale.place(marked) : scale.place(marked),
                 'cqw',
               ),
             } as CSSProperties
@@ -913,38 +1037,29 @@ function ChartReferenceLine({
  * chart whose x is a value too, such as a scatter, a band down the plot
  * between two x values.
  */
-function ChartReferenceArea({
-  from,
-  to,
-  axis = 'value',
-  label,
-  className,
-  ...props
-}: Omit<ComponentProps<'div'>, 'children'> & {
+type ChartReferenceAreaProps = Omit<ComponentProps<'div'>, 'children'> & {
   from: number
   to: number
-  /** The axis `from` and `to` are on: the value axis, or the x axis of a chart whose x is a value too. */
+  /**
+   * The axis `from` and `to` are on: the chart's value axis, another value
+   * axis by the id its series name in the config, or `'x'` on a chart whose
+   * x is a number too.
+   */
   axis?: ChartAxis
   label?: ReactNode
-}) {
+}
+
+function ChartReferenceArea(props: ChartReferenceAreaProps) {
+  const { from, to, axis, label, className, ...rest } = props
+  useDeclared('ChartReferenceArea', ChartReferenceArea.declare(props))
   const chart = useChart()
   const { direction, status } = chart
-  const onX = axis === 'x' && chart.xy !== undefined
-  const { scale } = scalesOf(chart, onX ? 'x' : 'value')
-  const addReference = onX && chart.xy ? chart.xy.addReference : chart.addReference
+  const { onX, scale } = referenceAxis(chart, axis)
   // A band on an x axis runs down the plot, as a lying bar chart's values do.
   const orientation = onX ? 'horizontal' : chart.orientation
-  useLayoutEffect(() => {
-    const letFrom = addReference(from)
-    const letTo = addReference(to)
-    return () => {
-      letFrom()
-      letTo()
-    }
-  }, [addReference, from, to])
   if (status !== 'ready') return null
-  const low = fractionOf(Math.min(from, to), scale.domain)
-  const high = fractionOf(Math.max(from, to), scale.domain)
+  const low = scale.place(Math.min(from, to))
+  const high = scale.place(Math.max(from, to))
   // Its edges as the plot's own places from the top, the left and the right.
   const top = plotOffset(1 - high, 'cqh')
   const bottom = `calc(100cqh - ${plotOffset(1 - low, 'cqh')})`
@@ -959,7 +1074,7 @@ function ChartReferenceArea({
       data-slot='chart-reference-area'
       // Over the grid, which shows through its tint, so no grid line strikes through its label.
       className={cn(plotLayerClassName, 'z-1', className)}
-      {...props}
+      {...rest}
     >
       <div
         className='bg-foreground/5 dark:bg-foreground/8 absolute inset-0 duration-(--motion-layout-duration) ease-(--motion-layout-easing) [clip-path:var(--area-clip)] transition-none group-data-mounted/chart:transition-[clip-path] motion-reduce:group-data-mounted/chart:transition-none forced-colors:bg-[GrayText]!'
@@ -986,6 +1101,30 @@ function ChartReferenceArea({
     </div>
   )
 }
+
+// The values a reference marks join its axis's range as the chart renders; one worked out
+// from the data is in it already.
+ChartReferenceLine.declare = ({
+  value,
+  category,
+  axis,
+}: ChartReferenceLineProps): ChartPartDeclaration => ({
+  references:
+    typeof value === 'number' && category === undefined
+      ? [{ axis: referenceOn(axis), value }]
+      : [],
+})
+
+ChartReferenceArea.declare = ({
+  from,
+  to,
+  axis,
+}: ChartReferenceAreaProps): ChartPartDeclaration => ({
+  references: [
+    { axis: referenceOn(axis), value: from },
+    { axis: referenceOn(axis), value: to },
+  ],
+})
 
 /**
  * One toggle for each series, which shows and hides it: its colour fills the

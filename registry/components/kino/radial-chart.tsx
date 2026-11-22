@@ -14,13 +14,7 @@ import {
   useChartActive,
   useRegistry,
 } from '@/registry/lib/chart-core'
-import {
-  categoryBand,
-  type ChartDatum,
-  type ChartPattern,
-  numberOf,
-  valueScale,
-} from '@/registry/lib/chart-math'
+import { type ChartDatum, type ChartPattern, numberOf } from '@/registry/lib/chart-math'
 import {
   fitRound,
   outerPoint,
@@ -43,6 +37,7 @@ import {
   forcedSeriesTextColor,
   plotLayerClassName,
 } from '@/registry/lib/chart-root'
+import { bandAt, linearScale } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -342,7 +337,7 @@ function standInSize(marks: readonly RoundMark[]) {
 function radialTop(rows: readonly ChartDatum[], dataKey: string) {
   let high = 0
   for (const row of rows) high = Math.max(high, numberOf(row[dataKey]) ?? 0)
-  return valueScale([0, high]).domain[1]
+  return linearScale([0, high]).domain[1]
 }
 
 /**
@@ -395,7 +390,7 @@ function RadialChart(props: RadialChartProps) {
       entrance: entrance !== 'none',
       nice: false,
       seriesOfRow: (row) => String(row[props.index]),
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       // Rounded out here, once, so the top never changes with the plot's size.
       measure: (rows) => ({ extent: [0, radialTop(rows, dataKey)] as const }),
     },
@@ -424,7 +419,7 @@ function RadialChart(props: RadialChartProps) {
   const needle = has('needle')
   const range = has('range') && !laps
   const centrePlace = centrePlaceOf(sweep, inner, needle)
-  const [min, max] = chart.scale.domain
+  const [min, max] = chart.frame.y.value.scale.domain
   const endText = (value: number) => chart.textWidth(chart.valueText(value))
   const marks: RoundMark[] = sweepMarks(sweep, inner)
   if (needle) marks.push({ x: 0, y: 0, left: HUB, right: HUB, up: HUB, down: HUB })

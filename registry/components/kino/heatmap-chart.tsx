@@ -31,12 +31,8 @@ import {
   stepExtent,
   stepOf,
 } from '@/registry/lib/chart-grid'
-import {
-  allWhole,
-  type ChartDatum,
-  numberOf,
-  valueScale,
-} from '@/registry/lib/chart-math'
+import { allWhole, type ChartDatum, numberOf } from '@/registry/lib/chart-math'
+import { linearScale } from '@/registry/lib/chart-scale'
 import {
   formatDate,
   monthName,
@@ -243,7 +239,7 @@ function HeatmapChart(props: HeatmapChartProps) {
     [data, dateKey, first, dateLocale, xKey, yKey, xFormat, yFormat, xValues, yValues],
   )
   const values = layout.rows.map((row) => numberOf(row[value]))
-  const scale = valueScale(stepExtent(values), {
+  const scale = linearScale(stepExtent(values), {
     domain,
     tickCount,
     nice: true,

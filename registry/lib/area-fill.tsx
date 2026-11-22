@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
  * `--area-chart-fill-top`.
  */
 
-/** The shape between `points` and their baselines in px, for a plot `width` by `height`, broken at each missing value. */
+/** The shape between `points` and their baselines, for a plot `width` by `height` in the SVG's units, broken at each missing value. */
 function areaPathThrough(
   points: readonly LinePoint[],
   curve: PathCurve,
@@ -51,7 +51,7 @@ interface AreaFillElements {
   gradient: RefObject<SVGLinearGradientElement | null>
 }
 
-/** Writes the fill's shape, `path` in px, and where its wash starts, `peak` px from the top, straight into its elements. */
+/** Writes the fill's shape, `path`, and where its wash starts, `peak` from the top in the SVG's units, straight into its elements. */
 function paintFill(elements: AreaFillElements, path: string, peak: number) {
   elements.path.current?.setAttribute('d', path)
   elements.gradient.current?.setAttribute('y1', String(peak))
@@ -72,11 +72,11 @@ function AreaFill({
 }: Omit<ComponentProps<'path'>, 'id' | 'd' | 'ref'> & {
   /** The gradient's id, unique on the page. */
   id: string
-  /** The shape in px, from `areaPathThrough`. */
+  /** The shape, from `areaPathThrough`. */
   path: string
-  /** Where the wash is strongest, in px from the top. */
+  /** Where the wash is strongest, from the top in the SVG's units. */
   peak: number
-  /** The plot's height in px, where the wash is faintest. */
+  /** The plot's height in the SVG's units, where the wash is faintest. */
   height: number
   /** Refs to the path and its gradient, for a move to redraw them. */
   elements?: AreaFillElements

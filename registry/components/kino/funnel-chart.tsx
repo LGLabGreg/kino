@@ -1,5 +1,6 @@
 'use client'
 
+import { slotBand } from '@/registry/lib/chart-bar-marks'
 import {
   barClip,
   BarLabel,
@@ -11,7 +12,6 @@ import {
   missingMark,
   outsideRoom,
   placeholderClip,
-  slotBand,
 } from '@/registry/lib/chart-bars'
 import {
   type CategoryChartInput,
@@ -27,10 +27,8 @@ import {
 } from '@/registry/lib/chart-core'
 import {
   cascadeAt,
-  categoryBand,
   type ChartDatum,
   type ChartOrientation,
-  fractionOf,
   numberOf,
   plotPoint,
 } from '@/registry/lib/chart-math'
@@ -43,6 +41,7 @@ import {
   swatchStyle,
   tooltipQuietClassName,
 } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { type ComponentProps, createContext, Fragment, use, useLayoutEffect } from 'react'
 
@@ -103,6 +102,8 @@ interface FunnelContextValue {
   /** How far through the cascade each step's bars start. */
   cascade: readonly number[]
   barGap: number
+  /** Keeps `px` past the value axis's far end while a part's labels sit there; returns what lets it go. */
+  addRoom: (px: number) => () => void
 }
 
 const FunnelContext = createContext<FunnelContextValue | null>(null)
@@ -148,7 +149,7 @@ function FunnelChart(props: FunnelChartProps) {
     children,
     ref,
   } = props
-  const { chart, rows, placeholder, fromPlaceholder, phase } = useCategoryChart(
+  const { chart, rows, placeholder, fromPlaceholder, phase, addRoom } = useCategoryChart(
     { ...props, ordered: false },
     {
       orientation,
@@ -160,7 +161,7 @@ function FunnelChart(props: FunnelChartProps) {
           : undefined,
       nice: true,
       bandOf: (index, count) =>
-        categoryBand(index, count, categoryGap === undefined ? {} : { gap: categoryGap }),
+        bandAt(index, count, categoryGap === undefined ? {} : { gap: categoryGap }),
       measure: (data, shown) => ({
         extent: [0, columnTop(data, shown, drop)] as const,
       }),
@@ -205,7 +206,7 @@ function FunnelChart(props: FunnelChartProps) {
         : 0
       return plotPoint(
         category.band,
-        fractionOf(top, chart.scale.domain),
+        chart.frame.y.value.scale.place(top),
         orientation,
         chart.direction,
       )
@@ -243,6 +244,7 @@ function FunnelChart(props: FunnelChartProps) {
   return (
     <FunnelContext
       value={{
+        addRoom,
         steps,
         rate,
         drop,
@@ -362,7 +364,7 @@ function funnelPlaces(
   key: string,
 ): { bar: BarPlace; drop: BarPlace } {
   const band = slotOf(chart, funnel, category, key)
-  const zero = fractionOf(0, chart.scale.domain)
+  const zero = chart.frame.y.value.scale.place(0)
   const step = funnel.steps[key]?.[category.index]
   const standing =
     step && !category.leaving && chart.entered && !chart.hidden.includes(key)
@@ -372,13 +374,12 @@ function funnelPlaces(
       drop: { band, from: zero, to: zero },
     }
   }
-  const value = fractionOf(step.value ?? 0, chart.scale.domain)
+  const value = chart.frame.y.value.scale.place(step.value ?? 0)
   // A missing step shows its dashed mark alone: nothing is known to have dropped off before it.
-  const before = fractionOf(
+  const before = chart.frame.y.value.scale.place(
     funnel.drop && step.value !== null
       ? Math.max(step.value, step.previous ?? 0)
       : (step.value ?? 0),
-    chart.scale.domain,
   )
   return {
     bar: { band, from: zero, to: value },
@@ -414,7 +415,8 @@ function Funnel({
   const chart = useChart()
   const { spotlit } = useChartActive()
   const funnel = useFunnelChart()
-  const { addRoom, locale } = chart
+  const { locale } = chart
+  const { addRoom } = funnel
   const steps = funnel.steps[dataKey] ?? []
   const writeRate = numberFormatter(locale, RATE_FORMAT)
   const rateOf = (step: FunnelStep) =>
@@ -445,7 +447,7 @@ function Funnel({
       ),
     ),
   )
-  const zero = fractionOf(0, chart.scale.domain)
+  const zero = chart.frame.y.value.scale.place(0)
   const dimmed = (category: ChartCategory) =>
     (spotlit !== null && spotlit !== category.index) ||
     (chart.emphasis !== null && chart.emphasis !== dataKey)
@@ -508,7 +510,11 @@ function Funnel({
                 images=''
                 slot={slot}
                 track={undefined}
-                missing={missing ? missingMark(chart, places.bar.band) : undefined}
+                missing={
+                  missing
+                    ? missingMark(chart, places.bar.band, chart.frame.baselines.value)
+                    : undefined
+                }
               />
             </Fragment>
           )

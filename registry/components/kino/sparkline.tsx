@@ -4,12 +4,8 @@ import { Area, AreaChart } from '@/registry/components/kino/area-chart'
 import { Bar, BarChart } from '@/registry/components/kino/bar-chart'
 import { Line, LineChart } from '@/registry/components/kino/line-chart'
 import type { CategoryChartProps } from '@/registry/lib/chart-core'
-import {
-  type ChartDatum,
-  type DomainEnd,
-  numberOf,
-  rangeOf,
-} from '@/registry/lib/chart-math'
+import { type ChartDatum, numberOf, rangeOf } from '@/registry/lib/chart-math'
+import type { DomainEnd } from '@/registry/lib/chart-scale'
 import type { LineCurve } from '@/registry/lib/line-path'
 import type { CSSProperties } from 'react'
 
@@ -208,8 +204,17 @@ function Sparkline({
     .filter((key) => dashed.includes(key))
     .map((key) => <Line key={key} dataKey={key} curve={curve} dashed />)
   if (variant === 'area') {
+    // Its dashed series are lines among the areas.
+    const config = Object.fromEntries(
+      keys.map((key) => [
+        key,
+        dashed.includes(key)
+          ? { ...props.config[key], mark: 'line' as const }
+          : props.config[key],
+      ]),
+    )
     return (
-      <AreaChart {...shared} entrance={entrance}>
+      <AreaChart {...shared} config={config} entrance={entrance}>
         {behind}
         {solid.map((key) => (
           <Area key={key} dataKey={key} curve={curve} dots={dots} />

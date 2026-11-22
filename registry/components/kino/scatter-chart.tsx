@@ -4,23 +4,26 @@ import {
   type CategoryChartInput,
   type CategoryChartProps,
   type ChartCategory,
+  type ChartContextValue,
+  type ChartPartDeclaration,
   figureProps,
   CategoryChartFrame,
-  useCategoryChart,
+  numberAxis,
+  plotPlace,
+  useCartesianChart,
   useChart,
   useChartActive,
-  xyPlace,
+  useDeclared,
   plotOffset,
   plotFraction,
 } from '@/registry/lib/chart-core'
 import {
   allWhole,
   type ChartDatum,
-  type DomainEnd,
   numberOf,
-  type Span,
   type XYValue,
 } from '@/registry/lib/chart-math'
+import { pointMarks } from '@/registry/lib/chart-point-marks'
 import {
   type ChartFormat,
   forcedSeriesTextColor,
@@ -29,6 +32,7 @@ import {
   plotLayerClassName,
   seriesColor,
 } from '@/registry/lib/chart-root'
+import type { DomainEnd } from '@/registry/lib/chart-scale'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
@@ -141,7 +145,9 @@ function bubbleRadius(value: number | null, largest: number): number {
 /**
  * The rows that are points: those with a number for both `x` and `y`, since
  * a point needs both, in a series the config names, by `seriesOf`, so a row
- * with a mistyped series is left out rather than drawn as another's.
+ * with a mistyped series is left out rather than drawn as another's. Each
+ * holds its `y` under its series' key too, where the frame reads a series'
+ * values, as it does in rows that hold every series.
  */
 function scatterRows(
   data: readonly ChartDatum[],
@@ -149,10 +155,12 @@ function scatterRows(
   y: string,
   seriesOf: (row: ChartDatum) => string | null = () => '',
 ): readonly ChartDatum[] {
-  return data.filter(
-    (row) =>
-      numberOf(row[x]) !== null && numberOf(row[y]) !== null && seriesOf(row) !== null,
-  )
+  return data.flatMap((row) => {
+    const series = seriesOf(row)
+    if (numberOf(row[x]) === null || numberOf(row[y]) === null || series === null)
+      return []
+    return [{ ...row, [series]: row[y] }]
+  })
 }
 
 /**
@@ -241,42 +249,30 @@ function ScatterChart(props: ScatterChartProps) {
   const largest = size ? Math.max(0, ...rows.map((row) => numberOf(row[size]) ?? 0)) : 0
   const radiusOfRow = (row: ChartDatum) =>
     size ? bubbleRadius(numberOf(row[size]), largest) : POINT_RADIUS
-  const { chart, placeholder } = useCategoryChart(
+  const { chart, placeholder } = useCartesianChart(
     {
       ...props,
       data: rows,
       allowDecimals: allowDecimals ?? !allWhole(rows, [y]),
     },
     {
+      kinds: [pointMarks],
       orientation: 'vertical',
       stack: 'none',
       entrance: false,
-      nice: true,
-      // Every point is one category, but none sits in a band: the XY frame places them.
-      bandOf: () => ({ start: 0, size: 0 }),
       seriesOfRow,
       keyOf: (row) => `${seriesOfRow(row)}\u0000${String(row[props.index])}`,
       inset: size ? BUBBLE_RADIUS.max + 2 : POINT_RADIUS + 2,
+      // Every point is one row, placed by both values rather than in a band.
       x: {
+        key: x,
         domain: xDomain,
         tickCount: xTickCount,
         allowDecimals: !allWhole(rows, [x]),
         format: xFormat,
-        labels: { x: xLabel, y: yLabel },
+        label: xLabel,
       },
-      measure: (drawn) => {
-        const points: XYValue[] = drawn.map((row) => ({
-          x: numberOf(row[x]) ?? 0,
-          y: numberOf(row[y]) ?? 0,
-        }))
-        return {
-          extent: valueExtent(points.map((point) => point.y)),
-          xy: {
-            extent: valueExtent(points.map((point) => point.x)),
-            points,
-          },
-        }
-      },
+      y: { zero: false, label: yLabel },
     },
   )
   const xText = formatterOf(locale, xFormat ?? format)
@@ -320,10 +316,10 @@ function ScatterChart(props: ScatterChartProps) {
     markerOf: scatter.markerOf,
     // The tooltip sits over the point, clear of its bubble.
     pointOf: (at) => {
-      const point = chart.xy?.points[at]
+      const point = chart.xyOf(at)
       const category = chart.current[at]
       if (!point || !category) return null
-      const place = xyPlace(chart, point)
+      const place = plotPlace(point.place, chart.direction)
       return {
         x: plotFraction(place.x, width, chart.inset),
         y:
@@ -379,17 +375,17 @@ function ScatterChart(props: ScatterChartProps) {
 }
 
 /**
- * The lowest and highest of `values`, or 0 to 1 with none. Values that are
- * all the same get a range around them, a tenth of their size each way, so
- * a single point sits in the middle of the plot rather than in its corner.
+ * Where a point with `value` sits on the plot, as fractions of it from its
+ * physical left and its top: a leaving one keeps the values it had, placed
+ * on the axes as they are now.
  */
-function valueExtent(values: readonly number[]): Span {
-  if (values.length === 0) return [0, 1]
-  const low = Math.min(...values)
-  const high = Math.max(...values)
-  if (low !== high) return [low, high]
-  const room = Math.abs(low) / 10 || 1
-  return [low - room, high + room]
+function pointPlace(chart: ChartContextValue, value: XYValue): XYValue {
+  const along = numberAxis(chart, 'x')
+  if (!along) throw new Error('A scatter places its points along an x axis of numbers.')
+  return plotPlace(
+    { x: along.scale.place(value.x), y: chart.frame.y.value.scale.place(value.y) },
+    chart.direction,
+  )
 }
 
 /**
@@ -451,6 +447,10 @@ function ScatterTooltipContent({
   )
 }
 
+Scatter.declare = ({ dataKey }: ScatterProps): ChartPartDeclaration => ({
+  series: { key: dataKey, mark: 'point' },
+})
+
 /**
  * One series' points: a layer of the plot holding a point for each row of
  * the series, in its colour and shape, sized by `size` as a bubble. While a
@@ -458,14 +458,14 @@ function ScatterTooltipContent({
  * number of points, and the lit point is drawn again over every series, so
  * it stays bright and whole. New data glides each point to its new place.
  */
-function Scatter({
-  dataKey,
-  className,
-  ...props
-}: Omit<ComponentProps<'div'>, 'children'> & {
+type ScatterProps = Omit<ComponentProps<'div'>, 'children'> & {
   /** The series' key in the config: the rows of this series are its points. */
   dataKey: string
-}) {
+}
+
+function Scatter(props: ScatterProps) {
+  const { dataKey, className, ...rest } = props
+  useDeclared('Scatter', Scatter.declare(props))
   const chart = useChart()
   const scatter = useScatter()
   const { spotlit } = useChartActive()
@@ -498,11 +498,11 @@ function Scatter({
           className,
         )}
         style={style}
-        {...props}
+        {...rest}
       >
         {chart.categories.map((category) => {
           if (scatter.seriesOf(category) !== dataKey) return null
-          const place = xyPlace(chart, scatter.valueOf(category))
+          const place = pointPlace(chart, scatter.valueOf(category))
           return (
             <ScatterPoint
               key={category.key}
@@ -530,7 +530,7 @@ function Scatter({
         >
           <ScatterPoint
             key={shownLit.key}
-            {...xyPlace(chart, scatter.valueOf(shownLit))}
+            {...pointPlace(chart, scatter.valueOf(shownLit))}
             radius={scatter.radiusOf(shownLit)}
             marker={marker}
             slot={slot}
@@ -653,5 +653,4 @@ export {
   markerAt,
   pointSeries,
   scatterRows,
-  valueExtent,
 }

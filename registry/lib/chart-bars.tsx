@@ -2,15 +2,13 @@
 
 import type { ChartContextValue } from '@/registry/lib/chart-core'
 import {
-  type Band,
-  categoryBand,
   type ChartOrientation,
-  fractionOf,
   physicalStart,
   plotPoint,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
 import { forcedSeriesColor, plotLayerClassName } from '@/registry/lib/chart-root'
+import { type Band, bandAt } from '@/registry/lib/chart-scale'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
@@ -101,7 +99,7 @@ function placeholderClip(
   value: number,
   count = PLACEHOLDER_COUNT,
 ) {
-  const band = categoryBand(at, count)
+  const band = bandAt(at, count)
   return barClipPath(
     barInsets(band, 0, value, chart.orientation, chart.direction),
     roundCorners(chart.orientation, chart.direction, true),
@@ -116,7 +114,10 @@ type BarLabelPosition = 'outside' | 'inside' | 'center'
 const OUTSIDE_ROOM = { vertical: 18, gap: 10 } as const
 
 /** The room past the bars' ends that labels reading `texts` take, in px. */
-function outsideRoom(chart: ChartContextValue, texts: readonly string[]) {
+function outsideRoom(
+  chart: Pick<ChartContextValue, 'orientation' | 'textWidth'>,
+  texts: readonly string[],
+) {
   if (chart.orientation === 'vertical') return OUTSIDE_ROOM.vertical
   return Math.ceil(Math.max(0, ...texts.map(chart.textWidth)) + OUTSIDE_ROOM.gap)
 }
@@ -196,9 +197,8 @@ function trackClip(chart: ChartContextValue, band: Band) {
   )
 }
 
-/** Where the mark of a missing value sits: across its band, on zero. */
-function missingMark(chart: ChartContextValue, band: Band): CSSProperties {
-  const zero = fractionOf(0, chart.scale.domain)
+/** Where the mark of a missing value sits: across its band, on `zero`, the fraction of the value axis bars grow from. */
+function missingMark(chart: ChartContextValue, band: Band, zero: number): CSSProperties {
   const start = physicalStart(
     band,
     chart.orientation === 'vertical' ? 'inline' : 'block',
@@ -331,16 +331,6 @@ function labelFits(
   return vertical
     ? thickness >= textWidth + 4 && length >= textHeight + inset + 2
     : thickness >= textHeight - 2 && length >= textWidth + 8 + inset + 2
-}
-
-/** The part of `band` the series in `slot` takes when `slots` series sit side by side, `gap` apart as a share of one slot. */
-function slotBand(band: Band, slot: number, slots: number, gap = 0.12): Band {
-  if (slots <= 1 || slot < 0) return band
-  const inner = categoryBand(slot, slots, { gap, outer: 0 })
-  return {
-    start: band.start + inner.start * band.size,
-    size: inner.size * band.size,
-  }
 }
 
 /** The edges of a bar, as fractions of the plot from each side. */
@@ -484,6 +474,5 @@ export {
   placeholderClip,
   placeholderValues,
   roundCorners,
-  slotBand,
   trackClip,
 }

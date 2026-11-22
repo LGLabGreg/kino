@@ -22,11 +22,7 @@ import {
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
-import {
-  categoryBand,
-  type ChartConfig,
-  type ChartDatum,
-} from '@/registry/lib/chart-math'
+import type { ChartConfig, ChartDatum } from '@/registry/lib/chart-math'
 import {
   drawingSize,
   forcedSeriesColor,
@@ -35,6 +31,7 @@ import {
   plotLayerClassName,
   swatchClassName,
 } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import {
   centreOf,
   LABEL_PADDING,
@@ -252,7 +249,7 @@ function TreemapChart(props: TreemapChartProps) {
       nice: false,
       seriesOfRow: (row) => String(row[TILE_TOP]),
       keyOf: (row) => String(row[TILE_KEY]),
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       measure: () => ({ extent: [0, 1] as const }),
     },
   )

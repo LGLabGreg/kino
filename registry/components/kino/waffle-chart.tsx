@@ -20,7 +20,7 @@ import {
   useChart,
   useChartActive,
 } from '@/registry/lib/chart-core'
-import { categoryBand, gridCellAt } from '@/registry/lib/chart-math'
+import { gridCellAt } from '@/registry/lib/chart-math'
 import {
   type ChartPoint,
   forcedSeriesColor,
@@ -28,6 +28,7 @@ import {
   plotLayerClassName,
   swatchClassName,
 } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { createContext, type CSSProperties, memo, use, useState } from 'react'
 
@@ -172,7 +173,7 @@ function WaffleChart(props: WaffleChartProps) {
       nice: false,
       heightFromData: true,
       seriesOfRow: (row) => String(row[index]),
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       measure: () => ({ extent: [0, 1] as const }),
     },
   )

@@ -3,24 +3,21 @@
 import {
   type CategoryChartInput,
   type CategoryChartProps,
-  type ChartContextValue,
+  type ChartPartDeclaration,
   figureProps,
-  useCategoryChart,
+  useCartesianChart,
+  useDeclared,
 } from '@/registry/lib/chart-core'
 import {
+  framePoints,
+  frameRest,
+  frameTop,
   LineFamilyFrame,
   LineSeries,
   type LineSeriesProps,
-  pointBand,
-  zeroY,
 } from '@/registry/lib/chart-line'
-import {
-  type ChartDatum,
-  fractionOf,
-  numberOf,
-  plotPoint,
-  type Span,
-} from '@/registry/lib/chart-math'
+import { lineMarks } from '@/registry/lib/chart-line-marks'
+import { plotPoint } from '@/registry/lib/chart-math'
 import type { LineCurve, LinePoint } from '@/registry/lib/line-path'
 
 /*
@@ -46,39 +43,6 @@ interface LineChartProps extends CategoryChartProps {
 
 const lineChartKeys = ['entrance', 'zero']
 
-/** The lowest and highest value the shown series reach, taking in zero unless `zero` is off. */
-function lineExtent(
-  rows: readonly ChartDatum[],
-  keys: readonly string[],
-  zero: boolean,
-): Span {
-  let low = zero ? 0 : Infinity
-  let high = zero ? 0 : -Infinity
-  for (const row of rows) {
-    for (const key of keys) {
-      const value = numberOf(row[key])
-      if (value === null) continue
-      low = Math.min(low, value)
-      high = Math.max(high, value)
-    }
-  }
-  return Number.isFinite(low) ? [low, high] : [0, 0]
-}
-
-/** A line's points for the categories shown, at their place on the value axis, or along zero when `flat`. */
-function linePoints(chart: ChartContextValue, key: string, flat: boolean): LinePoint[] {
-  const zero = zeroY(chart)
-  return chart.current.map((category) => {
-    const value = numberOf(category.datum[key])
-    return {
-      key: category.key,
-      x: category.band.start,
-      y: flat || value === null ? zero : 1 - fractionOf(value, chart.scale.domain),
-      defined: value !== null,
-    }
-  })
-}
-
 /**
  * The chart's root: it lays out the frame its parts draw in, places each
  * category along the plot from edge to edge, and fits the value axis to the
@@ -94,15 +58,13 @@ function LineChart(props: LineChartProps) {
     children,
     ref,
   } = props
-  const { chart, placeholder, phase } = useCategoryChart(props, {
+  const { chart, model, placeholder, phase } = useCartesianChart(props, {
+    kinds: [lineMarks],
     orientation: 'vertical',
     stack: 'none',
     entrance: entrance !== 'none',
-    nice: true,
-    bandOf: pointBand,
-    measure: (rows, shown) => ({ extent: lineExtent(rows, shown, zero) }),
+    y: { zero },
   })
-  const shown = chart.series.filter((key) => !chart.hidden.includes(key))
   const full: CategoryChartInput = {
     ...chart,
     // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
@@ -111,14 +73,13 @@ function LineChart(props: LineChartProps) {
     pointOf: (at) => {
       const category = chart.current[at]
       if (!category) return null
-      const top = chart.entered
-        ? Math.max(
-            ...shown.map((key) => numberOf(category.datum[key]) ?? -Infinity),
-            -Infinity,
-          )
-        : -Infinity
-      const along = Number.isFinite(top) ? fractionOf(top, chart.scale.domain) : 0
-      return plotPoint(category.band, along, 'vertical', chart.direction)
+      const along = chart.entered ? model.reach(category.index) : null
+      return plotPoint(
+        category.band,
+        along ?? model.baselines.value,
+        'vertical',
+        chart.direction,
+      )
     },
   }
   return (
@@ -128,13 +89,11 @@ function LineChart(props: LineChartProps) {
         name: 'line-chart',
         phase,
         entrance,
-        // Hidden, or waiting to rise, a line lies flat along zero.
+        // Hidden, or waiting to rise, a line lies flat along its baseline.
         pointsOf: (key, rising) =>
-          linePoints(full, key, rising || chart.hidden.includes(key)),
-        topOf: (key, category) => {
-          const value = numberOf(category.datum[key])
-          return value === null ? null : 1 - fractionOf(value, chart.scale.domain)
-        },
+          framePoints(full, model, key, rising || chart.hidden.includes(key), false),
+        topOf: (key, category) => frameTop(model, key, category),
+        restOf: (key) => frameRest(model, key),
       }}
       description={description}
       empty={empty}
@@ -158,8 +117,18 @@ type LineProps = LineSeriesProps
  * category, a window that glides with the axis's pill.
  */
 function Line(props: LineProps) {
+  useDeclared('Line', Line.declare(props))
   return <LineSeries {...props} />
 }
+
+// A line is its series, drawn as one; the tooltip, the slider and the table say which values
+// are projected.
+Line.declare = ({ dataKey, forecastFrom }: LineProps): ChartPartDeclaration => ({
+  series: { key: dataKey, mark: 'line' },
+  ...(forecastFrom === undefined
+    ? {}
+    : { forecast: { series: dataKey, from: forecastFrom } }),
+})
 
 export {
   Line,
@@ -168,5 +137,4 @@ export {
   type LineCurve,
   type LinePoint,
   type LineProps,
-  lineExtent,
 }

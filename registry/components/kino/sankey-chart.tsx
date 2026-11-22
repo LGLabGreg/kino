@@ -29,8 +29,9 @@ import {
   linkPath,
   stepNode,
 } from '@/registry/lib/chart-flows'
-import { categoryBand, type ChartConfig } from '@/registry/lib/chart-math'
+import type { ChartConfig } from '@/registry/lib/chart-math'
 import { drawingSize, swatchClassName, usePointsMove } from '@/registry/lib/chart-root'
+import { bandAt } from '@/registry/lib/chart-scale'
 import { useControllable } from '@/registry/lib/controllable'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
@@ -211,7 +212,7 @@ function SankeyChart(props: SankeyChartProps) {
       entrance: entrance !== 'none',
       // What leaves moves with the rest, so the chart waits on the move before letting it go.
       nice: false,
-      bandOf: (at, count) => categoryBand(at, count),
+      bandOf: (at, count) => bandAt(at, count),
       measure: () => ({ extent: [0, 1] as const }),
       rowsShown: (rows) => rows.filter((row) => drawnKeys.has(String(row[MARK_KEY]))),
     },
