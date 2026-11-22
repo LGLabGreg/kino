@@ -5,27 +5,34 @@ import { Button } from '@/registry/components/kino/button'
 import {
   type CategoryChartProps,
   figureProps,
+  IndexActive,
   useChartActive,
+  useChartLife,
+  useChartLoad,
+  useChartPick,
+  useIndexFocus,
 } from '@/registry/lib/chart-base'
 import {
-  CategoryChartFrame,
-  type ChartCategory,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
-import {
+  allWhole,
   cascadeAt,
   type ChartDatum,
   numberOf,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
 import {
-  ChartNumber,
+  ChartFrame,
   type ChartFormat,
+  type ChartItem,
   type ChartMessages,
+  ChartNumber,
+  type ChartReader,
+  type ChartRootValue,
   seriesColor,
+  useChartRoot,
+  useChartRootValue,
 } from '@/registry/lib/chart-root'
-import { bandAt } from '@/registry/lib/chart-scale'
+import { linearScale } from '@/registry/lib/chart-scale'
+import type { ChartTarget } from '@/registry/lib/chart-state'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
 import { useFlow } from '@/registry/lib/flow'
@@ -133,9 +140,12 @@ const barListKeys = [
 /** How long the placeholder's bars are, as fractions of the row: a typical ranking, knowing nothing of the data. */
 const PLACEHOLDER_LENGTHS = [0.92, 0.7, 0.54, 0.4, 0.3] as const
 
+/** A row of the data, as the list keeps it. */
+type BarListItem = ChartItem & { datum: ChartDatum }
+
 /** What a row shows, worked out once by the root. */
 interface BarListRowData {
-  category: ChartCategory
+  item: BarListItem
   /** Its place in the list, from the top. */
   rank: number
   value: number | null
@@ -149,13 +159,22 @@ interface BarListRowData {
   delay: string | undefined
 }
 
+/** The rows of a list that loads or failed: one array, so what compares rows sees no change. */
+const NO_ROWS: readonly ChartDatum[] = []
+
 /**
  * The list's root: it orders the rows, scales the bars to the largest value
- * (or the end of `domain`), and lays out the frame its rows draw in.
+ * (or the end of `domain`), and lays out the frame its rows draw in. It sits
+ * on the chart root with no browse layer: each row is a link or a button of
+ * its own, which the pointer and the keys reach as they are.
  */
 function BarList(props: BarListProps) {
   const {
+    data,
+    index,
     config,
+    domain,
+    categoryFormat = String,
     sort = 'descending',
     icon,
     href,
@@ -168,6 +187,9 @@ function BarList(props: BarListProps) {
     onExpandedChange,
     entrance = 'none',
     messages,
+    activeIndex,
+    defaultActiveIndex = null,
+    onActiveIndexChange,
     description,
     empty,
     className,
@@ -175,28 +197,51 @@ function BarList(props: BarListProps) {
   } = props
   const dataKey = Object.keys(config)[0] ?? ''
   const { showMore, showLess, ...chartMessages } = messages ?? {}
-  const { chart, placeholder, fromPlaceholder, phase } = useCategoryChart(
+  const state = useChartRoot(
+    { ...props, messages: { empty: 'No data yet', ...chartMessages } },
+    { entrance: entrance !== 'none', heightFromData: true },
+  )
+  const load = useChartLoad(props)
+  const drawn = load.placeholder || load.failed ? NO_ROWS : data
+  const shownSeries = state.series.filter((key) => !state.hidden.includes(key))
+  const { status, fromPlaceholder, phase } = useChartLife(
+    props,
+    state,
+    load,
+    { rows: drawn.length, shown: shownSeries.length, drawn: drawn.length },
     {
-      ...props,
-      color: undefined,
-      messages: { empty: 'No data yet', ...chartMessages },
-    },
-    {
-      orientation: 'horizontal',
-      stack: 'none',
       entrance: entrance !== 'none',
       cascade: { variable: '--bar-list-cascade', fallback: 0.8 },
-      nice: false,
-      heightFromData: true,
-      bandOf: (at, count) => bandAt(at, count),
-      measure: (rows) => ({
-        extent: [
-          0,
-          Math.max(0, ...rows.map((row) => Math.max(0, numberOf(row[dataKey]) ?? 0))),
-        ] as const,
-      }),
     },
   )
+  const current: BarListItem[] = drawn.map((datum, at) => ({
+    key: String(datum[index]),
+    value: datum[index],
+    datum,
+    index: at,
+  }))
+  const keys = current.map((item) => item.key)
+  const pick = useChartPick(props, keys)
+  const scale = linearScale([0, largestValue(drawn, dataKey)], {
+    domain,
+    tickCount: 5,
+    nice: false,
+    allowDecimals: !allWhole(drawn, shownSeries),
+  })
+  const reader = barListReader(current)
+  const root: ChartRootValue = {
+    ...state,
+    status,
+    reader,
+    markerOf: noMarker,
+    selectable: pick.selectable,
+    picked: pick.picked === null ? null : { kind: 'x', key: pick.picked },
+    togglePicked: (target) => {
+      if (reader.holds(target) && target.kind === 'x') pick.toggle(target.key)
+    },
+  }
+  const active = { activeIndex, defaultActiveIndex, onActiveIndexChange }
+  const { focusProps, toldRef } = useIndexFocus(reader.items, active)
   const [expanded, setExpanded] = useControllable(
     expandedProp,
     defaultExpanded,
@@ -204,7 +249,7 @@ function BarList(props: BarListProps) {
   )
   const listId = `${useId()}-rows`
 
-  const values = chart.current.map((category) => numberOf(category.datum[dataKey]))
+  const values = current.map((item) => numberOf(item.datum[dataKey]))
   const order = barListOrder(values, sort)
   const shares = barListShares(values)
   const most = limit === undefined ? order.length : Math.max(0, Math.floor(limit))
@@ -212,23 +257,22 @@ function BarList(props: BarListProps) {
   const waiting = phase === 'waiting'
   const drawing = phase === 'entering'
   const rows: BarListRowData[] = order.slice(0, shownCount).map((at, rank) => {
-    const category = chart.current[at]!
+    const item = current[at]!
     const value = values[at] ?? null
-    const fraction =
-      value === null || value <= 0 ? 0 : chart.frame.y.value.scale.place(value)
-    const zero = barListClip(0, chart.direction)
+    const fraction = value === null || value <= 0 ? 0 : scale.place(value)
+    const zero = barListClip(0, state.direction)
     const startAt = PLACEHOLDER_LENGTHS[Math.min(rank, PLACEHOLDER_LENGTHS.length - 1)]!
     return {
-      category,
+      item,
       rank,
       value,
       share: shares[at] ?? 0,
-      clip: waiting ? zero : barListClip(fraction, chart.direction),
+      clip: waiting ? zero : barListClip(fraction, state.direction),
       // A bar that arrives grows out of the placeholder in its place, or from the start.
-      from: fromPlaceholder ? barListClip(startAt, chart.direction) : zero,
-      color: color?.(category.datum, at) ?? seriesColor(dataKey),
-      icon: icon?.(category.datum),
-      href: href?.(category.datum),
+      from: fromPlaceholder ? barListClip(startAt, state.direction) : zero,
+      color: color?.(item.datum, at) ?? seriesColor(dataKey),
+      icon: icon?.(item.datum),
+      href: href?.(item.datum),
       delay: drawing
         ? `calc(var(--motion-draw-duration) * var(--bar-list-cascade, 0.8) * ${cascadeAt(rank, shownCount)})`
         : undefined,
@@ -240,12 +284,12 @@ function BarList(props: BarListProps) {
   // afresh, so its bar's slide would be lost. New values first land on the
   // rows where they are, so each bar's slide is running, then the rows move,
   // taking their slides with them.
-  const keys = rows.map((row) => row.category.key)
-  const [placed, setPlaced] = useState(keys)
-  const shown = barListPlacing(placed, keys)
-  const settled = sameOrder(shown, keys)
-  if (settled && !sameOrder(placed, keys)) setPlaced(keys)
-  const keysKey = keys.join('\u0000')
+  const rowKeys = rows.map((row) => row.item.key)
+  const [placed, setPlaced] = useState(rowKeys)
+  const shown = barListPlacing(placed, rowKeys)
+  const settled = sameOrder(shown, rowKeys)
+  if (settled && !sameOrder(placed, rowKeys)) setPlaced(rowKeys)
+  const keysKey = rowKeys.join('\u0000')
   useEffect(() => {
     if (settled) return
     let frame = requestAnimationFrame(() => {
@@ -253,54 +297,87 @@ function BarList(props: BarListProps) {
     })
     return () => cancelAnimationFrame(frame)
   }, [settled, keysKey])
-  const byKey = new Map(rows.map((row) => [row.category.key, row]))
+  const byKey = new Map(rows.map((row) => [row.item.key, row]))
   const placedRows = settled ? rows : shown.map((key) => byKey.get(key)!)
+  const valueLabel = config[dataKey]?.label
 
   return (
-    <CategoryChartFrame
-      chart={{ ...chart, pointOf: () => null }}
+    <ChartFrame
+      root={root}
+      focus={focusProps}
       ref={ref}
       slot='bar-list'
       description={description}
       empty={empty}
-      browse={false}
+      measuring={false}
+      inset={0}
+      data-orientation='horizontal'
       className={cn('h-auto min-h-(--control-height) text-sm', className)}
-      placeholder={
-        placeholder && (
+      {...figureProps({ ...props, color: undefined }, barListKeys)}
+    >
+      <IndexActive items={reader.items} active={active} toldRef={toldRef}>
+        <BarListRows
+          id={listId}
+          rows={placedRows}
+          nameOf={(item) => categoryFormat(item.value)}
+          valueLabel={typeof valueLabel === 'string' ? valueLabel : undefined}
+          share={share}
+          linkRender={linkRender}
+          entering={drawing}
+        />
+        {status === 'ready' && hiddenCount > 0 && (
+          <Button
+            size='sm'
+            variant='ghost'
+            aria-expanded={expanded}
+            aria-controls={listId}
+            className='mt-1 justify-self-start [grid-area:bottom]'
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded
+              ? (showLess ?? 'Show fewer')
+              : (showMore?.(hiddenCount) ?? `Show ${hiddenCount} more`)}
+          </Button>
+        )}
+        {load.placeholder && (
           <BarListPlaceholder
             count={Math.min(
               limit ?? PLACEHOLDER_LENGTHS.length,
               PLACEHOLDER_LENGTHS.length,
             )}
           />
-        )
-      }
-      {...figureProps({ ...props, color: undefined }, barListKeys)}
-    >
-      <BarListRows
-        id={listId}
-        rows={placedRows}
-        dataKey={dataKey}
-        share={share}
-        linkRender={linkRender}
-        entering={drawing}
-      />
-      {chart.status === 'ready' && hiddenCount > 0 && (
-        <Button
-          size='sm'
-          variant='ghost'
-          aria-expanded={expanded}
-          aria-controls={listId}
-          className='mt-1 justify-self-start [grid-area:bottom]'
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded
-            ? (showLess ?? 'Show fewer')
-            : (showMore?.(hiddenCount) ?? `Show ${hiddenCount} more`)}
-        </Button>
-      )}
-    </CategoryChartFrame>
+        )}
+      </IndexActive>
+    </ChartFrame>
   )
+}
+
+/** The list draws no legend, so its series take no marker. */
+function noMarker() {
+  return null
+}
+
+/** How far the bars reach: the largest value above zero, or zero. */
+function largestValue(rows: readonly ChartDatum[], dataKey: string) {
+  return Math.max(0, ...rows.map((row) => Math.max(0, numberOf(row[dataKey]) ?? 0)))
+}
+
+/**
+ * The list's reader: each row still in the data is held by its key, as an
+ * `x` target, and brings no series forward. It has no browse layer, since
+ * its rows are links and buttons of their own.
+ */
+function barListReader(current: readonly ChartItem[]): ChartReader {
+  const keys = current.map((item) => item.key)
+  const at = (target: { kind: string; key?: string }) =>
+    target.kind === 'x' && target.key !== undefined ? keys.indexOf(target.key) : -1
+  return {
+    holds: (target) => at(target) !== -1,
+    lights: () => null,
+    item: (target) => current[at(target)] ?? null,
+    items: keys.map((key) => ({ kind: 'x', key })),
+    browse: null,
+  }
 }
 
 /**
@@ -310,26 +387,30 @@ function BarList(props: BarListProps) {
 function BarListRows({
   id,
   rows,
-  dataKey,
+  nameOf,
+  valueLabel,
   share,
   linkRender,
   entering,
 }: {
   id: string
   rows: readonly BarListRowData[]
-  dataKey: string
+  nameOf: (item: BarListItem) => string
+  /** What the values are, read after each one; none when the config's label isn't text. */
+  valueLabel: string | undefined
   share: boolean
   linkRender: ReactElement | undefined
   entering: boolean
 }) {
-  const chart = useChart()
+  const { plot, status, picked, selectable, togglePicked, format, locale, messages } =
+    useChartRootValue()
   const { spotlit, setActive } = useChartActive()
   const { frame, row: list } = useFlow<HTMLDivElement, HTMLOListElement>(
     '[data-slot=bar-list-row]',
   )
   const own = useRef<HTMLOListElement>(null)
-  const listRef = useMemo(() => mergeRefs(list, chart.plot, own), [list, chart.plot])
-  const ready = chart.status === 'ready'
+  const listRef = useMemo(() => mergeRefs(list, plot, own), [list, plot])
+  const ready = status === 'ready'
   // A focused row that goes, past the limit or out of the data, hands the
   // focus to the list rather than to the page, and lets its light go.
   const holding = useRef(false)
@@ -361,7 +442,6 @@ function BarListRows({
     setActive(null)
     element.focus({ preventScroll: true })
   })
-  const valueLabel = chart.config[dataKey]?.label
   return (
     <div
       ref={frame}
@@ -378,12 +458,13 @@ function BarListRows({
         {ready &&
           rows.map((row) => (
             <BarListRow
-              key={row.category.key}
-              index={row.category.index}
-              name={chart.categoryText(row.category.value)}
+              key={row.item.key}
+              index={row.item.index}
+              itemKey={row.item.key}
+              name={nameOf(row.item)}
               value={row.value}
               share={share ? (row.value === null ? 'none' : row.share) : null}
-              valueLabel={typeof valueLabel === 'string' ? valueLabel : undefined}
+              valueLabel={valueLabel}
               clip={row.clip}
               from={row.from}
               color={row.color}
@@ -392,14 +473,14 @@ function BarListRows({
               linkRender={linkRender}
               delay={row.delay}
               entering={entering}
-              dim={spotlit !== null && spotlit !== row.category.index}
-              picked={chart.selected === row.category.index}
-              selectable={chart.selectable}
+              dim={spotlit !== null && spotlit !== row.item.index}
+              picked={picked?.kind === 'x' && picked.key === row.item.key}
+              selectable={selectable}
               setActive={setActive}
-              toggleSelected={chart.toggleSelected}
-              format={chart.format}
-              locale={chart.locale}
-              noValue={chart.messages.noValue}
+              togglePicked={togglePicked}
+              format={format}
+              locale={locale}
+              noValue={messages.noValue}
             />
           ))}
       </ol>
@@ -415,6 +496,7 @@ function BarListRows({
  */
 const BarListRow = memo(function BarListRow({
   index,
+  itemKey,
   name,
   value,
   share,
@@ -431,12 +513,13 @@ const BarListRow = memo(function BarListRow({
   picked,
   selectable,
   setActive,
-  toggleSelected,
+  togglePicked,
   format,
   locale,
   noValue,
 }: {
   index: number
+  itemKey: string
   name: string
   value: number | null
   /** Its share of the total, `none` for a missing value, or null when shares aren't written. */
@@ -454,7 +537,7 @@ const BarListRow = memo(function BarListRow({
   picked: boolean
   selectable: boolean
   setActive: (index: number | null) => void
-  toggleSelected: (index: number) => void
+  togglePicked: (target: ChartTarget) => void
   format: ChartFormat | undefined
   locale: Intl.LocalesArgument
   noValue: string
@@ -582,7 +665,7 @@ const BarListRow = memo(function BarListRow({
               type='button'
               aria-pressed={picked}
               className={rowClassName}
-              onClick={() => toggleSelected(index)}
+              onClick={() => togglePicked({ kind: 'x', key: itemKey })}
               {...events}
             >
               {content}
@@ -736,6 +819,7 @@ function barListClip(fraction: number, direction: ReadingDirection): string {
 
 export {
   BarList,
+  barListReader,
   type BarListMessages,
   type BarListProps,
   type BarListSort,

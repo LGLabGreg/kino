@@ -24,7 +24,6 @@ import {
   useIndexFocus,
   useLeavingItems,
   usePreviousScales,
-  useRegistry,
 } from '@/registry/lib/chart-base'
 import { type CartesianParts, useCartesianParts } from '@/registry/lib/chart-cartesian'
 import { type ChartReference, VALUE_AXIS } from '@/registry/lib/chart-frame'
@@ -59,7 +58,6 @@ import {
   bandScale,
   baselineOf,
   extentWith,
-  extentWithRoom,
   indexAt,
   linearScale,
 } from '@/registry/lib/chart-scale'
@@ -595,12 +593,11 @@ function useCategoryValue(
 }
 
 /**
- * A chart with categories whose shape is its own, such as a donut or a
- * funnel, until it moves to a family of its own: its categories in bands
+ * A chart with categories whose shape is its own, such as a treemap or a
+ * waffle, until it moves to a family of its own: its categories in bands
  * and one value axis fitted to what `measure` says its shapes reach. A
  * chart's root adds where its tooltip sits and draws its marks inside
- * `CategoryChartFrame`. Parts that draw past the value axis's end say how
- * far with the `addRoom` it returns.
+ * `CategoryChartFrame`.
  */
 function useCategoryChart<Shapes>(
   props: CategoryChartProps,
@@ -609,18 +606,10 @@ function useCategoryChart<Shapes>(
   const { index, domain, tickCount = 5, tickValues, allowDecimals } = props
   const base = useCategoryRows(props, options)
   const { state, rows, drawn, shown, parts, keyOf } = base
-  const { moves, plotSize } = state
-  const rooms = useRegistry<number>()
+  const { moves } = state
   const shapes = options.measure(drawn, shown)
-  const valueLength =
-    options.orientation === 'vertical' ? plotSize.height : plotSize.width
-  const room = Math.max(0, ...rooms.values)
   const scale = linearScale(
-    extentWithRoom(
-      extentWith(shapes.extent, valueReferences(parts.references)),
-      room,
-      valueLength,
-    ),
+    extentWith(shapes.extent, valueReferences(parts.references)),
     {
       domain,
       tickCount,
@@ -646,12 +635,11 @@ function useCategoryChart<Shapes>(
     baselines: { [VALUE_AXIS]: baselineOf(scale) },
     axisOf: () => VALUE_AXIS,
     totals: () => true,
-    // A part's room is registered once it has mounted, by which time the plot is measured.
     measuring: false,
     live: null,
   }
   const value = useCategoryValue(props, options, base, { categories, current }, frame)
-  return { ...value, shapes, room, addRoom: rooms.add }
+  return { ...value, shapes }
 }
 
 /**

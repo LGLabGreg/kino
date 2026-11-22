@@ -15,37 +15,48 @@ import {
 } from '@/registry/lib/chart-bars'
 import {
   type CategoryChartProps,
+  type ChartWords,
   type EntrancePhase,
   figureProps,
+  pickedName,
   useChartActive,
+  useDeclared,
 } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  type ChartCategory,
-  type ChartContextValue,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
+  CartesianChartFrame,
+  type CartesianChartValue,
+  cartesianSignature,
+  type CartesianStop,
+  cartesianTable,
+  type ChartPartDeclaration,
+  type ChartRoomState,
+  useCartesian,
+  useCartesianChart,
+} from '@/registry/lib/chart-cartesian'
+import type { MarkKind } from '@/registry/lib/chart-frame'
 import {
   cascadeAt,
   type ChartDatum,
   type ChartOrientation,
   numberOf,
   plotPoint,
+  type SeriesValueOf,
+  seriesSpans,
 } from '@/registry/lib/chart-math'
 import {
   ChartNumber,
+  type ChartItem,
   forcedSeriesColor,
+  formatterOf,
   plotLayerClassName,
   seriesColor,
   swatchClassName,
   swatchStyle,
   tooltipQuietClassName,
 } from '@/registry/lib/chart-root'
-import { bandAt } from '@/registry/lib/chart-scale'
+import type { BandGaps } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
-import { type ComponentProps, createContext, Fragment, use, useLayoutEffect } from 'react'
+import { type ComponentProps, createContext, Fragment, use } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -55,9 +66,9 @@ import { cn } from '@/lib/utils'
  * one as tall as the step before, the people who dropped off between them,
  * and over each column its rate rolls to every new value: its share of the
  * first step, or of the step before. Two periods compare as bars side by
- * side. The bars are the Bar chart's own, so a funnel moves, dims and loads
- * as every bar does; the step under the pointer stays bright while the rest
- * step back.
+ * side. The bars are the Bar chart's own, on the same cartesian frame, so a
+ * funnel moves, dims and loads as every bar does; the step under the
+ * pointer stays bright while the rest step back.
  */
 
 /** What each step's rate is a share of: the first step, or the step before it. */
@@ -66,8 +77,6 @@ type FunnelRate = 'first' | 'previous'
 interface FunnelChartProps extends Omit<CategoryChartProps, 'ordered'> {
   /** Upright bars over the steps, or bars lying along them. */
   orientation?: ChartOrientation
-  /** What each step's rate is a share of, over its column; the first step by default. */
-  rate?: FunnelRate
   /**
    * How the bars arrive the first time the chart comes into view: all
    * rising together, one step after another, or simply there, the default,
@@ -96,7 +105,6 @@ interface FunnelStep {
 interface FunnelContextValue {
   /** Each series' steps, in the data's order. */
   steps: Record<string, readonly FunnelStep[]>
-  rate: FunnelRate
   drop: boolean
   phase: EntrancePhase
   fromPlaceholder: boolean
@@ -104,8 +112,6 @@ interface FunnelContextValue {
   /** How far through the cascade each step's bars start. */
   cascade: readonly number[]
   barGap: number
-  /** Keeps `px` past the value axis's far end while a part's labels sit there; returns what lets it go. */
-  addRoom: (px: number) => () => void
 }
 
 const FunnelContext = createContext<FunnelContextValue | null>(null)
@@ -122,14 +128,15 @@ const PLACEHOLDER_VALUES = [0.92, 0.68, 0.5, 0.36, 0.24] as const
 /** How rates are written: whole percents, with a tenth below 10%, where a whole one hides the change. */
 const RATE_FORMAT = { style: 'percent', maximumFractionDigits: 1 } as const
 
-const funnelChartKeys = [
-  'orientation',
-  'rate',
-  'entrance',
-  'categoryGap',
-  'barGap',
-  'drop',
-]
+const funnelChartKeys = ['orientation', 'entrance', 'categoryGap', 'barGap', 'drop']
+
+/** Every series at a step, read along the steps. */
+const X_BROWSE = { kind: 'x' } as const
+
+/** The legend's keys are plain swatches. */
+function noMarker() {
+  return null
+}
 
 /**
  * The chart's root: it works out each series' steps from the data, and
@@ -139,7 +146,6 @@ function FunnelChart(props: FunnelChartProps) {
   const {
     config,
     orientation = 'vertical',
-    rate = 'first',
     entrance = 'none',
     categoryGap,
     barGap = 0.12,
@@ -151,9 +157,11 @@ function FunnelChart(props: FunnelChartProps) {
     children,
     ref,
   } = props
-  const { chart, rows, placeholder, fromPlaceholder, phase, addRoom } = useCategoryChart(
+  const gaps: BandGaps = categoryGap === undefined ? {} : { gap: categoryGap }
+  const cartesian = useCartesianChart(
     { ...props, ordered: false },
     {
+      kinds: [funnelMarks(drop)],
       orientation,
       stack: 'none',
       entrance: entrance !== 'none',
@@ -161,19 +169,20 @@ function FunnelChart(props: FunnelChartProps) {
         entrance === 'cascade'
           ? { variable: '--funnel-chart-cascade', fallback: 0.8 }
           : undefined,
-      nice: true,
-      bandOf: (index, count) =>
-        bandAt(index, count, categoryGap === undefined ? {} : { gap: categoryGap }),
-      measure: (data, shown) => ({
-        extent: [0, columnTop(data, shown, drop)] as const,
-      }),
+      y: { nice: true },
+      gaps,
     },
   )
+  const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
+  const stops = chart.current
   const steps = Object.fromEntries(
-    chart.series.map((key) => [key, funnelSteps(rows.map((row) => numberOf(row[key])))]),
+    chart.series.map((key) => [
+      key,
+      funnelSteps(stops.map((stop) => numberOf(chart.valueOf(key, stop)))),
+    ]),
   )
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  const cascade = rows.map((_, at) => cascadeAt(at, rows.length, 'start'))
+  const cascade = stops.map((_, at) => cascadeAt(at, stops.length, 'start'))
   const write = chart.valueText
   const writeRate = numberFormatter(locale, RATE_FORMAT)
   const { messages } = chart
@@ -192,85 +201,77 @@ function FunnelChart(props: FunnelChartProps) {
       step.dropped === null ? '' : write(step.dropped),
     ] as const
   }
-  const words = [messages.ofFirst, messages.ofPrevious, messages.droppedOff] as const
+  const terms = [messages.ofFirst, messages.ofPrevious, messages.droppedOff] as const
   const nameOf = (key: string) => {
     const label = config[key]?.label
     return typeof label === 'string' ? label : key
   }
-  const full: CategoryChartInput = {
-    ...chart,
-    // The tooltip sits on the top of the step's columns: the tallest bar, or the step before's behind it.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const top = chart.entered
-        ? columnTop([category.datum], shown, drop, rows[at - 1])
-        : 0
-      return plotPoint(
-        category.band,
-        chart.frame.y.value.scale.place(top),
-        orientation,
-        chart.direction,
-      )
-    },
-    describe: (at) =>
-      shown
+  const words: ChartWords = {
+    describe: (stop) => {
+      const name = pickedName(chart.stopText(stop), chart.selected === stop.key, messages)
+      const said = shown
         .map((key) => {
-          const [value, ...rest] = figures(key, at)
-          const said = rest.flatMap((figure, w) =>
-            figure ? `${words[w]} ${figure}` : [],
+          const [value, ...rest] = figures(key, stop.index)
+          const more = rest.flatMap((figure, w) =>
+            figure ? `${terms[w]} ${figure}` : [],
           )
-          return [`${nameOf(key)} ${value}`, ...said].join(', ')
+          return [`${nameOf(key)} ${value}`, ...more].join(', ')
         })
-        .join('; '),
-    table: {
-      columns: shown.flatMap((key) => {
-        const name = nameOf(key)
-        return shown.length === 1
-          ? [name, ...words]
-          : [name, ...words.map((word) => `${name}, ${word}`)]
-      }),
-      cells: (category) => shown.flatMap((key) => figures(key, category.index, false)),
+        .join('; ')
+      return `${name}: ${said}`
     },
-    tooltipContent: (at) => (
+    tooltip: (stop) => (
       <FunnelTooltipContent
         chart={chart}
-        index={at}
+        stop={stop}
         shown={shown}
         figures={figures}
-        words={words}
+        terms={terms}
       />
+    ),
+    table: cartesianTable(
+      chart,
+      shown.flatMap((key) => {
+        const name = nameOf(key)
+        return shown.length === 1
+          ? [name, ...terms]
+          : [name, ...terms.map((term) => `${name}, ${term}`)]
+      }),
+      (stop) => shown.flatMap((key) => figures(key, stop.index, false)),
     ),
   }
 
   return (
     <FunnelContext
-      value={{
-        addRoom,
-        steps,
-        rate,
-        drop,
-        phase,
-        fromPlaceholder,
-        entrance,
-        cascade,
-        barGap,
-      }}
+      value={{ steps, drop, phase, fromPlaceholder, entrance, cascade, barGap }}
     >
-      <CategoryChartFrame
-        chart={full}
+      <CartesianChartFrame
+        chart={cartesian}
         ref={ref}
         slot='funnel-chart'
         description={description}
         empty={empty}
         className={className}
         placeholder={
-          placeholder && <BarPlaceholder chart={full} values={PLACEHOLDER_VALUES} />
+          placeholder && <BarPlaceholder chart={chart} values={PLACEHOLDER_VALUES} />
         }
+        markerOf={noMarker}
+        // The tooltip sits on the top of the step's columns: the tallest bar, or the step before's behind it.
+        anchor={(stop) => {
+          const along = chart.entered ? model.reach(stop.index) : null
+          return plotPoint(
+            stop.band,
+            along ?? model.baselines.value,
+            orientation,
+            chart.direction,
+          )
+        }}
+        words={words}
+        browse={X_BROWSE}
         {...figureProps(props, funnelChartKeys)}
       >
         {children}
-      </CategoryChartFrame>
+      </CartesianChartFrame>
     </FunnelContext>
   )
 }
@@ -282,26 +283,24 @@ function FunnelChart(props: FunnelChartProps) {
  */
 function FunnelTooltipContent({
   chart,
-  index,
+  stop,
   shown,
   figures,
-  words,
+  terms,
 }: {
-  chart: Omit<ChartContextValue, 'pointOf'>
-  index: number
+  chart: CartesianChartValue
+  stop: ChartItem
   shown: readonly string[]
   figures: (key: string, at: number) => readonly string[]
-  words: readonly string[]
+  terms: readonly string[]
 }) {
-  const { id, current, series, config, categoryText, patternOf, emphasis } = chart
-  const category = current[index]
-  if (!category) return null
+  const { id, series, config, patternOf, emphasis } = chart
   return (
     // The tooltip sits outside the chart, so it carries the chart's id for its colours.
     <div data-chart={id} className='grid min-w-40 gap-1'>
-      <div className='font-medium'>{categoryText(category.value)}</div>
+      <div className='font-medium'>{chart.stopText(stop)}</div>
       {shown.map((key) => {
-        const [value, ...rest] = figures(key, index)
+        const [value, ...rest] = figures(key, stop.index)
         return (
           <div
             key={key}
@@ -324,9 +323,9 @@ function FunnelTooltipContent({
             {rest.map(
               (figure, w) =>
                 figure && (
-                  <div key={words[w]} className='flex items-center gap-2 ps-4'>
+                  <div key={terms[w]} className='flex items-center gap-2 ps-4'>
                     <span className={cn(tooltipQuietClassName, 'flex-1')}>
-                      {words[w]}
+                      {terms[w]}
                     </span>
                     <span dir='auto' className='tabular-nums'>
                       {figure}
@@ -343,42 +342,42 @@ function FunnelTooltipContent({
 
 /** The part of the step's band that series `key` takes, beside the other shown series. */
 function slotOf(
-  chart: ChartContextValue,
+  chart: CartesianChartValue,
   funnel: FunnelContextValue,
-  category: ChartCategory,
+  stop: CartesianStop,
   key: string,
 ) {
   const order = chart.series.filter((k) => k === key || !chart.hidden.includes(k))
-  return slotBand(category.band, order.indexOf(key), order.length, funnel.barGap)
+  return slotBand(stop.band, order.indexOf(key), order.length, funnel.barGap)
 }
 
 /**
- * Where the bar of `key` stands on `category`, and, behind it, the step
+ * Where the bar of `key` stands on `stop`, and, behind it, the step
  * before's: from zero to each value. A hidden series, a missing value, a
  * bar that hasn't risen yet and a step that leaves all stand at zero; a
  * step that has more than the one before has nothing behind it, so its
  * drop sinks into the bar's end.
  */
 function funnelPlaces(
-  chart: ChartContextValue,
+  chart: CartesianChartValue,
   funnel: FunnelContextValue,
-  category: ChartCategory,
+  stop: CartesianStop,
   key: string,
 ): { bar: BarPlace; drop: BarPlace } {
-  const band = slotOf(chart, funnel, category, key)
-  const zero = chart.frame.y.value.scale.place(0)
-  const step = funnel.steps[key]?.[category.index]
-  const standing =
-    step && !category.leaving && chart.entered && !chart.hidden.includes(key)
+  const band = slotOf(chart, funnel, stop, key)
+  const { scale } = chart.frame.y.value
+  const zero = scale.place(0)
+  const step = funnel.steps[key]?.[stop.index]
+  const standing = step && !stop.leaving && chart.entered && !chart.hidden.includes(key)
   if (!standing) {
     return {
       bar: { band, from: zero, to: zero },
       drop: { band, from: zero, to: zero },
     }
   }
-  const value = chart.frame.y.value.scale.place(step.value ?? 0)
+  const value = scale.place(step.value ?? 0)
   // A missing step shows its dashed mark alone: nothing is known to have dropped off before it.
-  const before = chart.frame.y.value.scale.place(
+  const before = scale.place(
     funnel.drop && step.value !== null
       ? Math.max(step.value, step.previous ?? 0)
       : (step.value ?? 0),
@@ -396,6 +395,8 @@ type FunnelProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
   color?: (datum: ChartDatum, index: number) => string | undefined
   /** What each column writes over it: the step's rate, its value, or nothing. */
   label?: 'rate' | 'value' | 'none'
+  /** What each step's rate over its column is a share of; the first step by default. */
+  rate?: FunnelRate
 }
 
 /**
@@ -406,37 +407,25 @@ type FunnelProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
  * `layout`. A missing value shows a short dashed mark at zero, so it reads
  * apart from a zero.
  */
-function Funnel({
-  dataKey,
-  color,
-  label = 'rate',
-  className,
-  style,
-  ...props
-}: FunnelProps) {
-  const chart = useChart()
+function Funnel(props: FunnelProps) {
+  const {
+    dataKey,
+    color,
+    label = 'rate',
+    rate = 'first',
+    className,
+    style,
+    ...rest
+  } = props
+  useDeclared('Funnel', Funnel.declare(props), cartesianSignature)
+  const chart = useCartesian()
   const { spotlit } = useChartActive()
   const funnel = useFunnelChart()
   const { locale } = chart
-  const { addRoom } = funnel
   const steps = funnel.steps[dataKey] ?? []
   const writeRate = numberFormatter(locale, RATE_FORMAT)
-  const rateOf = (step: FunnelStep) =>
-    funnel.rate === 'first' ? step.ofFirst : step.ofPrevious
-  const textOf = (step: FunnelStep | undefined) => {
-    if (!step || label === 'none') return ''
-    if (label === 'value') return step.value === null ? '' : chart.valueText(step.value)
-    const share = rateOf(step)
-    return share === null ? '' : writeRate.format(share)
-  }
-  const room =
-    label === 'none'
-      ? 0
-      : outsideRoom(
-          chart,
-          chart.current.map((category) => textOf(steps[category.index])),
-        )
-  useLayoutEffect(() => (room > 0 ? addRoom(room) : undefined), [addRoom, room])
+  const textOf = (step: FunnelStep | undefined) =>
+    labelText(step, label, rate, chart.valueText, (share) => writeRate.format(share))
   if (chart.status === 'empty') return null
   const slot = chart.series.indexOf(dataKey)
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
@@ -444,14 +433,14 @@ function Funnel({
   const widest = Math.max(
     0,
     ...shown.flatMap((key) =>
-      chart.current.map((category) =>
-        chart.textWidth(textOf(funnel.steps[key]?.[category.index])),
+      chart.current.map((stop) =>
+        chart.textWidth(textOf(funnel.steps[key]?.[stop.index])),
       ),
     ),
   )
   const zero = chart.frame.y.value.scale.place(0)
-  const dimmed = (category: ChartCategory) =>
-    (spotlit !== null && spotlit !== category.index) ||
+  const dimmed = (stop: CartesianStop) =>
+    (spotlit !== null && spotlit !== stop.index) ||
     (chart.emphasis !== null && chart.emphasis !== dataKey)
   return (
     <>
@@ -461,13 +450,15 @@ function Funnel({
         aria-hidden
         className={cn(plotLayerClassName, 'z-10', className)}
         style={style}
-        {...props}
+        {...rest}
       >
-        {chart.categories.map((category) => {
-          const places = funnelPlaces(chart, funnel, category, dataKey)
-          const step = steps[category.index]
-          const own = color?.(category.datum, category.index) ?? seriesColor(dataKey)
-          const at = Math.min(category.index, PLACEHOLDER_VALUES.length - 1)
+        {chart.stops.map((stop) => {
+          const places = funnelPlaces(chart, funnel, stop, dataKey)
+          const step = steps[stop.index]
+          const own =
+            (stop.datum ? color?.(stop.datum, stop.index) : undefined) ??
+            seriesColor(dataKey)
+          const at = Math.min(stop.index, PLACEHOLDER_VALUES.length - 1)
           // A bar that arrives grows out of the placeholder in its place, or up from zero.
           const from = funnel.fromPlaceholder
             ? placeholderClip(
@@ -478,16 +469,16 @@ function Funnel({
               )
             : barClip(chart, { band: places.bar.band, from: zero, to: zero }, true)
           const missing =
-            !category.leaving &&
+            !stop.leaving &&
             chart.entered &&
             !chart.hidden.includes(dataKey) &&
             step?.value === null
-          const delay = cascadeDelay(funnel, category.index)
-          const dim = dimmed(category)
+          const delay = cascadeDelay(funnel, stop.index)
+          const dim = dimmed(stop)
           const entering = funnel.phase === 'entering'
           return (
-            <Fragment key={category.key}>
-              {funnel.drop && category.index > 0 && (
+            <Fragment key={stop.key}>
+              {funnel.drop && stop.index > 0 && (
                 <BarShape
                   clip={barClip(chart, places.drop, true)}
                   from={from}
@@ -525,9 +516,9 @@ function Funnel({
       {label !== 'none' && chart.status === 'ready' && (
         // Above the reference lines, so a line across a value never runs through it.
         <div aria-hidden className={cn(plotLayerClassName, 'z-20')}>
-          {chart.categories.map((category) => {
-            const { bar, drop: behind } = funnelPlaces(chart, funnel, category, dataKey)
-            const step = steps[category.index]
+          {chart.stops.map((stop) => {
+            const { bar, drop: behind } = funnelPlaces(chart, funnel, stop, dataKey)
+            const step = steps[stop.index]
             const text = textOf(step)
             const top = funnel.drop ? behind : bar
             const across =
@@ -542,21 +533,18 @@ function Funnel({
               (shown.length === 1 ||
                 chart.orientation === 'horizontal' ||
                 across >= widest + 4)
-            const value = step && (label === 'value' ? step.value : rateOf(step))
+            const value = step && (label === 'value' ? step.value : rateOf(step, rate))
             return (
               <BarLabel
-                key={category.key}
+                key={stop.key}
                 {...labelPlace(chart, top, 'outside')}
                 // A hidden series' labels fade as its bars sink.
                 shown={
-                  !category.leaving &&
-                  !chart.hidden.includes(dataKey) &&
-                  text !== '' &&
-                  fits
+                  !stop.leaving && !chart.hidden.includes(dataKey) && text !== '' && fits
                 }
-                dim={dimmed(category)}
+                dim={dimmed(stop)}
                 entering={funnel.phase === 'entering'}
-                delay={cascadeDelay(funnel, category.index)}
+                delay={cascadeDelay(funnel, stop.index)}
               >
                 {value !== null && value !== undefined && (
                   <ChartNumber
@@ -571,6 +559,56 @@ function Funnel({
         </div>
       )}
     </>
+  )
+}
+
+// A funnel is its series; its labels over the columns keep room for themselves past the value
+// axis's far end, worked out from what they will read.
+Funnel.declare = ({
+  dataKey,
+  label = 'rate',
+  rate = 'first',
+}: FunnelProps): ChartPartDeclaration => ({
+  series: { key: dataKey, mark: 'bar' },
+  ...(label === 'none'
+    ? {}
+    : { room: (chart: ChartRoomState) => funnelRoom(chart, dataKey, label, rate) }),
+})
+
+/** The share a step's label writes: of the first step, or of the step before. */
+function rateOf(step: FunnelStep, rate: FunnelRate) {
+  return rate === 'first' ? step.ofFirst : step.ofPrevious
+}
+
+/** What a step's label reads: its rate, its value, or nothing for none or a missing one. */
+function labelText(
+  step: FunnelStep | undefined,
+  label: NonNullable<FunnelProps['label']>,
+  rate: FunnelRate,
+  write: (value: number) => string,
+  writeRate: (share: number) => string,
+) {
+  if (!step || label === 'none') return ''
+  if (label === 'value') return step.value === null ? '' : write(step.value)
+  const share = rateOf(step, rate)
+  return share === null ? '' : writeRate(share)
+}
+
+/** The room past the value axis's far end that the labels of the series `dataKey` take, in px, from the rows the chart draws. */
+function funnelRoom(
+  chart: ChartRoomState,
+  dataKey: string,
+  label: NonNullable<FunnelProps['label']>,
+  rate: FunnelRate,
+) {
+  const write = formatterOf(chart.locale, chart.format)
+  const writeRate = numberFormatter(chart.locale, RATE_FORMAT)
+  const steps = funnelSteps(chart.rows.map((row) => numberOf(row[dataKey])))
+  return outsideRoom(
+    chart,
+    steps.map((step) =>
+      labelText(step, label, rate, write, (share) => writeRate.format(share)),
+    ),
   )
 }
 
@@ -605,27 +643,59 @@ function funnelSteps(values: readonly (number | null)[]): FunnelStep[] {
 }
 
 /**
- * How high the tallest column of `rows` stands across the `keys` shown:
- * each step's own value, or with `drop` the step before's, which stands
- * behind any step that has a value. `before` is the row ahead of the first, for a single step.
+ * How high the tallest column of `count` steps stands across the `keys`
+ * shown, each value read with `valueOf`: each step's own value, or with
+ * `drop` the step before's, which stands behind any step that has a value.
+ * With `at`, only that step's column, with the step before it standing
+ * behind.
  */
 function columnTop(
-  rows: readonly ChartDatum[],
+  count: number,
+  valueOf: SeriesValueOf,
   keys: readonly string[],
   drop: boolean,
-  before?: ChartDatum,
+  at?: number,
 ): number {
   let top = 0
-  rows.forEach((row, at) => {
-    const ahead = !drop ? undefined : at === 0 ? before : rows[at - 1]
+  const first = at ?? 0
+  const end = at === undefined ? count : Math.min(at + 1, count)
+  for (let step = first; step < end; step += 1) {
     for (const key of keys) {
-      const own = numberOf(row[key])
+      const own = numberOf(valueOf(key, step))
       // A missing step has nothing standing behind it.
-      const behind = ahead && own !== null ? (numberOf(ahead[key]) ?? 0) : 0
+      const behind =
+        drop && step > 0 && own !== null ? (numberOf(valueOf(key, step - 1)) ?? 0) : 0
       top = Math.max(top, own ?? 0, behind)
     }
-  })
+  }
   return top
+}
+
+/**
+ * A funnel's bars as a kind of mark on the cartesian frame: each step's bar
+ * from zero to its value, side by side and never stacked, with the value
+ * axis reaching the tallest column, the step before's behind it with
+ * `drop`, which the tooltip sits on too.
+ */
+function funnelMarks(drop: boolean): MarkKind {
+  return {
+    mark: 'bar',
+    stacks: false,
+    spans: ({ count, valueOf, series, shown }) => ({
+      spans: seriesSpans(count, valueOf, series, 'none'),
+      extent: [0, columnTop(count, valueOf, shown, drop)],
+    }),
+    reach: (spans, shown, index, scale) =>
+      scale.place(
+        columnTop(
+          index + 1,
+          (key, at) => spans[key]?.[at]?.[1] ?? null,
+          shown,
+          drop,
+          index,
+        ),
+      ),
+  }
 }
 
 export {
@@ -636,5 +706,6 @@ export {
   type FunnelRate,
   type FunnelStep,
   columnTop,
+  funnelMarks,
   funnelSteps,
 }
