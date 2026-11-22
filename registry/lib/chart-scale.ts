@@ -1,12 +1,20 @@
-import type { Span } from '@/registry/lib/chart-math'
+import { labelBox, labelsMeet, type Span } from '@/registry/lib/chart-math'
+import {
+  timeIntervals,
+  timeTicks,
+  type TimeUnit,
+  timeUnitOf,
+  unitLength,
+  type Weekday,
+} from '@/registry/lib/dates'
 import { nice, ticks } from 'd3-array'
 
 /*
  * A chart's scales: where a value sits along an axis, as a fraction of its
  * length, and back. One union, so every part that places something reads
  * any axis the same way: a band of categories, which bars stand in; points
- * of categories, edge to edge, which lines run through; and numbers. A time
- * scale and a log scale are each one more member (LGL-613). Every function
+ * of categories, edge to edge, which lines run through; numbers; and
+ * times, as instants. A log scale is one more member. Every function
  * here is pure: the frame makes the scales from the data and the props
  * while the chart renders, so the server draws the range the browser does.
  */
@@ -64,7 +72,35 @@ interface CategoryScale {
   valueAt: (fraction: number) => string | null
 }
 
-type ChartScale = LinearScale | CategoryScale
+/**
+ * Times along an axis, as instants in ms, each where it falls, so a missing
+ * date stays a gap. Its ticks fall on the calendar of `timeZone`'s clock.
+ */
+interface TimeScale {
+  kind: 'time'
+  /** The instants at the axis's two ends. */
+  domain: Span
+  /** The clock its ticks and times are written on: UTC for calendar values, which name no zone. */
+  timeZone: string
+  /** The finest unit its times hold, which a time is written as fine as. */
+  unit: Exclude<TimeUnit, 'week'>
+  /** The instants of every tick it may mark, earliest first. */
+  ticks: readonly number[]
+  /**
+   * The ticks of each calendar step that fits its span, coarsest first, such
+   * as quarters, months and weeks: an axis shows the finest its length has
+   * room for (`timeLadder`).
+   */
+  tickSets: readonly (readonly number[])[]
+  /** Where `time` sits, from 0 at the axis's start to 1 at its end, held inside them. */
+  place: (time: number) => number
+  /** The instant at `fraction` of the axis, past its ends too. */
+  valueAt: (fraction: number) => number
+  /** The band a mark at `time` stands in, centred on it: as wide as bars on the closest two times allow, or none for points. */
+  bandOf: (time: number) => Band
+}
+
+type ChartScale = LinearScale | CategoryScale | TimeScale
 
 interface LinearScaleOptions {
   domain?: readonly [DomainEnd, DomainEnd]
@@ -252,6 +288,182 @@ function wholeTicks(low: number, high: number, count: number, allowDecimals: boo
   return out
 }
 
+/**
+ * How values placed by where they fall, sorted and each once, spread along
+ * an axis: its ends, and the share of it a band takes. As points, the
+ * first value is at the start and the last at the end; as bands with
+ * `gaps`, each band is the closest two values' gap less the gap between
+ * categories, with half a band and the outer gap of room at each end, so
+ * values an even step apart lay out exactly as bands of categories do. One
+ * value alone has `alone` on each side, as if its neighbours were that far.
+ */
+function spreadAlong(
+  values: readonly number[],
+  gaps: BandGaps | null,
+  alone: number,
+): { domain: Span; size: number } {
+  const first = values[0]
+  const last = values.at(-1)
+  if (first === undefined || last === undefined) return { domain: [0, 1], size: 0 }
+  let least = Number.POSITIVE_INFINITY
+  for (let at = 1; at < values.length; at += 1)
+    least = Math.min(least, values[at]! - values[at - 1]!)
+  const step = values.length > 1 ? least : alone
+  if (gaps === null) {
+    return {
+      domain: values.length > 1 ? [first, last] : [first - alone, first + alone],
+      size: 0,
+    }
+  }
+  const { gap = 0.3, outer = 0.15 } = gaps
+  const room = step * (outer + (1 - gap) / 2)
+  const domain: Span = [first - room, last + room]
+  return { domain, size: (step * (1 - gap)) / (domain[1] - domain[0]) }
+}
+
+interface TimeScaleOptions {
+  /** The clock ticks fall on: UTC for calendar values. */
+  timeZone: string
+  /** The day weeks start on, which a tick a week marks. */
+  firstDay?: Weekday
+  /** Bars stand on the times, these gaps apart; points, edge to edge, when null. */
+  bands: BandGaps | null
+}
+
+/**
+ * The scale of `times`, instants in ms in order, each once: from the first
+ * to the last, or with room for bars at each end, with ticks on
+ * `timeZone`'s calendar. With no times, the axis shows the first second of
+ * 1970 and marks none.
+ */
+function timeScale(
+  times: readonly number[],
+  { timeZone, firstDay = 1, bands }: TimeScaleOptions,
+): TimeScale {
+  const unit = timeUnitOf(times, timeZone)
+  const { domain, size } = spreadAlong(times, bands, unitLength(unit))
+  const [low, high] = domain
+  const span = high - low
+  const tickSets =
+    times.length === 0
+      ? []
+      : timeIntervals(span)
+          // No tick finer than the times themselves: days get no 12:00.
+          .filter(
+            (interval) => unitLength(interval.unit) * interval.step >= unitLength(unit),
+          )
+          .map((interval) => timeTicks(domain, interval, timeZone, firstDay))
+          .filter((set) => set.length > 0)
+  const place = (time: number) =>
+    span === 0 ? 0.5 : Math.min(1, Math.max(0, (time - low) / span))
+  return {
+    kind: 'time',
+    domain,
+    timeZone,
+    unit,
+    ticks: [...new Set(tickSets.flat())].toSorted((a, b) => a - b),
+    tickSets,
+    place,
+    valueAt: (fraction) => low + fraction * span,
+    bandOf: (time) => ({ start: place(time) - size / 2, size }),
+  }
+}
+
+/**
+ * The least length, in px, an axis needs for labels `widths` px wide at
+ * `places`, fractions of it in order, to stand `gap` px apart or more, each
+ * kept inside the axis as a name at either end is. Infinity when no length
+ * up to 20,000 px does.
+ */
+function labelsLength(
+  places: readonly number[],
+  widths: readonly number[],
+  gap: number,
+): number {
+  const fits = (length: number) =>
+    places.every((place, at) => {
+      const width = widths[at] ?? 0
+      if (width > length) return false
+      if (at === 0) return true
+      const before = labelBox(places[at - 1]!, widths[at - 1] ?? 0, length)
+      return !labelsMeet(before, labelBox(place, width, length), gap)
+    })
+  let high = 20_000
+  if (!fits(high)) return Number.POSITIVE_INFINITY
+  let low = 0
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2)
+    if (fits(middle)) high = middle
+    else low = middle
+  }
+  return high
+}
+
+/**
+ * Every `k`th of `ticks` from the first, for each `k` from all of them down
+ * to every other, coarsest first: what an axis too short for even its
+ * coarsest calendar step shows, so its labels never overlap.
+ */
+function thinned(ticks: readonly number[]): (readonly number[])[] {
+  const sets: (readonly number[])[] = []
+  for (let k = ticks.length; k >= 2; k--) {
+    const set = ticks.filter((_, at) => at % k === 0)
+    if (set.length !== sets.at(-1)?.length) sets.push(set)
+  }
+  return sets
+}
+
+/**
+ * The ticks an axis of times draws, and which show at each of its lengths:
+ * of `scale`'s calendar steps, the finest whose labels, `width(tick)` px
+ * wide, stand `gap` px apart at that length, without its ticks at the axis's
+ * ends while only the ticks between fit. Below the coarsest step's own
+ * length, every other of its ticks, or fewer, down to the first alone. Read
+ * by container queries, as `tickLadder`'s are.
+ */
+function timeLadder(
+  scale: TimeScale,
+  width: (tick: number) => number,
+  gap: number,
+): { ticks: readonly number[]; steps: readonly TickStep[] } {
+  const steps: TickStep[] = []
+  let least = 0
+  // A tick at either end of the axis is kept inside it, so it needs a step's room more than
+  // the ticks between; each step is tried without those first, then whole.
+  const inner = (set: readonly number[]) =>
+    set.filter((tick) => scale.place(tick) > 0 && scale.place(tick) < 1)
+  const candidates = [
+    ...thinned(scale.tickSets[0] ?? []),
+    ...scale.tickSets.flatMap((set) =>
+      set.length > 2 && inner(set).length < set.length ? [inner(set), set] : [set],
+    ),
+  ]
+  for (const set of candidates) {
+    const need = labelsLength(set.map(scale.place), set.map(width), gap)
+    const last = steps.at(-1)
+    if (!last) {
+      steps.push({ from: 0, to: null, shown: set })
+      least = need
+      continue
+    }
+    if (need === Number.POSITIVE_INFINITY) continue
+    // A finer step that needs no more room than the one before takes its place.
+    if (need <= least) {
+      last.shown = set
+      continue
+    }
+    // One that needs more room but shows no more ticks only moves them.
+    if (set.length <= last.shown.length) continue
+    last.to = need
+    steps.push({ from: need, to: null, shown: set })
+    least = need
+  }
+  const ticks = [...new Set(steps.flatMap((step) => step.shown))].toSorted(
+    (a, b) => a - b,
+  )
+  return { ticks, steps }
+}
+
 /** The band of the category at `index` among `count`, in reading order, as d3's band scale lays it out. */
 function bandAt(
   index: number,
@@ -308,17 +520,24 @@ function bandCentre(band: Band): number {
  */
 function indexAt(at: number, centres: readonly number[]): number | null {
   if (centres.length === 0) return null
-  let index = 0
-  while (index < centres.length - 1 && at >= (centres[index]! + centres[index + 1]!) / 2)
-    index += 1
-  return index
+  // A binary search: the last centre whose halfway point from the one before is at or before `at`.
+  let low = 0
+  let high = centres.length - 1
+  while (low < high) {
+    const middle = (low + high + 1) >> 1
+    if (at >= (centres[middle - 1]! + centres[middle]!) / 2) low = middle
+    else high = middle - 1
+  }
+  return low
 }
 
 /** What tells two scales apart, so what follows a scale moves only when it changes. */
 function scaleSignature(scale: ChartScale): string {
-  return scale.kind === 'linear'
-    ? `linear|${scale.domain.join()}|${scale.ticks.join()}`
-    : `${scale.kind}|${scale.keys.join('\u0000')}`
+  if (scale.kind === 'linear')
+    return `linear|${scale.domain.join()}|${scale.ticks.join()}`
+  if (scale.kind === 'time')
+    return `time|${scale.timeZone}|${scale.domain.join()}|${scale.ticks.join()}`
+  return `${scale.kind}|${scale.keys.join('\u0000')}`
 }
 
 export {
@@ -342,7 +561,13 @@ export {
   pointAt,
   pointScale,
   scaleSignature,
+  labelsLength,
+  spreadAlong,
   tickCountFor,
   tickLadder,
   type TickStep,
+  timeLadder,
+  timeScale,
+  type TimeScale,
+  type TimeScaleOptions,
 }

@@ -70,6 +70,7 @@ import {
   linearScale,
   type LinearScale,
   scaleSignature,
+  type TimeScale,
 } from '@/registry/lib/chart-scale'
 import {
   chartStatus,
@@ -81,6 +82,15 @@ import {
   targetSeries,
 } from '@/registry/lib/chart-state'
 import { useControllable } from '@/registry/lib/controllable'
+import {
+  isoInstant,
+  onOneDay,
+  readTime,
+  timeLabel,
+  useLocale,
+  useTimeZone,
+  weekStart,
+} from '@/registry/lib/dates'
 import {
   Children,
   type ComponentProps,
@@ -637,6 +647,13 @@ function numberAxis(
   if (scale.kind !== 'linear') return null
   // A new x of numbers slides from where the same range put it.
   return { scale, previous: previous.kind === 'linear' ? previous : scale, format, label }
+}
+
+/** The frame's x axis when it runs along times, such as a year of days on a line chart; none otherwise. */
+function timeAxis(chart: Pick<ChartContextValue, 'frame'>): FrameAxis<TimeScale> | null {
+  const { scale, previous, format, label } = chart.frame.x
+  if (scale.kind !== 'time') return null
+  return { scale, previous: previous.kind === 'time' ? previous : scale, format, label }
 }
 
 /**
@@ -1249,6 +1266,50 @@ function noPlace() {
   return null
 }
 
+/** The props a chart on the cartesian frame takes, such as a line chart, beside those every chart with categories takes. */
+interface CartesianChartProps extends CategoryChartProps {
+  /**
+   * What `index` holds: categories, laid out evenly in the data's order, or
+   * times, each where it falls, so a missing date stays a gap. A time is a
+   * `yyyy-mm-dd` date, a `yyyy-mm` month or a `yyyy-mm-ddTHH:mm[:ss]` date
+   * and time, each the same everywhere, or an instant: an ISO string with
+   * `Z` or an offset, a `Date`, or milliseconds. Rows come in time order.
+   */
+  indexType?: 'category' | 'time'
+  /**
+   * The IANA time zone instants are written in, such as `Europe/London`;
+   * the visitor's own by default, after the page loads, and UTC on the
+   * server. Give one, so the server and the browser agree. Dates and times
+   * with no zone are written as they are.
+   */
+  timeZone?: string
+}
+
+/** The props of a chart on the cartesian frame that aren't its `<figure>`'s. */
+const cartesianChartKeys = [
+  'indexType',
+  'timeZone',
+] as const satisfies readonly (keyof CartesianChartProps)[]
+
+/**
+ * A row's key along an x of times: a calendar value's own text, so a day
+ * keeps the key it has along categories, as charts synced with one share
+ * it, and an instant's ISO form, whatever form it is given in.
+ */
+function timeKey(value: unknown) {
+  const read = readTime(value)
+  return read?.instant ? isoInstant(read.time) : String(value)
+}
+
+/** A locale as one tag, for the lib's functions that take one. */
+/** A locale for the dates lib: the chart's own when it is one tag. */
+function localeTag(locale: Intl.LocalesArgument): string | undefined {
+  if (typeof locale === 'string') return locale
+  if (locale instanceof Intl.Locale) return locale.toString()
+  if (Array.isArray(locale)) return localeTag(locale[0])
+  return undefined
+}
+
 interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
   /** The kinds of mark the chart draws, its own first: a series that names no mark is drawn as that. */
   kinds: readonly [MarkKind, ...MarkKind[]]
@@ -1269,14 +1330,29 @@ interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
  * chart's root adds where its tooltip sits and draws its marks inside
  * `CategoryChartFrame`.
  */
-function useCartesianChart(props: CategoryChartProps, options: CartesianChartOptions) {
+function useCartesianChart(props: CartesianChartProps, options: CartesianChartOptions) {
   const { index, config, domain, tickCount, tickValues, allowDecimals } = props
-  const base = useCategoryRows(props, options)
+  const times = props.indexType === 'time'
+  if (times && options.x) {
+    throw new Error('A chart whose x is a number of its own takes no `indexType`.')
+  }
+  if (times && options.orientation === 'horizontal') {
+    throw new Error(
+      'Lying bars take categories down the side, not times: give `indexType="time"` to upright bars.',
+    )
+  }
+  const timeZone = useTimeZone(props.timeZone)
+  // The week starts on the same day on the server and on the first paint in the browser.
+  const firstDay = weekStart(useLocale(localeTag(props.locale)))
+  const base = useCategoryRows(
+    props,
+    times ? { ...options, keyOf: (row) => timeKey(row[index]) } : options,
+  )
   const { state, drawn, parts, keyOf } = base
   const { moves, plotSize, hidden } = state
   checkSeries(config, parts, options.kinds[0].mark)
   const numbersAlong = options.x !== undefined
-  // A value given for an x of categories marks the value axis.
+  // A value given for an x of categories or times marks the value axis.
   const references = parts.declarations.flatMap((part) =>
     (part.references ?? []).map((ref) =>
       ref.axis === 'x' && !numbersAlong ? { ...ref, axis: VALUE_AXIS } : ref,
@@ -1303,7 +1379,15 @@ function useCartesianChart(props: CategoryChartProps, options: CartesianChartOpt
     stack: options.stack,
     x: options.x
       ? { kind: 'number', ...options.x }
-      : { kind: 'category', keys: drawn.map(keyOf), gaps: options.gaps },
+      : times
+        ? {
+            kind: 'time',
+            key: index,
+            timeZone,
+            firstDay,
+            gaps: options.gaps,
+          }
+        : { kind: 'category', keys: drawn.map(keyOf), gaps: options.gaps },
     y: {
       domain,
       tickCount,
@@ -1315,13 +1399,7 @@ function useCartesianChart(props: CategoryChartProps, options: CartesianChartOpt
     room: { px: room, length: valueLength },
   })
   const x = model.x
-  const { categories, current } = useCategories(
-    moves,
-    drawn,
-    index,
-    (at) => (x.kind === 'linear' ? NO_BAND : x.bandAt(at)),
-    keyOf,
-  )
+  const { categories, current } = useCategories(moves, drawn, index, model.bandOf, keyOf)
   const previousY = usePreviousScales(model.y)
   const previousX = usePreviousScales({ x }).x ?? x
   const frame: ChartFrame = {
@@ -1348,8 +1426,26 @@ function useCartesianChart(props: CategoryChartProps, options: CartesianChartOpt
     axisOf: model.axisOf,
     measuring: room > 0 && valueLength <= 0 && drawn.length > 0,
   }
+  // A row's time is written as fine as the chart's times are, and on one day, as its time of day alone.
+  const oneDay =
+    x.kind === 'time' &&
+    onOneDay(
+      current.flatMap((category) => readTime(category.value)?.time ?? []),
+      x.timeZone,
+    )
+  const timeText =
+    x.kind === 'time'
+      ? (value: unknown) => {
+          const read = readTime(value)
+          return read
+            ? timeLabel(read.time, x.unit, props.locale, x.timeZone, oneDay)
+            : String(value)
+        }
+      : undefined
   const value = useCategoryValue(
-    props,
+    timeText && props.categoryFormat === undefined
+      ? { ...props, categoryFormat: timeText }
+      : props,
     options,
     base,
     { categories, current },
@@ -1361,9 +1457,6 @@ function useCartesianChart(props: CategoryChartProps, options: CartesianChartOpt
 
 /** Where a row with no shown value sits among points, so the keys still reach it. */
 const NO_POINT: XYValue = { x: 0, y: 0 }
-
-/** The band of a row on an x of numbers, which places it by its value instead. */
-const NO_BAND: Band = { start: 0, size: 0 }
 
 /** The share of its role's duration a cascade's marks start over, from its variable on the chart. */
 function cascadeSpan(element: Element, variable: string, fallback: number) {
@@ -1783,7 +1876,11 @@ function figureProps<P extends CategoryChartProps>(
 ): ComponentProps<'figure'> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(props)) {
-    if (!(categoryChartKeys as readonly string[]).includes(key) && !own.includes(key))
+    if (
+      !(categoryChartKeys as readonly string[]).includes(key) &&
+      !(cartesianChartKeys as readonly string[]).includes(key) &&
+      !own.includes(key)
+    )
       out[key] = value
   }
   return out as ComponentProps<'figure'>
@@ -1896,6 +1993,7 @@ export {
   CategoryChartFrame,
   type CategoryChartInput,
   type CategoryChartProps,
+  type CartesianChartProps,
   type CategoryReaderParts,
   type CategoryTable,
   categoryTable,
@@ -1919,8 +2017,10 @@ export {
   type EntrancePhase,
   figureProps,
   type FrameAxis,
+  localeTag,
   isForecast,
   numberAxis,
+  timeAxis,
   pickIndex,
   plotFraction,
   plotOffset,

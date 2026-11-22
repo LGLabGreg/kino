@@ -961,3 +961,493 @@ export function instantLabel(
     timeStyle: 'short',
   })
 }
+
+/*
+ * Times along a chart's axis. A time is an instant in milliseconds, read
+ * once from what the data holds. A calendar value (`yyyy-mm-dd`, `yyyy-mm`,
+ * or a date and time with no zone) means the same day and hour everywhere,
+ * so it is read on a UTC calendar, where no day is 23 or 25 hours long, and
+ * written there. An instant (an ISO string with `Z` or an offset, a `Date`,
+ * or milliseconds) is one moment, written on the wall clock of a time zone.
+ * Ticks fall on that clock's boundaries: midnights, firsts of the month,
+ * whole hours, and are placed at the instant they fall on, so a day the
+ * clock changes is as long as it really is.
+ */
+
+/** A calendar unit a time can fall on, coarsest last. */
+export type TimeUnit = 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+
+/** A time read from data: its instant in ms, and whether it was a moment rather than a calendar value. */
+export interface ReadTime {
+  time: number
+  instant: boolean
+}
+
+const ZONED = /(?:Z|[+-]\d{2}:?\d{2})$/i
+const SECOND_MS = 1000
+const MINUTE_MS = 60_000
+const HOUR_MS = 3_600_000
+
+/**
+ * The time `value` holds, or null when it holds none: a `yyyy-mm-dd` day or a
+ * `yyyy-mm` month at its first midnight, a `yyyy-mm-ddTHH:mm[:ss]` date and
+ * time, each on a UTC calendar; an ISO instant with `Z` or an offset, a
+ * valid `Date`, or a finite number of milliseconds, each a moment.
+ */
+export function readTime(value: unknown): ReadTime | null {
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? { time: value, instant: true } : null
+  if (value instanceof Date) {
+    const time = value.getTime()
+    return Number.isNaN(time) ? null : { time, instant: true }
+  }
+  if (typeof value !== 'string') return null
+  const text: string = value
+  const day = text.slice(0, 10)
+  if (isISOMonth(text)) return { time: instant(firstOfMonth(text)), instant: false }
+  if (isISODate(text)) return { time: instant(text), instant: false }
+  if (ZONED.test(text)) {
+    const time = Date.parse(text)
+    return Number.isNaN(time) || !isISODate(day) ? null : { time, instant: true }
+  }
+  const { date, time } = splitDateTime(text)
+  if (date === null || time === null) return null
+  const parts = timeParts(time)
+  if (!parts) return null
+  return { time: instant(`${date}T${time.slice(0, 8)}`), instant: false }
+}
+
+/** A time's fields on the wall clock of a zone. */
+interface WallFields {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}
+
+const wallFormats = new Map<string, Intl.DateTimeFormat>()
+
+/** `time`'s fields on `timeZone`'s wall clock; on UTC's, worked out with no formatter. */
+function wallFields(time: number, timeZone: string): WallFields {
+  if (timeZone === 'UTC') {
+    const at = new Date(time)
+    return {
+      year: at.getUTCFullYear(),
+      month: at.getUTCMonth() + 1,
+      day: at.getUTCDate(),
+      hour: at.getUTCHours(),
+      minute: at.getUTCMinutes(),
+      second: at.getUTCSeconds(),
+    }
+  }
+  let format = wallFormats.get(timeZone)
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      calendar: 'gregory',
+      numberingSystem: 'latn',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hourCycle: 'h23',
+    })
+    wallFormats.set(timeZone, format)
+  }
+  const fields: Record<string, number> = {}
+  for (const part of format.formatToParts(time)) fields[part.type] = Number(part.value)
+  return {
+    year: fields.year ?? 1970,
+    month: fields.month ?? 1,
+    day: fields.day ?? 1,
+    // Some engines write midnight as 24 even with `h23`.
+    hour: (fields.hour ?? 0) % 24,
+    minute: fields.minute ?? 0,
+    second: fields.second ?? 0,
+  }
+}
+
+/** The wall clock `fields` names, as milliseconds on a UTC calendar. */
+function wallTime({ year, month, day, hour, minute, second }: WallFields): number {
+  const at = new Date(0)
+  at.setUTCFullYear(year, month - 1, day)
+  at.setUTCHours(hour, minute, second, 0)
+  return at.getTime()
+}
+
+/** How far `timeZone`'s wall clock is ahead of UTC at `time`, in ms. */
+function zoneOffset(time: number, timeZone: string): number {
+  if (timeZone === 'UTC') return 0
+  const whole = Math.floor(time / SECOND_MS) * SECOND_MS
+  return wallTime(wallFields(whole, timeZone)) - whole
+}
+
+/**
+ * The instant `timeZone`'s wall clock shows `fields`. A time the clock skips
+ * as it springs forward lands just after the change; one it shows twice as
+ * it falls back is the first.
+ */
+function zonedTime(fields: WallFields, timeZone: string): number {
+  const wall = wallTime(fields)
+  if (timeZone === 'UTC') return wall
+  const first = wall - zoneOffset(wall, timeZone)
+  const second = wall - zoneOffset(first, timeZone)
+  if (first === second) return first
+  // Across a change, the earlier reading that shows this wall time, else the later one.
+  const earlier = Math.min(first, second)
+  return wallTime(wallFields(earlier, timeZone)) === wall
+    ? earlier
+    : Math.max(first, second)
+}
+
+/** The visitor's own time zone. */
+export function browserTimeZone(): string {
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'
+}
+
+/**
+ * The time zone instants are written in: the one given, else the browser's.
+ * The server can't know the browser's, so it writes UTC and the browser
+ * moves to the visitor's own right after hydration, as `useLocale` does.
+ */
+export function useTimeZone(timeZone: string | undefined): string {
+  const browser = useSyncExternalStore(noChange, browserTimeZone, () => 'UTC')
+  return timeZone ?? browser
+}
+
+/** One step between ticks: a unit, so many of it. */
+export interface TimeInterval {
+  unit: TimeUnit
+  step: number
+}
+
+const DAY_LENGTH = 24 * HOUR_MS
+const UNIT_MS: Record<TimeUnit, number> = {
+  second: SECOND_MS,
+  minute: MINUTE_MS,
+  hour: HOUR_MS,
+  day: DAY_LENGTH,
+  week: 7 * DAY_LENGTH,
+  // The Gregorian calendar's average month and year.
+  month: (365.2425 / 12) * DAY_LENGTH,
+  year: 365.2425 * DAY_LENGTH,
+}
+
+// d3-time's tick intervals: a step a person counts in, from a second to a year.
+const INTERVALS: readonly TimeInterval[] = [
+  { unit: 'second', step: 1 },
+  { unit: 'second', step: 5 },
+  { unit: 'second', step: 15 },
+  { unit: 'second', step: 30 },
+  { unit: 'minute', step: 1 },
+  { unit: 'minute', step: 5 },
+  { unit: 'minute', step: 15 },
+  { unit: 'minute', step: 30 },
+  { unit: 'hour', step: 1 },
+  { unit: 'hour', step: 3 },
+  { unit: 'hour', step: 6 },
+  { unit: 'hour', step: 12 },
+  { unit: 'day', step: 1 },
+  { unit: 'day', step: 2 },
+  { unit: 'week', step: 1 },
+  { unit: 'month', step: 1 },
+  { unit: 'month', step: 3 },
+  { unit: 'year', step: 1 },
+]
+
+const intervalLength = ({ unit, step }: TimeInterval) => UNIT_MS[unit] * step
+
+/**
+ * The intervals of d3's list, then round numbers of years, that mark at
+ * least one and at most `most` ticks over `span` ms, coarsest first: the
+ * steps an axis of times chooses among by the room it has.
+ */
+export function timeIntervals(span: number, most = 40): TimeInterval[] {
+  const years: TimeInterval[] = []
+  for (let power = 1; power <= 1e4; power *= 10) {
+    for (const share of [1, 2, 5]) {
+      if (power * share > 1) years.push({ unit: 'year', step: power * share })
+    }
+  }
+  return [...INTERVALS, ...years]
+    .filter((interval) => {
+      const count = span / intervalLength(interval)
+      return count <= most && count >= 0.5
+    })
+    .toReversed()
+}
+
+/** The first of `fields`' boundaries of `unit` at or before it, on its wall clock. */
+function floorFields(fields: WallFields, unit: TimeUnit, firstDay: Weekday): WallFields {
+  const { year, month, day } = fields
+  switch (unit) {
+    case 'second':
+      return fields
+    case 'minute':
+      return { ...fields, second: 0 }
+    case 'hour':
+      return { ...fields, minute: 0, second: 0 }
+    case 'day':
+      return { year, month, day, hour: 0, minute: 0, second: 0 }
+    case 'week': {
+      const date = startOfWeek(toISODate({ year, month, day }) ?? '1970-01-01', firstDay)
+      const parts = fromISODate(date)
+      return {
+        year: parts.year ?? year,
+        month: parts.month ?? month,
+        day: parts.day ?? day,
+        hour: 0,
+        minute: 0,
+        second: 0,
+      }
+    }
+    case 'month':
+      return { year, month, day: 1, hour: 0, minute: 0, second: 0 }
+    case 'year':
+      return { year, month: 1, day: 1, hour: 0, minute: 0, second: 0 }
+  }
+}
+
+/** `fields` moved on by one `unit` of the calendar. */
+function nextFields(fields: WallFields, unit: TimeUnit): WallFields {
+  switch (unit) {
+    case 'second':
+    case 'minute':
+    case 'hour':
+      return fields
+    case 'day':
+    case 'week': {
+      const date = addDays(toISODate(fields) ?? '1970-01-01', unit === 'day' ? 1 : 7)
+      const parts = fromISODate(date)
+      return {
+        ...fields,
+        year: parts.year ?? fields.year,
+        month: parts.month ?? fields.month,
+        day: parts.day ?? fields.day,
+      }
+    }
+    case 'month':
+      return fields.month === 12
+        ? { ...fields, year: fields.year + 1, month: 1 }
+        : { ...fields, month: fields.month + 1 }
+    case 'year':
+      return { ...fields, year: fields.year + 1 }
+  }
+}
+
+/** Whether a boundary of `interval` is one its ticks mark: every `step`th, counted from the unit above. */
+function marks(fields: WallFields, { unit, step }: TimeInterval): boolean {
+  if (step === 1) return true
+  switch (unit) {
+    case 'second':
+      return fields.second % step === 0
+    case 'minute':
+      return fields.minute % step === 0
+    case 'hour':
+      return fields.hour % step === 0
+    case 'day':
+      return (fields.day - 1) % step === 0
+    case 'week':
+      return true
+    case 'month':
+      return (fields.month - 1) % step === 0
+    case 'year':
+      return fields.year % step === 0
+  }
+}
+
+/**
+ * The ticks of `interval` from `domain[0]` to `domain[1]`, both instants in
+ * ms, on `timeZone`'s wall clock: its whole seconds, minutes and hours, its
+ * midnights, the starts of its weeks (on `firstDay`), months and years.
+ * Seconds, minutes and hours count on in real time, so an hour the clock
+ * repeats is marked once each time it passes; longer units count on the
+ * calendar, each at the instant its midnight falls on.
+ */
+export function timeTicks(
+  domain: readonly [number, number],
+  interval: TimeInterval,
+  timeZone: string,
+  firstDay: Weekday = 1,
+): number[] {
+  const [low, high] = domain
+  if (!(high >= low) || !Number.isFinite(low) || !Number.isFinite(high)) return []
+  const { unit } = interval
+  const ticks: number[] = []
+  // A guard against a span far longer than the interval suits, which would mark thousands.
+  const limit = 1000
+  if (unit === 'second' || unit === 'minute') {
+    // A zone's offset is a whole number of minutes, so these steps fall on the wall clock's own.
+    const length = UNIT_MS[unit] * interval.step
+    const offset = zoneOffset(low, timeZone)
+    for (
+      let time = Math.ceil((low + offset) / length) * length - offset;
+      time <= high && ticks.length < limit;
+      time += length
+    ) {
+      ticks.push(time)
+    }
+    return ticks
+  }
+  if (unit === 'hour') {
+    // Hours count on in real time, each marked by the hour the wall clock shows then.
+    let time = zonedTime(
+      floorFields(wallFields(low, timeZone), 'hour', firstDay),
+      timeZone,
+    )
+    if (time > low) time -= HOUR_MS
+    for (; time <= high && ticks.length < limit; time += HOUR_MS) {
+      if (time >= low && marks(wallFields(time, timeZone), interval)) ticks.push(time)
+    }
+    return ticks
+  }
+  let fields = floorFields(wallFields(low, timeZone), unit, firstDay)
+  for (let count = 0; count < limit * interval.step * 31; count += 1) {
+    const time = zonedTime(fields, timeZone)
+    if (time > high || ticks.length >= limit) break
+    if (time >= low && marks(fields, interval)) ticks.push(time)
+    fields = nextFields(fields, unit)
+  }
+  return ticks
+}
+
+/** The coarsest unit `time` falls on the boundary of, on `timeZone`'s wall clock, weeks aside. */
+function boundaryOf(time: number, timeZone: string): TimeUnit {
+  const { month, day, hour, minute, second } = wallFields(time, timeZone)
+  if (time % SECOND_MS !== 0 || second !== 0) return 'second'
+  if (minute !== 0) return 'minute'
+  // A zone that springs forward at midnight starts that day at 1:00.
+  if (hour !== 0 && wallFields(time - 1, timeZone).day === day) return 'hour'
+  if (day !== 1) return 'day'
+  if (month !== 1) return 'month'
+  return 'year'
+}
+
+/**
+ * The finest unit any of `times` holds on `timeZone`'s wall clock: `year`
+ * when each is the start of one, `day` when each is a midnight, `second`
+ * when any has seconds. A tick's or a row's label is written that fine.
+ */
+export function timeUnitOf(
+  times: readonly number[],
+  timeZone: string,
+): Exclude<TimeUnit, 'week'> {
+  const order = ['second', 'minute', 'hour', 'day', 'month', 'year'] as const
+  let finest = order.length - 1
+  for (const time of times) {
+    finest = Math.min(
+      finest,
+      order.indexOf(boundaryOf(time, timeZone) as (typeof order)[number]),
+    )
+    if (finest === 0) break
+  }
+  return order[finest]!
+}
+
+const instantFormats = new Map<string, Intl.DateTimeFormat>()
+
+/** `time` as `locale` writes it with `options` on `timeZone`'s wall clock. */
+export function formatInstant(
+  time: number,
+  locale: Intl.LocalesArgument,
+  options: Omit<Intl.DateTimeFormatOptions, 'timeZone'>,
+  timeZone: string,
+): string {
+  const key = `${String(locale ?? '')}|${timeZone}|${JSON.stringify(options)}`
+  let format = instantFormats.get(key)
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, {
+      ...options,
+      calendar: 'gregory',
+      timeZone,
+    })
+    instantFormats.set(key, format)
+  }
+  return format.format(time)
+}
+
+const TICK_FORMATS: Record<Exclude<TimeUnit, 'week'>, Intl.DateTimeFormatOptions> = {
+  second: { hour: 'numeric', minute: '2-digit', second: '2-digit' },
+  minute: { hour: 'numeric', minute: '2-digit' },
+  hour: { hour: 'numeric', minute: '2-digit' },
+  day: { day: 'numeric', month: 'short' },
+  month: { month: 'short' },
+  year: { year: 'numeric' },
+}
+
+/**
+ * A tick's label, as short as the boundary it falls on lets it be, as d3's
+ * multi-scale format writes it: 14:05:30, 14:05, 14:00, 17 Nov, Dec, 2027.
+ * Each tick says only what changed at it, so the months after a year's
+ * tick read Feb, Mar, and the tick at midnight names its day.
+ */
+export function timeTickLabel(
+  time: number,
+  locale: Intl.LocalesArgument,
+  timeZone: string,
+): string {
+  const unit = boundaryOf(time, timeZone)
+  return formatInstant(
+    time,
+    locale,
+    TICK_FORMATS[unit as Exclude<TimeUnit, 'week'>],
+    timeZone,
+  )
+}
+
+/**
+ * A time as a tooltip, the data table and a screen reader name it, as fine
+ * as `unit`, the finest its chart's times hold: 2026, Nov 2026, 17 Nov
+ * 2026, 17 Nov 2026, 14:05, or the time of day alone when `oneDay`, every
+ * time the chart shows being on one day.
+ */
+export function timeLabel(
+  time: number,
+  unit: Exclude<TimeUnit, 'week'>,
+  locale: Intl.LocalesArgument,
+  timeZone: string,
+  oneDay = false,
+): string {
+  const date: Intl.DateTimeFormatOptions = {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }
+  const clock: Intl.DateTimeFormatOptions = {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(unit === 'second' ? { second: '2-digit' } : {}),
+  }
+  const options: Intl.DateTimeFormatOptions =
+    unit === 'year'
+      ? { year: 'numeric' }
+      : unit === 'month'
+        ? { month: 'short', year: 'numeric' }
+        : unit === 'day'
+          ? date
+          : oneDay
+            ? clock
+            : { ...date, ...clock }
+  return formatInstant(time, locale, options, timeZone)
+}
+
+/** Whether every one of `times` falls on one day of `timeZone`'s wall clock. */
+export function onOneDay(times: readonly number[], timeZone: string): boolean {
+  const [first] = times
+  if (first === undefined) return true
+  const day = (time: number) => {
+    const { year, month, day } = wallFields(time, timeZone)
+    return `${year}-${month}-${day}`
+  }
+  const firstDay = day(first)
+  return times.every((time) => day(time) === firstDay)
+}
+
+/** About how long one `unit` lasts, in ms: a month and a year as the calendar's averages. */
+export function unitLength(unit: TimeUnit): number {
+  return UNIT_MS[unit]
+}

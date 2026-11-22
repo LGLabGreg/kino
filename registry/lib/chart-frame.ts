@@ -9,6 +9,7 @@ import {
   type XYValue,
 } from '@/registry/lib/chart-math'
 import {
+  type Band,
   type BandGaps,
   bandScale,
   baselineOf,
@@ -20,7 +21,9 @@ import {
   type LinearScale,
   numberExtent,
   pointScale,
+  timeScale,
 } from '@/registry/lib/chart-scale'
+import { readTime, type Weekday } from '@/registry/lib/dates'
 
 /*
  * The cartesian frame: an x axis, one or more value axes and the marks
@@ -85,9 +88,19 @@ interface ValueAxisOptions {
   base?: number
 }
 
-/** What runs along the x axis: the rows' categories in order, or a number of each row's. */
+/** What runs along the x axis: the rows' categories in order, a number of each row's, or a time. */
 type CartesianX =
   | { kind: 'category'; keys: readonly string[]; gaps?: BandGaps }
+  | {
+      kind: 'time'
+      /** The key of each row's time. */
+      key: string
+      /** The clock instants are written on; calendar values are written on UTC's, which names no zone. */
+      timeZone: string
+      /** The day weeks start on. */
+      firstDay?: Weekday
+      gaps?: BandGaps
+    }
   | {
       kind: 'number'
       /** The key of each row's value along the x axis. */
@@ -127,6 +140,8 @@ interface CartesianModel {
   y: Readonly<Record<string, LinearScale>> & { value: LinearScale }
   /** Where marks grow from on each value axis, as a fraction of it. */
   baselines: Readonly<Record<string, number>> & { value: number }
+  /** The band the row at `index` stands in along x: its category's, or centred on its time; none along numbers, where rows are points. */
+  bandOf: (index: number) => Band
   /** The kind of mark of a series. */
   markOf: (key: string) => ChartMark
   /** The id of the value axis a series is read against. */
@@ -253,10 +268,23 @@ function cartesianModel(input: CartesianInput): CartesianModel {
   }
 
   const xValues = x.kind === 'number' ? input.rows.map((row) => numberOf(row[x.key])) : []
-  const xScale = xScaleOf(input, xValues, markOf)
+  const times = x.kind === 'time' ? rowTimes(rows, x.key) : null
+  const hasBars = Object.keys(config).some((key) => markOf(key) === 'bar')
+  const xScale =
+    x.kind === 'time' && times
+      ? timeScale(times.times, {
+          timeZone: times.instants ? x.timeZone : 'UTC',
+          firstDay: x.firstDay,
+          bands: hasBars ? (x.gaps ?? {}) : null,
+        })
+      : xScaleOf(input, xValues, hasBars)
 
   return {
     x: xScale,
+    bandOf: (index) => {
+      if (xScale.kind === 'time') return xScale.bandOf(times?.times[index] ?? 0)
+      return xScale.kind === 'linear' ? NO_BAND : xScale.bandAt(index)
+    },
     y: scales,
     baselines,
     markOf,
@@ -312,14 +340,12 @@ function cartesianModel(input: CartesianInput): CartesianModel {
 function xScaleOf(
   input: CartesianInput,
   values: readonly (number | null)[],
-  markOf: (key: string) => ChartMark,
+  hasBars: boolean,
 ): ChartScale {
   const { x } = input
-  if (x.kind === 'category') {
-    return Object.keys(input.config).some((key) => markOf(key) === 'bar')
-      ? bandScale(x.keys, x.gaps)
-      : pointScale(x.keys)
-  }
+  if (x.kind === 'category')
+    return hasBars ? bandScale(x.keys, x.gaps) : pointScale(x.keys)
+  if (x.kind === 'time') throw new Error('An x of times has a scale of its own.')
   const numbers = values.filter((value) => value !== null)
   const tickCount = x.tickCount ?? 5
   return linearScale(
@@ -333,6 +359,45 @@ function xScaleOf(
       allowDecimals: x.allowDecimals ?? !numbers.every(Number.isInteger),
     },
   )
+}
+
+/** The band of a row on an x of numbers, which places it by its value instead. */
+const NO_BAND: Band = { start: 0, size: 0 }
+
+/**
+ * The time of each of `rows` under `key`, read once, and whether they are
+ * instants rather than calendar values. Throws, naming the row, on one with
+ * no time, on calendar values and instants together, and on times out of
+ * order or repeated, which a line couldn't run through in order.
+ */
+function rowTimes(
+  rows: readonly ChartDatum[],
+  key: string,
+): { times: readonly number[]; instants: boolean } {
+  const times: number[] = []
+  let instants: boolean | null = null
+  for (const [at, row] of rows.entries()) {
+    const read = readTime(row[key])
+    if (!read) {
+      throw new Error(
+        `Row ${at} has no time under \`${key}\`: give a \`yyyy-mm-dd\` date, a \`yyyy-mm\` month, a \`yyyy-mm-ddTHH:mm\` time, an ISO instant, a \`Date\` or milliseconds.`,
+      )
+    }
+    if (instants !== null && instants !== read.instant) {
+      throw new Error(
+        `Row ${at}'s time under \`${key}\` is ${read.instant ? 'an instant' : 'a calendar value'}, and the rows before it are ${instants ? 'instants' : 'calendar values'}: give them all one way.`,
+      )
+    }
+    instants = read.instant
+    const before = times.at(-1)
+    if (before !== undefined && read.time <= before) {
+      throw new Error(
+        `Row ${at}'s time under \`${key}\` ${read.time === before ? 'repeats the one before it' : 'comes before the one before it'}: give the rows in time order, each time once.`,
+      )
+    }
+    times.push(read.time)
+  }
+  return { times, instants: instants ?? false }
 }
 
 export {

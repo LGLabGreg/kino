@@ -14,6 +14,7 @@ import {
   ChartTooltipTotal,
   numberAxis,
   slideLine,
+  timeAxis,
   TICK_SPACING,
   tickMove,
   useChart,
@@ -25,6 +26,8 @@ import {
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   axisNames,
+  labelBox,
+  labelsMeet,
   type ChartSummary,
   numberOf,
   physicalStart,
@@ -41,8 +44,9 @@ import {
   useChartFocus,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
-import { tickLadder } from '@/registry/lib/chart-scale'
+import { bandCentre, tickLadder, timeLadder } from '@/registry/lib/chart-scale'
 import { type ChartTarget, indexOfKey, sameTarget } from '@/registry/lib/chart-state'
+import { timeTickLabel } from '@/registry/lib/dates'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {
   createHighlight,
@@ -264,6 +268,10 @@ function ChartXAxis({
   const numbers = !grid && frame.x.scale.kind === 'linear'
   const values = !grid && !numbers && orientation === 'horizontal'
   if (!values) categoriesOnly('ChartXAxis', axis)
+  if (frame.x.scale.kind === 'time')
+    return (
+      <TimeAxis side={side} format={format} categoryFormat={categoryFormat} {...props} />
+    )
   if (numbers) return <ValueAxis side={side} format={format} axis='x' {...props} />
   return values ? (
     <ValueAxis side={side} format={format} axis={axis} {...props} />
@@ -440,6 +448,185 @@ function ValueAxis({
               </span>
             </span>
           ))}
+        </span>
+      </div>
+    </AxisFrame>
+  )
+}
+
+/** The least room between two tick labels on an axis of times, in px. */
+const TIME_TICK_GAP = 16
+
+/**
+ * The axis under a plot whose x is times: ticks on the calendar's
+ * boundaries, as many as fit its width, each saying only what changed at it
+ * (14:00, 17 Nov, Dec, 2027), which slide when the range changes. The
+ * category axis's pill glides along it to the time under the pointer, the
+ * focus or picked, naming it whole, while the ticks it would cover step
+ * aside.
+ */
+function TimeAxis({
+  side,
+  format,
+  categoryFormat,
+  label,
+  className,
+  ...props
+}: AxisProps & { side: 'top' | 'bottom' }) {
+  const chart = useChart()
+  const { locale, status, direction, textWidth, categoryText } = chart
+  const frame = timeAxis(chart)
+  const own = format ?? frame?.format
+  const zone = frame?.scale.timeZone ?? 'UTC'
+  const write =
+    typeof own === 'function' ? own : (time: number) => timeTickLabel(time, locale, zone)
+  const tickWidth = (tick: number) => textWidth(write(tick))
+  const ladder = frame && timeLadder(frame.scale, tickWidth, TIME_TICK_GAP)
+  const all = useTicks('x', ladder?.ticks)
+  const { current, spotlit } = useAxisNames(chart, 'x')
+  const ref = useRef<HTMLDivElement>(null)
+  const pill = useRef<HTMLSpanElement>(null)
+  const target = useRef<HTMLSpanElement>(null)
+  const [length, setLength] = useState(0)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setLength(entry.contentRect.width)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const highlight = useRef<Highlight | null>(null)
+  useEffect(() => {
+    const element = pill.current
+    if (!element) return
+    const created = createHighlight(element)
+    highlight.current = created
+    return () => {
+      created.stop()
+      highlight.current = null
+    }
+  }, [])
+  const litKey = spotlit === null ? null : (current[spotlit]?.key ?? null)
+  // The time the pill names: the one lit, kept once nothing is lit so the pill fades over it.
+  // Only one, since two times close together would overlap inside the pill.
+  const [named, setNamed] = useState<string | null>(null)
+  if (litKey !== null && named !== litKey) setNamed(litKey)
+  useEffect(() => {
+    highlight.current?.move(litKey === null ? null : target.current)
+  }, [litKey, length])
+  const axisId = useId()
+  if (!frame || !ladder) throw new Error('`TimeAxis` goes on a chart whose x is times.')
+  const { scale, previous } = frame
+  const writeName = categoryFormat ?? categoryText
+  const physical = (place: number) => (direction === 'rtl' ? 1 - place : place)
+  const ticks = status === 'ready' ? all : []
+  const nameOf = (key: string) => current.find((category) => category.key === key)
+  const lit = litKey === null ? undefined : nameOf(litKey)
+  // The ticks the pill would cover, kept inside the axis as its names are.
+  const litBox =
+    lit && length > 0
+      ? labelBox(
+          physical(bandCentre(lit.band)),
+          textWidth(writeName(lit.value)) + 12,
+          length,
+        )
+      : null
+  const covered = (tick: number) =>
+    litBox !== null &&
+    labelsMeet(
+      labelBox(physical(scale.place(tick)), tickWidth(tick), length),
+      litBox,
+      LABEL_GAP,
+    )
+  const shown = named === null ? undefined : nameOf(named)
+  const pillName = (copy: boolean) =>
+    shown && (
+      <span className={axisLayerClassName}>
+        <span
+          key={shown.key}
+          ref={copy ? undefined : target}
+          dir='auto'
+          className={cn(
+            'absolute top-0 left-0 mt-1 rounded-(--control-radius-xs) px-1.5 py-0.5 whitespace-nowrap',
+            // On the axis, the name is the pill's place; only the pill's copy shows it.
+            !copy && 'opacity-0',
+          )}
+          style={{
+            translate: `clamp(0px, ${physical(bandCentre(shown.band)) * 100}cqw - 50%, 100cqw - 100%) 0`,
+          }}
+        >
+          {writeName(shown.value)}
+        </span>
+      </span>
+    )
+  return (
+    <AxisFrame
+      side={side}
+      label={label ?? frame.label}
+      slot='chart-time-axis'
+      aria-hidden
+      className={className}
+      {...props}
+    >
+      <div
+        ref={ref}
+        data-axis={axisId}
+        className={cn(
+          'text-muted-foreground relative min-h-0 min-w-0 flex-1 tabular-nums [container-type:inline-size]',
+          side === 'bottom' && 'pt-1',
+          side === 'top' && 'pb-1',
+        )}
+      >
+        {/* One name's height under the plot, before any tick is placed. */}
+        <span className='invisible mt-1 block py-0.5'>&nbsp;</span>
+        <span data-ticks={axisId} className={axisLayerClassName}>
+          {status === 'ready' && (
+            <TickSteps
+              id={axisId}
+              ladder={ladder}
+              before={timeLadder(previous, tickWidth, TIME_TICK_GAP)}
+              line='x'
+            />
+          )}
+          {ticks.map(({ value: tick, leaving }) => {
+            // A tick that leaves stays kept inside the axis as it was, rather than jumping to
+            // where its place past the end would keep it.
+            const place = physical((leaving ? previous : scale).place(tick))
+            return (
+              <span
+                key={tick}
+                data-leaving={leaving ? '' : undefined}
+                data-tick={tick}
+                data-covered={!leaving && covered(tick) ? '' : undefined}
+                className={cn(tickMove, slideLine.x, 'data-covered:opacity-0')}
+                style={axisSlide('x', scale.place(tick), previous.place(tick), direction)}
+              >
+                <span
+                  className='absolute top-0 left-0 mt-1 py-0.5 whitespace-nowrap transition-none group-data-mounted/chart:transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:group-data-mounted/chart:transition-none'
+                  // Centred on its time, but kept inside the axis, so a tick near either end stays in
+                  // view. Reaching an end or leaving it, it eases there as it slides.
+                  style={{
+                    translate: `clamp(${-place * 100}cqw, -50%, ${(1 - place) * 100}cqw - 100%) 0`,
+                  }}
+                >
+                  {write(tick)}
+                </span>
+              </span>
+            )
+          })}
+        </span>
+        {pillName(false)}
+        <span
+          ref={pill}
+          data-slot='chart-category-pill'
+          className={cn(
+            highlightClassName,
+            'bg-foreground text-background z-10 forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none',
+          )}
+        >
+          {pillName(true)}
         </span>
       </div>
     </AxisFrame>

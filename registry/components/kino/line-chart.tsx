@@ -2,7 +2,7 @@
 
 import {
   type CategoryChartInput,
-  type CategoryChartProps,
+  type CartesianChartProps,
   type ChartPartDeclaration,
   figureProps,
   useCartesianChart,
@@ -30,7 +30,7 @@ import type { LineCurve, LinePoint } from '@/registry/lib/line-path'
  * new one.
  */
 
-interface LineChartProps extends CategoryChartProps {
+interface LineChartProps extends CartesianChartProps {
   /**
    * How the lines arrive the first time the chart comes into view: rising
    * from zero, drawn along from the reading start, or simply there, the

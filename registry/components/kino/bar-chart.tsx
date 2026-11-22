@@ -20,7 +20,7 @@ import {
 import {
   type CategoryChartInput,
   CategoryChartFrame,
-  type CategoryChartProps,
+  type CartesianChartProps,
   type ChartCategory,
   type ChartContextValue,
   type ChartPartDeclaration,
@@ -64,7 +64,7 @@ import { cn } from '@/lib/utils'
  * back, and the tooltip sits on the end of its bars.
  */
 
-interface BarChartProps extends CategoryChartProps {
+interface BarChartProps extends CartesianChartProps {
   /** Upright bars over the categories, or bars lying along them. */
   orientation?: ChartOrientation
   /** How each category's series combine: side by side, stacked, or stacked as shares of their total. */

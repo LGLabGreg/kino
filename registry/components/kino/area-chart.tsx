@@ -3,7 +3,7 @@
 import { areaMarks } from '@/registry/lib/chart-area-marks'
 import {
   type CategoryChartInput,
-  type CategoryChartProps,
+  type CartesianChartProps,
   type ChartPartDeclaration,
   figureProps,
   useCartesianChart,
@@ -32,7 +32,7 @@ import type { LineCurve } from '@/registry/lib/line-path'
  * such as last year's to compare with, is a `Line` among the areas.
  */
 
-interface AreaChartProps extends CategoryChartProps {
+interface AreaChartProps extends CartesianChartProps {
   /**
    * How the areas of one category combine: each from zero, overlapping, the
    * default; stacked on each other in the order of the config; or stacked

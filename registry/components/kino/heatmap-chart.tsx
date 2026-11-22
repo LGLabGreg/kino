@@ -22,6 +22,7 @@ import {
   type CategoryChartProps,
   CategoryChartFrame,
   figureProps,
+  localeTag,
   useCategoryChart,
 } from '@/registry/lib/chart-core'
 import {
@@ -113,14 +114,6 @@ const heatmapChartKeys = [
   'date',
   'weekStartsOn',
 ]
-
-/** A locale for the dates lib: the chart's own when it is one tag. */
-function localeTag(locale: Intl.LocalesArgument): string | undefined {
-  if (typeof locale === 'string') return locale
-  if (locale instanceof Intl.Locale) return locale.toString()
-  if (Array.isArray(locale)) return localeTag(locale[0])
-  return undefined
-}
 
 function gridLayout(
   data: readonly ChartDatum[],
