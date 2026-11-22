@@ -1,16 +1,16 @@
 'use client'
 
 import { areaMarks } from '@/registry/lib/chart-area-marks'
-import { figureProps, useDeclared } from '@/registry/lib/chart-base'
+import { figureProps, seriesWords, useDeclared } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
   type CartesianChartProps,
+  cartesianChartKeys,
+  cartesianSignature,
+  cartesianWords,
   type ChartPartDeclaration,
   type LiveChartProps,
   useCartesianChart,
-  cartesianSignature,
-  cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+} from '@/registry/lib/chart-cartesian'
 import {
   framePoints,
   frameRest,
@@ -52,6 +52,14 @@ interface AreaChartProps extends CartesianChartProps, LiveChartProps {
 
 const areaChartKeys = [...cartesianChartKeys, 'stack', 'entrance']
 
+/** Every series at a stop, read along x. */
+const X_BROWSE = { kind: 'x' } as const
+
+/** The legend's keys are plain swatches. */
+function noMarker() {
+  return null
+}
+
 /**
  * The chart's root: it lays out the frame its parts draw in, places each
  * category along the plot from edge to edge, and fits the value axis to the
@@ -67,33 +75,33 @@ function AreaChart(props: AreaChartProps) {
     children,
     ref,
   } = props
-  const { chart, model, placeholder, phase } = useCartesianChart(props, {
+  const made = useCartesianChart(props, {
     kinds: [areaMarks, lineMarks],
     orientation: 'vertical',
     stack,
     entrance: entrance !== 'none',
   })
-  const full: CategoryChartInput = {
-    ...chart,
-    // An area's fill fades, so a pattern on it would fade away; its key stays solid.
-    patternOf: () => 'solid',
-    // The tooltip sits over the highest of the category's areas.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const along = chart.entered ? model.reach(category.index) : null
-      return plotPoint(
-        category.band,
-        along ?? model.baselines.value,
-        'vertical',
-        chart.direction,
-      )
-    },
-  }
+  const { model, placeholder, phase } = made
+  // An area's fill fades, so a pattern on it would fade away; its key stays solid.
+  const chart = { ...made.chart, patternOf: () => 'solid' as const }
+  const cartesian = { ...made, chart }
   const isLine = (key: string) => model.markOf(key) === 'line'
   return (
     <LineFamilyFrame
-      chart={full}
+      chart={cartesian}
+      markerOf={noMarker}
+      // The tooltip sits over the highest of the stop's areas.
+      anchor={(stop) => {
+        const along = chart.entered ? model.reach(stop.index) : null
+        return plotPoint(
+          stop.band,
+          along ?? model.baselines.value,
+          'vertical',
+          chart.direction,
+        )
+      }}
+      words={seriesWords(chart, cartesianWords(chart, null))}
+      browse={X_BROWSE}
       family={{
         name: 'area-chart',
         phase,
@@ -101,17 +109,17 @@ function AreaChart(props: AreaChartProps) {
         // A hidden area folds into the one below it; a hidden line lies flat, as the Line chart's.
         pointsOf: (key, rising) =>
           framePoints(
-            full,
+            chart,
             model,
             key,
             rising || (isLine(key) && chart.hidden.includes(key)),
             !isLine(key),
           ),
-        topOf: (key, category) => frameTop(model, key, category),
+        topOf: (key, stop) => frameTop(model, key, stop),
         // A value given as a range is marked at both ends.
-        bottomOf: (key, category) =>
-          !isLine(key) && rangeOf(category.datum[key])
-            ? frameTop(model, key, category, true)
+        bottomOf: (key, stop) =>
+          !isLine(key) && rangeOf(chart.valueOf(key, stop))
+            ? frameTop(model, key, stop, true)
             : null,
         restOf: (key) => frameRest(model, key),
       }}

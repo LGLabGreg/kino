@@ -21,7 +21,10 @@ import {
   useDeclared,
   useTicks,
 } from '@/registry/lib/chart-base'
-import { cartesianSignature, type ChartPartDeclaration } from '@/registry/lib/chart-core'
+import {
+  cartesianSignature,
+  type ChartPartDeclaration,
+} from '@/registry/lib/chart-cartesian'
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import { ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import {

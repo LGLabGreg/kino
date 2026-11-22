@@ -19,10 +19,13 @@ import { type Band, bandAt } from '@/registry/lib/chart-scale'
 const barMarks: MarkKind = {
   mark: 'bar',
   stacks: true,
-  spans: ({ rows, series, shown, stack, stackOf }) => {
-    const spans = seriesSpans(rows, shown, stack, stackOf)
+  spans: ({ count, valueOf, series, shown, stack, stackOf }) => {
+    const spans = seriesSpans(count, valueOf, shown, stack, stackOf)
     return {
-      spans: { ...spans, ...hiddenSpans(rows, series, shown, stack, stackOf) },
+      spans: {
+        ...spans,
+        ...hiddenSpans(count, valueOf, series, shown, stack, stackOf),
+      },
       extent: shown.length === 0 ? null : spanExtent(spans),
     }
   },

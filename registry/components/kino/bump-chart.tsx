@@ -4,18 +4,20 @@ import {
   axisLayerClassName,
   type CategoryChartProps,
   figureProps,
+  seriesWords,
   slideLine,
   useDeclared,
 } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
-  type ChartCategory,
-  type ChartPartDeclaration,
-  useCartesianChart,
-  useChart,
-  cartesianSignature,
   cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+  cartesianSignature,
+  type CartesianStop,
+  cartesianTable,
+  cartesianWords,
+  type ChartPartDeclaration,
+  useCartesian,
+  useCartesianChart,
+} from '@/registry/lib/chart-cartesian'
 import {
   framePoints,
   frameRest,
@@ -35,6 +37,7 @@ import {
 } from '@/registry/lib/chart-math'
 import {
   ChangeText,
+  type ChartItem,
   type ChartMessages,
   defaultMessages,
   forcedSeriesColor,
@@ -263,11 +266,13 @@ function rowOf(place: number, scale: LinearScale) {
   return 1 - scale.place(place)
 }
 
-/** What the Bump chart's own parts read: each series' rank and amount in a period, and its words. */
+/** What the Bump chart's own parts read: each series' row, rank and amount in a period, and its words. */
 interface BumpContextValue {
-  rankOf: (category: ChartCategory, key: string) => number | null
+  /** The row each series sits on in a period, from 1 at the top, by its key. */
+  placesOf: (period: CartesianStop) => ChartDatum
+  rankOf: (period: CartesianStop, key: string) => number | null
   /** The amount a series was ranked by, or null when the ranks were given. */
-  amountOf: (category: ChartCategory, key: string) => number | null
+  amountOf: (period: CartesianStop, key: string) => number | null
   /** A rank or a number of places, written in the chart's locale. */
   rankText: (rank: number) => string
   messages: BumpChartMessages
@@ -279,6 +284,11 @@ function useBump() {
   const bump = use(BumpContext)
   if (!bump) throw new Error('`BumpNames` goes inside a `BumpChart`.')
   return bump
+}
+
+/** The legend's keys are plain swatches. */
+function noMarker() {
+  return null
 }
 
 /**
@@ -313,7 +323,7 @@ function BumpChart(props: BumpChartProps) {
   // Every series counts, the hidden ones too, so hiding one never moves the rows.
   const rows = rankCount(ranking.places, keys)
   const said: BumpChartMessages = { ...defaultMessages, ...bumpMessages, ...messages }
-  const { chart, model, placeholder, phase } = useCartesianChart(
+  const made = useCartesianChart(
     {
       ...props,
       // The chart places each series on its row; its rank and amount are looked up by period.
@@ -332,6 +342,9 @@ function BumpChart(props: BumpChartProps) {
       y: { nice: false, zero: false, base: rows + 0.5 },
     },
   )
+  const { model, placeholder, phase } = made
+  // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
+  const chart = { ...made.chart, patternOf: () => 'solid' as const }
   const byPeriod = useMemo(() => {
     const out = new Map<string, { rank: ChartDatum; amount: ChartDatum }>()
     data.forEach((row, at) => {
@@ -340,9 +353,12 @@ function BumpChart(props: BumpChartProps) {
     return out
   }, [data, index, ranking])
   const bump: BumpContextValue = {
-    rankOf: (category, key) => numberOf(byPeriod.get(category.key)?.rank[key]),
-    amountOf: (category, key) =>
-      rankBy === 'given' ? null : numberOf(byPeriod.get(category.key)?.amount[key]),
+    // The chart draws each series on its row, so its value at a period is its row there.
+    placesOf: (period) =>
+      Object.fromEntries(keys.map((key) => [key, chart.valueOf(key, period)])),
+    rankOf: (period, key) => numberOf(byPeriod.get(period.key)?.rank[key]),
+    amountOf: (period, key) =>
+      rankBy === 'given' ? null : numberOf(byPeriod.get(period.key)?.amount[key]),
     rankText: (rank) => numberFormatter(chart.locale).format(rank),
     messages: said,
   }
@@ -355,12 +371,12 @@ function BumpChart(props: BumpChartProps) {
   }
   // What each item says for a period: its rank, its move since the period before and, ranked
   // by amount, the amount.
-  const itemText = (key: string, category: ChartCategory) => {
-    const rank = bump.rankOf(category, key)
+  const itemText = (key: string, period: CartesianStop) => {
+    const rank = bump.rankOf(period, key)
     if (rank === null) return `${labelOf(key)}, ${said.unranked}`
-    const before = chart.current[category.index - 1]
+    const before = chart.current[period.index - 1]
     const move = before ? rankMove(bump.rankOf(before, key), rank) : null
-    const amount = bump.amountOf(category, key)
+    const amount = bump.amountOf(period, key)
     return [
       labelOf(key),
       said.rank(rank, bump.rankText(rank)),
@@ -370,62 +386,67 @@ function BumpChart(props: BumpChartProps) {
       .filter(Boolean)
       .join(', ')
   }
-  const full: CategoryChartInput = {
-    ...chart,
-    // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
-    patternOf: () => 'solid',
-    // The tooltip sits over the period's top point, so it covers no line.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const along = model.reach(category.index) ?? 1
-      return plotPoint(category.band, along, 'vertical', chart.direction)
-    },
-    seriesAt: (point) =>
-      nearestLine(
-        shown.map((key) => ({ key, points: pointsOf(key) })),
-        point,
-      ),
-    stepSeries: (at, from, step) => {
-      const category = chart.current[at]
-      return category ? stepRank(category.datum, shown, from, step) : null
-    },
-    // The series brought forward alone, so Up and Down are heard to move; with none, every
-    // ranked one, best first.
-    describe: (at) => {
-      const category = chart.current[at]
-      if (!category) return ''
-      if (chart.emphasis !== null && shown.includes(chart.emphasis)) {
-        return itemText(chart.emphasis, category)
-      }
-      return rankOrder(category.datum, shown)
-        .map((key) => itemText(key, category))
-        .join('; ')
-    },
-    table: {
-      columns: shown.map(labelOf),
-      cells: (category) =>
-        shown.map((key) => {
-          const rank = bump.rankOf(category, key)
-          const amount = bump.amountOf(category, key)
-          if (rank === null) return said.unranked
-          return amount === null
-            ? said.rank(rank, bump.rankText(rank))
-            : `${said.rank(rank, bump.rankText(rank))}, ${chart.valueText(amount)}`
-        }),
-    },
-    tooltipContent: (at) => <BumpTooltipContent index={at} />,
+  const byKey = new Map(chart.current.map((period) => [period.key, period]))
+  // The series brought forward alone, so Up and Down are heard to move; with none, every ranked
+  // one, best first.
+  const periodText = (item: ChartItem) => {
+    const period = byKey.get(item.key)
+    if (!period) return ''
+    if (chart.emphasis !== null && shown.includes(chart.emphasis)) {
+      return itemText(chart.emphasis, period)
+    }
+    return rankOrder(bump.placesOf(period), shown)
+      .map((key) => itemText(key, period))
+      .join('; ')
+  }
+  const words = {
+    ...seriesWords(chart, cartesianWords(chart, { name: '', text: periodText })),
+    tooltip: (item: ChartItem) => <BumpTooltipContent index={item.index} />,
+    table: cartesianTable(chart, shown.map(labelOf), (period) =>
+      shown.map((key) => {
+        const rank = bump.rankOf(period, key)
+        const amount = bump.amountOf(period, key)
+        if (rank === null) return said.unranked
+        return amount === null
+          ? said.rank(rank, bump.rankText(rank))
+          : `${said.rank(rank, bump.rankText(rank))}, ${chart.valueText(amount)}`
+      }),
+    ),
   }
   return (
     <BumpContext value={bump}>
       <LineFamilyFrame
-        chart={full}
+        chart={{ ...made, chart }}
+        markerOf={noMarker}
+        // The tooltip sits over the period's top point, so it covers no line.
+        anchor={(period) =>
+          plotPoint(
+            period.band,
+            model.reach(period.index) ?? 1,
+            'vertical',
+            chart.direction,
+          )
+        }
+        words={words}
+        // The pointer brings forward the line nearest it, and Up and Down step through the ranks.
+        browse={{
+          kind: 'x-series',
+          seriesAt: (point) =>
+            nearestLine(
+              shown.map((key) => ({ key, points: pointsOf(key) })),
+              point,
+            ),
+          step: (at, from, step) => {
+            const period = chart.current[at]
+            return period ? stepRank(bump.placesOf(period), shown, from, step) : null
+          },
+        }}
         family={{
           name: 'bump-chart',
           phase,
           entrance,
           pointsOf,
-          topOf: (key, category) => frameTop(model, key, category),
+          topOf: (key, period) => frameTop(model, key, period),
           restOf: (key) => frameRest(model, key),
         }}
         description={description}
@@ -453,33 +474,24 @@ function BumpChart(props: BumpChartProps) {
  * brought forward reads in full, the rest a step back.
  */
 function BumpTooltipContent({ index }: { index: number }) {
-  const chart = useChart()
-  const { rankOf, amountOf, rankText } = useBump()
-  const {
-    id,
-    current,
-    series,
-    hidden,
-    config,
-    categoryText,
-    valueText,
-    emphasis,
-    locale,
-  } = chart
-  const category = current[index]
-  if (!category) return null
+  const chart = useCartesian()
+  const { placesOf, rankOf, amountOf, rankText } = useBump()
+  const { id, current, series, hidden, config, stopText, valueText, emphasis, locale } =
+    chart
+  const period = current[index]
+  if (!period) return null
   const before = current[index - 1]
   const shown = series.filter((key) => !hidden.includes(key))
   return (
     // The tooltip sits outside the chart, so it carries the chart's id for its colours.
     <div data-chart={id} className='grid min-w-40 gap-1'>
-      <div className='font-medium'>{categoryText(category.value)}</div>
+      <div className='font-medium'>{stopText(period)}</div>
       {/* One grid, so each column lines up from row to row. */}
       <div className='grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-1'>
-        {rankOrder(category.datum, shown).map((key) => {
-          const rank = rankOf(category, key)
+        {rankOrder(placesOf(period), shown).map((key) => {
+          const rank = rankOf(period, key)
           const move = before ? rankMove(rankOf(before, key), rank) : null
-          const amount = amountOf(category, key)
+          const amount = amountOf(period, key)
           return (
             // The item brought forward reads in full colour; the rest stay as they are, legible.
             <div
@@ -560,16 +572,16 @@ function BumpNames({
     emphasis,
     setEmphasis,
     entered,
-  } = useChart()
+  } = useCartesian()
   const { scale } = frame.y.value
-  const { rankOf, rankText } = useBump()
+  const { placesOf, rankOf, rankText } = useBump()
   const family = useLineFamily()
   const period = side === 'start' ? current[0] : current.at(-1)
   // Where each name last sat, so one that loses its rank fades where it was.
   const [places, setPlaces] = useState<Record<string, number>>({})
   const now: Record<string, number> = {}
   for (const key of series) {
-    const place = period ? numberOf(period.datum[key]) : null
+    const place = period ? numberOf(placesOf(period)[key]) : null
     if (place !== null) now[key] = rowOf(place, scale)
   }
   if (Object.entries(now).some(([key, place]) => places[key] !== place)) {
@@ -578,7 +590,7 @@ function BumpNames({
   const ready = status === 'ready'
   const labelOf = (key: string): ReactNode => config[key]?.label ?? key
   const last = current.at(-1)
-  const namedAtEnd = (key: string) => !!last && numberOf(last.datum[key]) !== null
+  const namedAtEnd = (key: string) => !!last && numberOf(placesOf(last)[key]) !== null
   return (
     <div
       data-slot='bump-chart-names'
@@ -624,7 +636,7 @@ function BumpNames({
         {scale.ticks.map((row) => {
           const key = series.find(
             (key) =>
-              period && numberOf(period.datum[key]) === row && !hidden.includes(key),
+              period && numberOf(placesOf(period)[key]) === row && !hidden.includes(key),
           )
           const rank = key === undefined || !period ? null : rankOf(period, key)
           return (

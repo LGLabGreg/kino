@@ -5,6 +5,8 @@ import {
   type ChartMark,
   type ChartStack,
   numberOf,
+  rowValues,
+  type SeriesValueOf,
   type Span,
   type XYValue,
 } from '@/registry/lib/chart-math'
@@ -47,13 +49,15 @@ interface MarkKind {
   /** Whether its series stack when the chart stacks, as bars and areas do; lines and points never do. */
   stacks: boolean
   /**
-   * Each of `series`' span in every row of `rows`, in its axis's units: a
-   * hidden one where it would sit, so it leaves from there and comes back to
-   * it. `extent` is what the `shown` ones reach, null with nothing to show.
-   * Series with the same `stackOf` stack together, when the chart stacks.
+   * Each of `series`' span at each of `count` stops, from its value there
+   * (`valueOf`), in its axis's units: a hidden one where it would sit, so it
+   * leaves from there and comes back to it. `extent` is what the `shown`
+   * ones reach, null with nothing to show. Series with the same `stackOf`
+   * stack together, when the chart stacks.
    */
   spans: (input: {
-    rows: readonly ChartDatum[]
+    count: number
+    valueOf: SeriesValueOf
     series: readonly string[]
     shown: readonly string[]
     stack: ChartStack
@@ -229,6 +233,7 @@ function cartesianModel(input: CartesianInput): CartesianModel {
   }
   const stackOf = (key: string) => `${axisOf(key)}\u0000${config[key]?.stack ?? ''}`
   const { rows } = input
+  const valueOf = rowValues(rows)
   const shown = series.filter((key) => !hidden.includes(key))
   const axes = [...new Set([VALUE_AXIS, ...series.map(axisOf)])]
 
@@ -244,7 +249,8 @@ function cartesianModel(input: CartesianInput): CartesianModel {
   for (const group of groups) {
     if (group.series.length === 0) continue
     const out = group.kind.spans({
-      rows,
+      count: rows.length,
+      valueOf,
       series: group.series,
       shown: group.series.filter((key) => shown.includes(key)),
       stack,

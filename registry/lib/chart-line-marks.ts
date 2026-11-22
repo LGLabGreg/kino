@@ -1,5 +1,5 @@
 import type { MarkKind, SeriesSpans } from '@/registry/lib/chart-frame'
-import { type ChartDatum, numberOf, type Span } from '@/registry/lib/chart-math'
+import { numberOf, type SeriesValueOf, type Span } from '@/registry/lib/chart-math'
 import { type Band, bandCentre, type LinearScale } from '@/registry/lib/chart-scale'
 import type { LinePoint } from '@/registry/lib/line-path'
 
@@ -13,35 +13,43 @@ import type { LinePoint } from '@/registry/lib/line-path'
 const lineMarks: MarkKind = {
   mark: 'line',
   stacks: false,
-  spans: ({ rows, series, shown }) => ({
-    spans: valueSpans(rows, series),
-    extent: valueExtent(rows, shown),
+  spans: ({ count, valueOf, series, shown }) => ({
+    spans: valueSpans(count, valueOf, series),
+    extent: valueExtent(count, valueOf, shown),
   }),
   // Over the highest of the row's points.
   reach: highestPlace,
 }
 
-/** Each series' value in every row, as a span from it to itself, null where it is missing. */
-function valueSpans(rows: readonly ChartDatum[], series: readonly string[]): SeriesSpans {
+/** Each series' value at each of `count` stops, as a span from it to itself, null where it is missing. */
+function valueSpans(
+  count: number,
+  valueOf: SeriesValueOf,
+  series: readonly string[],
+): SeriesSpans {
   return Object.fromEntries(
     series.map((key) => [
       key,
-      rows.map((row): Span | null => {
-        const value = numberOf(row[key])
+      Array.from({ length: count }, (_, at): Span | null => {
+        const value = numberOf(valueOf(key, at))
         return value === null ? null : [value, value]
       }),
     ]),
   )
 }
 
-/** The lowest and highest values of `keys` in `rows`, or null with none. */
-function valueExtent(rows: readonly ChartDatum[], keys: readonly string[]): Span | null {
-  const values = rows.flatMap((row) =>
+/** The lowest and highest values of `keys` at each of `count` stops, or null with none. */
+function valueExtent(
+  count: number,
+  valueOf: SeriesValueOf,
+  keys: readonly string[],
+): Span | null {
+  const values = Array.from({ length: count }, (_, at) =>
     keys.flatMap((key) => {
-      const value = numberOf(row[key])
+      const value = numberOf(valueOf(key, at))
       return value === null ? [] : [value]
     }),
-  )
+  ).flat()
   return values.length === 0 ? null : [Math.min(...values), Math.max(...values)]
 }
 

@@ -1,15 +1,15 @@
 'use client'
 
-import { figureProps, useDeclared } from '@/registry/lib/chart-base'
+import { figureProps, seriesWords, useDeclared } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
   type CartesianChartProps,
+  cartesianChartKeys,
+  cartesianSignature,
+  cartesianWords,
   type ChartPartDeclaration,
   type LiveChartProps,
   useCartesianChart,
-  cartesianSignature,
-  cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+} from '@/registry/lib/chart-cartesian'
 import {
   framePoints,
   frameRest,
@@ -46,6 +46,14 @@ interface LineChartProps extends CartesianChartProps, LiveChartProps {
 
 const lineChartKeys = [...cartesianChartKeys, 'entrance', 'zero']
 
+/** Every series at a stop, read along x. */
+const X_BROWSE = { kind: 'x' } as const
+
+/** The legend's keys are plain swatches. */
+function noMarker() {
+  return null
+}
+
 /**
  * The chart's root: it lays out the frame its parts draw in, places each
  * category along the plot from edge to edge, and fits the value axis to the
@@ -61,41 +69,41 @@ function LineChart(props: LineChartProps) {
     children,
     ref,
   } = props
-  const { chart, model, placeholder, phase } = useCartesianChart(props, {
+  const made = useCartesianChart(props, {
     kinds: [lineMarks],
     orientation: 'vertical',
     stack: 'none',
     entrance: entrance !== 'none',
     y: { zero },
   })
-  const full: CategoryChartInput = {
-    ...chart,
-    // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
-    patternOf: () => 'solid',
-    // The tooltip sits over the highest of the category's points.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const along = chart.entered ? model.reach(category.index) : null
-      return plotPoint(
-        category.band,
-        along ?? model.baselines.value,
-        'vertical',
-        chart.direction,
-      )
-    },
-  }
+  const { model, placeholder, phase } = made
+  // A line has no fill to pattern, so its key in the legend and the tooltip stays solid too.
+  const chart = { ...made.chart, patternOf: () => 'solid' as const }
+  const cartesian = { ...made, chart }
   return (
     <LineFamilyFrame
-      chart={full}
+      chart={cartesian}
+      markerOf={noMarker}
+      // The tooltip sits over the highest of the stop's points.
+      anchor={(stop) => {
+        const along = chart.entered ? model.reach(stop.index) : null
+        return plotPoint(
+          stop.band,
+          along ?? model.baselines.value,
+          'vertical',
+          chart.direction,
+        )
+      }}
+      words={seriesWords(chart, cartesianWords(chart, null))}
+      browse={X_BROWSE}
       family={{
         name: 'line-chart',
         phase,
         entrance,
         // Hidden, or waiting to rise, a line lies flat along its baseline.
         pointsOf: (key, rising) =>
-          framePoints(full, model, key, rising || chart.hidden.includes(key), false),
-        topOf: (key, category) => frameTop(model, key, category),
+          framePoints(chart, model, key, rising || chart.hidden.includes(key), false),
+        topOf: (key, stop) => frameTop(model, key, stop),
         restOf: (key) => frameRest(model, key),
       }}
       description={description}

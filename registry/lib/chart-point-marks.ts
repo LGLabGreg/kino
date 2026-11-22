@@ -11,10 +11,10 @@ import { numberExtent } from '@/registry/lib/chart-scale'
 const pointMarks: MarkKind = {
   mark: 'point',
   stacks: false,
-  spans: ({ rows, series, shown }) => {
-    const reached = valueExtent(rows, shown)
+  spans: ({ count, valueOf, series, shown }) => {
+    const reached = valueExtent(count, valueOf, shown)
     return {
-      spans: valueSpans(rows, series),
+      spans: valueSpans(count, valueOf, series),
       extent: reached && numberExtent(reached),
     }
   },

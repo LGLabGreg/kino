@@ -66,24 +66,34 @@ export function rangeOf(value: unknown): Span | null {
   return from === null || to === null ? null : [from, to]
 }
 
+/** A series' value at a stop, by its place: what the spans of a cartesian chart read, never its rows. */
+export type SeriesValueOf = (series: string, index: number) => unknown
+
+/** The values of `rows` as the spans read them: each series' under its key in each row. */
+export function rowValues(rows: readonly ChartDatum[]): SeriesValueOf {
+  return (series, index) => rows[index]?.[series]
+}
+
 /**
- * Each series' span in every row, null where its value is missing. Side by
- * side, a bar runs from zero to its value. Stacked, positive values stack up
- * from zero and negative ones down from it, in the order of `keys`, each
- * stack on its own (`stackOf`); as shares, each stack is divided by the
- * total of its values' sizes, so it fills the axis. A value given as
- * `[from, to]` spans exactly that and never stacks.
+ * Each series' span at each of `count` stops, null where its value is
+ * missing. Side by side, a bar runs from zero to its value. Stacked,
+ * positive values stack up from zero and negative ones down from it, in the
+ * order of `keys`, each stack on its own (`stackOf`); as shares, each stack
+ * is divided by the total of its values' sizes, so it fills the axis. A
+ * value given as `[from, to]` spans exactly that and never stacks.
  */
 export function seriesSpans(
-  data: readonly ChartDatum[],
+  count: number,
+  valueOf: SeriesValueOf,
   keys: readonly string[],
   stack: ChartStack,
   stackOf: (key: string) => string = () => '',
 ): Record<string, (Span | null)[]> {
   const spans: Record<string, (Span | null)[]> = {}
   for (const key of keys) spans[key] = []
-  for (const row of data) {
-    const values = keys.map((key) => numberOf(row[key]))
+  for (let at = 0; at < count; at += 1) {
+    const raw = keys.map((key) => valueOf(key, at))
+    const values = raw.map(numberOf)
     const totals = new Map<string, number>()
     if (stack === 'expand') {
       keys.forEach((key, index) => {
@@ -94,7 +104,7 @@ export function seriesSpans(
     const up = new Map<string, number>()
     const down = new Map<string, number>()
     keys.forEach((key, index) => {
-      const range = rangeOf(row[key])
+      const range = rangeOf(raw[index])
       if (range) {
         spans[key]!.push(range)
         return
@@ -127,7 +137,8 @@ export function seriesSpans(
  * and comes back to its own place in the stack.
  */
 export function hiddenSpans(
-  data: readonly ChartDatum[],
+  count: number,
+  valueOf: SeriesValueOf,
   series: readonly string[],
   shown: readonly string[],
   stack: ChartStack,
@@ -138,8 +149,8 @@ export function hiddenSpans(
       .filter((key) => !shown.includes(key))
       .map((key) => {
         const order = series.filter((k) => k === key || shown.includes(k))
-        const zeroed = data.map((row) => ({ ...row, [key]: 0 }))
-        return [key, seriesSpans(zeroed, order, stack, stackOf)[key] ?? []]
+        const zeroed: SeriesValueOf = (k, at) => (k === key ? 0 : valueOf(k, at))
+        return [key, seriesSpans(count, zeroed, order, stack, stackOf)[key] ?? []]
       }),
   )
 }

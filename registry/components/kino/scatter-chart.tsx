@@ -4,22 +4,24 @@ import {
   type CategoryChartProps,
   figureProps,
   numberAxis,
+  plotFraction,
   plotPlace,
+  seriesWords,
   useChartActive,
   useDeclared,
-  plotFraction,
 } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
-  type ChartCategory,
-  type ChartContextValue,
-  type ChartPartDeclaration,
-  CategoryChartFrame,
-  useCartesianChart,
-  useChart,
-  cartesianSignature,
+  CartesianChartFrame,
+  type CartesianChartValue,
   cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+  cartesianSignature,
+  type CartesianStop,
+  cartesianTable,
+  cartesianWords,
+  type ChartPartDeclaration,
+  useCartesian,
+  useCartesianChart,
+} from '@/registry/lib/chart-cartesian'
 import {
   allWhole,
   type ChartDatum,
@@ -30,6 +32,7 @@ import { pointMarks } from '@/registry/lib/chart-point-marks'
 import { markerAt, type PlacedPoint, PointSeries } from '@/registry/lib/chart-points'
 import {
   type ChartFormat,
+  type ChartItem,
   forcedSeriesTextColor,
   formatterOf,
   drawingSize,
@@ -168,14 +171,20 @@ function drawOrder(radii: readonly number[]): number[] {
     .map(({ index }) => index)
 }
 
+/** A point's row: each of a scatter's stops is one of its rows. */
+function rowOf(stop: CartesianStop): ChartDatum {
+  if (!stop.datum) throw new Error('A scatter draws a point for each of its rows.')
+  return stop.datum
+}
+
 interface ScatterContextValue {
   /** A point's two values, from its row: a leaving one keeps the ones it had. */
-  valueOf: (category: ChartCategory) => XYValue
-  /** Each point's series, by its category's key. */
-  seriesOf: (category: ChartCategory) => string
-  /** Each point's radius in px, by its category's key. */
-  radiusOf: (category: ChartCategory) => number
-  /** Where each point sits from the back, by its category's key. */
+  valueOf: (stop: CartesianStop) => XYValue
+  /** Each point's series. */
+  seriesOf: (stop: CartesianStop) => string
+  /** Each point's radius in px. */
+  radiusOf: (stop: CartesianStop) => number
+  /** Where each point sits from the back, by its stop's key. */
   depthOf: (key: string) => number
   markerOf: (key: string) => string
 }
@@ -229,7 +238,7 @@ function ScatterChart(props: ScatterChartProps) {
   const largest = size ? Math.max(0, ...rows.map((row) => numberOf(row[size]) ?? 0)) : 0
   const radiusOfRow = (row: ChartDatum) =>
     size ? bubbleRadius(numberOf(row[size]), largest) : POINT_RADIUS
-  const { chart, placeholder } = useCartesianChart(
+  const made = useCartesianChart(
     {
       ...props,
       data: rows,
@@ -255,6 +264,9 @@ function ScatterChart(props: ScatterChartProps) {
       y: { zero: false, label: yLabel },
     },
   )
+  const { model, placeholder } = made
+  // A shape, not a pattern, tells series apart.
+  const chart = { ...made.chart, patternOf: () => 'solid' as const }
   const xText = formatterOf(locale, xFormat ?? format)
   const sizeText = formatterOf(locale, sizeFormat ?? format)
   const several = keys.length > 1
@@ -262,94 +274,101 @@ function ScatterChart(props: ScatterChartProps) {
     const label = config[key]?.label
     return typeof label === 'string' ? label : key
   }
-  const radii = chart.categories.map((category) => radiusOfRow(category.datum))
+  const radii = chart.stops.map((stop) => radiusOfRow(rowOf(stop)))
   const depth = new Map(
-    drawOrder(radii).map((at, place) => [chart.categories[at]?.key ?? '', place]),
+    drawOrder(radii).map((at, place) => [chart.stops[at]?.key ?? '', place]),
   )
   const scatter: ScatterContextValue = {
-    valueOf: (category) => ({
-      x: numberOf(category.datum[x]) ?? 0,
-      y: numberOf(category.datum[y]) ?? 0,
+    valueOf: (stop) => ({
+      x: numberOf(rowOf(stop)[x]) ?? 0,
+      y: numberOf(rowOf(stop)[y]) ?? 0,
     }),
-    seriesOf: (category) => seriesOfRow(category.datum),
-    radiusOf: (category) => radiusOfRow(category.datum),
+    seriesOf: (stop) => seriesOfRow(rowOf(stop)),
+    radiusOf: (stop) => radiusOfRow(rowOf(stop)),
     depthOf: (key) => depth.get(key) ?? 0,
     markerOf: (key) => markerAt(Math.max(0, keys.indexOf(key))),
   }
   // What a point holds, in the order it is read: its series, then each value.
-  const valuesOf = (category: ChartCategory) => {
+  const valuesOf = (stop: CartesianStop) => {
+    const row = rowOf(stop)
     const values = [
-      [xLabel, xText(numberOf(category.datum[x]) ?? 0)],
-      [yLabel, chart.valueText(numberOf(category.datum[y]) ?? 0)],
+      [xLabel, xText(numberOf(row[x]) ?? 0)],
+      [yLabel, chart.valueText(numberOf(row[y]) ?? 0)],
     ]
     if (size) {
-      const value = numberOf(category.datum[size])
+      const value = numberOf(row[size])
       values.push([sizeLabel, value === null ? chart.messages.noValue : sizeText(value)])
     }
     return values
   }
   const { width, height } = drawingSize(chart.plotSize)
-  const full: CategoryChartInput = {
-    ...chart,
-    // A shape, not a pattern, tells series apart.
-    patternOf: () => 'solid',
-    markerOf: scatter.markerOf,
-    // The tooltip sits over the point, clear of its bubble.
-    pointOf: (at) => {
-      const point = chart.xyOf(at)
-      const category = chart.current[at]
-      if (!point || !category) return null
-      const place = plotPlace(point.place, chart.direction)
-      return {
-        x: plotFraction(place.x, width, chart.inset),
-        y:
-          plotFraction(place.y, height, chart.inset) -
-          (height === 0 ? 0 : radiusOfRow(category.datum) / height),
-        side: 'top',
-      }
-    },
-    describe: (at) => {
-      const category = chart.current[at]
-      if (!category) return ''
-      const values = valuesOf(category).map(([name, value]) => `${name} ${value}`)
-      return [several ? seriesName(seriesOfRow(category.datum)) : null, ...values]
-        .filter(Boolean)
-        .join(', ')
-    },
-    table: {
-      columns: [
+  const byKey = new Map(chart.current.map((stop) => [stop.key, stop]))
+  // What a point says: its series, when there are several, then each of its values.
+  const said = (item: ChartItem) => {
+    const stop = byKey.get(item.key)
+    if (!stop) return ''
+    const values = valuesOf(stop).map(([name, value]) => `${name} ${value}`)
+    return [several ? seriesName(seriesOfRow(rowOf(stop))) : null, ...values]
+      .filter(Boolean)
+      .join(', ')
+  }
+  const words = {
+    ...seriesWords(chart, cartesianWords(chart, { name: '', text: said })),
+    tooltip: (item: ChartItem) => (
+      <ScatterTooltipContent
+        index={item.index}
+        values={valuesOf}
+        seriesName={several ? seriesName : undefined}
+      />
+    ),
+    table: cartesianTable(
+      chart,
+      [
         ...(several ? [chart.messages.series] : []),
         xLabel,
         yLabel,
         ...(size ? [sizeLabel] : []),
       ],
-      cells: (category) => [
-        ...(several ? [seriesName(seriesOfRow(category.datum))] : []),
-        ...valuesOf(category).map(([, value]) => value ?? ''),
+      (stop) => [
+        ...(several ? [seriesName(seriesOfRow(rowOf(stop)))] : []),
+        ...valuesOf(stop).map(([, value]) => value ?? ''),
       ],
-    },
-    tooltipContent: (at) => (
-      <ScatterTooltipContent
-        index={at}
-        values={(category) => valuesOf(category)}
-        seriesName={several ? seriesName : undefined}
-      />
     ),
   }
   return (
     <ScatterContext value={scatter}>
-      <CategoryChartFrame
-        chart={full}
+      <CartesianChartFrame
+        chart={{ ...made, chart }}
         ref={ref}
         slot='scatter-chart'
         description={description}
         empty={empty}
         className={className}
         placeholder={placeholder && <ScatterPlaceholder />}
+        markerOf={scatter.markerOf}
+        // The tooltip sits over the point, clear of its bubble.
+        anchor={(stop) => {
+          const point = model.point(stop.index)
+          if (!point) return null
+          const place = plotPlace(point.place, chart.direction)
+          return {
+            x: plotFraction(place.x, width, chart.inset),
+            y:
+              plotFraction(place.y, height, chart.inset) -
+              (height === 0 ? 0 : scatter.radiusOf(stop) / height),
+            side: 'top',
+          }
+        }}
+        words={words}
+        browse={{
+          kind: 'points',
+          point: (stop) => model.point(stop.index),
+          inset: chart.inset,
+        }}
         {...figureProps(props, scatterChartKeys)}
       >
         {children}
-      </CategoryChartFrame>
+      </CartesianChartFrame>
     </ScatterContext>
   )
 }
@@ -359,7 +378,10 @@ function ScatterChart(props: ScatterChartProps) {
  * physical left and its top: a leaving one keeps the values it had, placed
  * on the axes as they are now.
  */
-function pointPlace(chart: ChartContextValue, value: XYValue): XYValue {
+function pointPlace(
+  chart: Pick<CartesianChartValue, 'frame' | 'direction'>,
+  value: XYValue,
+): XYValue {
   const along = numberAxis(chart, 'x')
   if (!along) throw new Error('A scatter places its points along an x axis of numbers.')
   return plotPlace(
@@ -378,18 +400,18 @@ function ScatterTooltipContent({
   seriesName,
 }: {
   index: number
-  values: (category: ChartCategory) => string[][]
+  values: (stop: CartesianStop) => string[][]
   seriesName?: (key: string) => string
 }) {
-  const chart = useChart()
+  const chart = useCartesian()
   const scatter = useScatter()
-  const category = chart.current[index]
-  if (!category) return null
-  const key = scatter.seriesOf(category)
+  const stop = chart.current[index]
+  if (!stop) return null
+  const key = scatter.seriesOf(stop)
   return (
     // The tooltip sits outside the chart, so it carries the chart's id for its colours.
     <div data-chart={chart.id} className='grid min-w-36 gap-1'>
-      <div className='font-medium'>{chart.categoryText(category.value)}</div>
+      <div className='font-medium'>{chart.stopText(stop)}</div>
       {seriesName && (
         <div className='flex items-center gap-2'>
           <svg
@@ -411,7 +433,7 @@ function ScatterTooltipContent({
       )}
       {/* One grid, so the values line up from row to row. */}
       <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1'>
-        {values(category).map(([name, value]) => (
+        {values(stop).map(([name, value]) => (
           <div key={name} className='col-span-full grid grid-cols-subgrid'>
             <span className='text-background/75 min-w-0 truncate forced-colors:text-[CanvasText]'>
               {name}
@@ -446,16 +468,16 @@ type ScatterProps = Omit<ComponentProps<'div'>, 'children'> & {
 function Scatter(props: ScatterProps) {
   const { dataKey, ...rest } = props
   useDeclared('Scatter', Scatter.declare(props), cartesianSignature)
-  const chart = useChart()
+  const chart = useCartesian()
   const scatter = useScatter()
   const { spotlit } = useChartActive()
   if (chart.status === 'empty') return null
-  const placed = (category: ChartCategory): PlacedPoint => ({
-    key: category.key,
-    ...pointPlace(chart, scatter.valueOf(category)),
-    radius: scatter.radiusOf(category),
-    depth: scatter.depthOf(category.key),
-    leaving: category.leaving,
+  const placed = (stop: CartesianStop): PlacedPoint => ({
+    key: stop.key,
+    ...pointPlace(chart, scatter.valueOf(stop)),
+    radius: scatter.radiusOf(stop),
+    depth: scatter.depthOf(stop.key),
+    leaving: stop.leaving,
   })
   const litNow = spotlit === null ? undefined : chart.current[spotlit]
   const lit =
@@ -466,8 +488,8 @@ function Scatter(props: ScatterProps) {
     <PointSeries
       name='scatter-chart'
       dataKey={dataKey}
-      points={chart.categories
-        .filter((category) => scatter.seriesOf(category) === dataKey)
+      points={chart.stops
+        .filter((stop) => scatter.seriesOf(stop) === dataKey)
         .map(placed)}
       lit={lit}
       seriesIndex={chart.series.indexOf(dataKey)}

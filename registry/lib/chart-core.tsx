@@ -8,22 +8,16 @@ import {
   type ChartAxisName,
   type ChartForecast,
   type ChartFrame,
-  type ChartParts,
   ChartPartsContext,
-  chartParts,
-  checkSeries,
   writeDatum,
   IndexActive,
   isForecast,
-  localeTag,
   pickedName,
-  plotPlace,
+  rowsShown,
   SeriesWordsContext,
   type SeriesWordsInput,
   seriesWords,
   stickTo,
-  timeKey,
-  useChartActive,
   useChartLife,
   useChartLoad,
   useChartPick,
@@ -32,51 +26,35 @@ import {
   usePreviousScales,
   useRegistry,
 } from '@/registry/lib/chart-base'
-import {
-  type CartesianX,
-  cartesianModel,
-  type ChartReference,
-  type MarkKind,
-  VALUE_AXIS,
-  type ValueAxisOptions,
-} from '@/registry/lib/chart-frame'
-import { type ChartLive, useLiveClock } from '@/registry/lib/chart-live-clock'
+import { type CartesianParts, useCartesianParts } from '@/registry/lib/chart-cartesian'
+import { type ChartReference, VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   allWhole,
   alongCategories,
   changeSince,
   type ChartDatum,
-  type ChartMark,
   type ChartOrientation,
   type ChartStack,
   type GridCell,
-  keyAxis,
-  nearestPoint,
   numberOf,
-  pointRank,
   type ReadingDirection,
   sliderValue,
   type Span,
   stepCell,
   stepIndex,
-  stepPoint,
-  type XYValue,
 } from '@/registry/lib/chart-math'
 import {
   ChartFrame as RootFrame,
-  type ChartFormat,
   type ChartMoves,
   type ChartPoint,
   type ChartReader,
   type ChartRootState,
   type ChartRootValue,
-  formatterOf,
   type PlotPoint,
   useChartRoot,
 } from '@/registry/lib/chart-root'
 import {
   type Band,
-  type BandGaps,
   bandCentre,
   bandScale,
   baselineOf,
@@ -94,14 +72,6 @@ import {
   targetSeries,
 } from '@/registry/lib/chart-state'
 import {
-  onOneDay,
-  readTime,
-  timeLabel,
-  useLocale,
-  useTimeZone,
-  weekStart,
-} from '@/registry/lib/dates'
-import {
   type ComponentProps,
   createContext,
   type CSSProperties,
@@ -116,14 +86,13 @@ import { cn } from '@/lib/utils'
 
 /*
  * The category family: charts whose marks are categories, the rows of their
- * data, such as bars, lines, slices and tiles. It sits on the chart root
+ * data, such as slices, rings, tiles and cells. It sits on the chart root
  * (`chart-root`), which knows nothing about categories: this file keeps the
  * categories and the ones leaving, the frame's scales, and the motion the
  * axes share, and hands the root a reader that answers for the categories.
- * A cartesian chart (`BarChart`) gets its frame from the cartesian model
- * (`chart-frame`) and its marks' maths from their kinds; a chart of another
- * shape, until it has a family of its own, gets a band of categories and one
- * value axis from here. Everything else comes from here and the root, so
+ * The cartesian charts, such as the Bar chart, are a family of their own
+ * (`chart-cartesian`); a chart of another shape, until it has a family of its
+ * own, gets a band of categories and one value axis from here. Everything else comes from here and the root, so
  * every chart looks, moves and reads the same way.
  */
 
@@ -137,12 +106,6 @@ interface ChartCategory {
   index: number
   band: Band
   leaving: boolean
-}
-
-/** A row placed by both values, by value and by place. */
-interface ChartXYPoint {
-  value: XYValue
-  place: XYValue
 }
 
 /** One axis of a grid of cells: its names, and which one each cell is under. */
@@ -176,13 +139,6 @@ interface ChartContextValue extends ChartRootState {
   orientation: ChartOrientation
   stack: ChartStack
   frame: ChartFrame
-  /**
-   * The row at `index` as a point placed by both values, for a chart whose x
-   * is a number: its x value and its highest shown value, and where they sit
-   * along x from the reading start and up their value axis, as fractions of
-   * each. Null on a chart with categories.
-   */
-  xyOf: (index: number) => ChartXYPoint | null
   /** The cells and the names of their columns and rows, for a chart drawn as a grid of cells. */
   grid?: ChartCellGrid
   /**
@@ -293,12 +249,6 @@ interface CategoryReaderParts {
   table?: CategoryTable
   /** What the tooltip shows for the category at `index`, in place of each series' value. */
   tooltipContent?: (index: number) => ReactNode
-  /**
-   * The shape a series' marks take, such as a scatter's points, as an SVG
-   * path centred on 0 0 that fills a box 2 across, which its legend swatch
-   * takes too; none for a plain swatch.
-   */
-  markerOf?: (key: string) => string | undefined
 }
 
 /** What a chart's root hands its frame: what it keeps, and what its reader is told. */
@@ -321,106 +271,27 @@ interface CategoryTable {
   }
 }
 
-/**
- * What a part written inside a chart tells it before anything draws, so the
- * chart fits its range, reads its forecasts and keeps its room as it renders,
- * on the server as in the browser: the series it draws and as what, the
- * values its axis must reach, and the px it draws past the far end of the
- * value axis. A part says it with a static `declare` of its props.
- */
-interface ChartPartDeclaration {
-  series?: { key: string; mark: ChartMark }
-  forecast?: ChartForecast
-  /** Values the axes must reach: `'x'`, or a value axis's id. */
-  references?: readonly ChartReference[]
-  /** The px it draws past the far end of the value axis, worked out from what the chart shows. */
-  room?: (chart: ChartRoomState) => number
-}
-
-/** What a part's room is worked out from: the chart before its scales are made, and the rows it draws. */
-type ChartRoomState = Pick<
-  ChartContextValue,
-  | 'series'
-  | 'config'
-  | 'hidden'
-  | 'stack'
-  | 'orientation'
-  | 'locale'
-  | 'format'
-  | 'textWidth'
-> & { rows: readonly ChartDatum[] }
-
-/** What tells a declaration apart, but for its room, which is a function; empty for one that says nothing. */
-function cartesianSignature(declaration: ChartPartDeclaration) {
-  const { series, forecast, references, room } = declaration
-  if (!series && !forecast && !references?.length && !room) return ''
-  return JSON.stringify([
-    series ?? null,
-    forecast ?? null,
-    references ?? null,
-    room ? 'room' : null,
-  ])
-}
-
-/** What the parts of a chart with categories declared, read by what each says. */
-interface CartesianParts extends ChartParts<ChartPartDeclaration> {
-  /** The series the parts draw, and as what. */
-  marks: ReadonlyMap<string, ChartMark>
-  forecasts: readonly ChartForecast[]
-  references: readonly ChartReference[]
-  rooms: readonly ((chart: ChartRoomState) => number)[]
-}
-
-/** What `declarations` say, gathered by kind. */
-function cartesianParts(
-  declarations: readonly ChartPartDeclaration[],
-): Omit<CartesianParts, keyof ChartParts<ChartPartDeclaration>> {
-  const marks = new Map<string, ChartMark>()
-  for (const { series } of declarations) if (series) marks.set(series.key, series.mark)
-  return {
-    marks,
-    forecasts: declarations.flatMap((part) => (part.forecast ? [part.forecast] : [])),
-    references: declarations.flatMap((part) => part.references ?? []),
-    rooms: declarations.flatMap((part) => (part.room ? [part.room] : [])),
-  }
-}
-
 const ChartContext = createContext<ChartContextValue | null>(null)
 
 function useChart() {
   const chart = use(ChartContext)
-  if (!chart) throw new Error('Chart parts go inside a chart, such as a `BarChart`.')
+  if (!chart) throw new Error('Chart parts go inside a chart, such as a `DonutChart`.')
   return chart
 }
 
 /**
  * The reader of a chart with categories: each category is a stop, held by
  * its key, and the pointer and the keys find them along the category axis,
- * on an XY frame by both values, on a grid by column and row, or the
- * chart's own way. On a chart whose series are pointed at one by one, the
- * stop holds its series too, which it brings forward. `along` is the axis
- * the last arrow stepped along among points placed by two values, which the
- * slider's value counts on; `opens` keeps what a press under the pointer
- * opens, by the target it found.
+ * on a grid by column and row, or the chart's own way. On a chart whose
+ * series are pointed at one by one, the stop holds its series too, which it
+ * brings forward. `opens` keeps what a press under the pointer opens, by the
+ * target it found.
  */
 function categoryReader(
   chart: CategoryChartInput,
-  along: 'x' | 'y',
-  setAlong: (axis: 'x' | 'y') => void,
   opens: WeakMap<ChartTarget, () => void>,
 ): ChartReader {
   const { current, orientation, direction, grid } = chart
-  // On a chart whose x is a number, each row is a point placed by both values.
-  const xy =
-    chart.frame.x.scale.kind === 'linear'
-      ? current.map(
-          (category) =>
-            chart.xyOf(category.index) ?? { value: NO_POINT, place: NO_POINT },
-        )
-      : null
-  // The arrows step by value, and the pointer finds the nearest by place.
-  const points = xy && xy.map((point) => point.value)
-  const places = xy && xy.map((point) => point.place)
   const keys = current.map((category) => category.key)
   const count = keys.length
   const centres = current.map((category) => bandCentre(category.band))
@@ -431,15 +302,12 @@ function categoryReader(
     if (key === undefined) return null
     return series === null ? { kind: 'x', key } : { kind: 'datum', series, key }
   }
-  // A chart that scrolls, sideways or live, opens at its end, so the keys start there too.
+  // A chart that scrolls sideways opens at its end, so the keys start there too.
   const start =
     count === 0
       ? null
       : Math.min(
-          chart.keys?.start ??
-            (chart.leastPlotWidth === undefined && chart.frame.live === null
-              ? 0
-              : count - 1),
+          chart.keys?.start ?? (chart.leastPlotWidth === undefined ? 0 : count - 1),
           count - 1,
         )
   const words = seriesWords(chart, categoryWords(chart))
@@ -466,7 +334,7 @@ function categoryReader(
       targetAt: (point: PlotPoint) => {
         // The plot's own box, from its top left, which the chart's own picking reads as the page's.
         const box = new DOMRect(0, 0, point.width, point.height)
-        const index = pickIndex(chart, point, box, centres, places)
+        const index = pickIndex(chart, point, box, centres)
         const series =
           chart.seriesAt?.({
             x: alongCategories(point, box, 'vertical', direction),
@@ -490,23 +358,17 @@ function categoryReader(
         if (index === null) return null
         const series = targetSeries(from)
         if (chart.keys) return at(chart.keys.step(index, key), null)
-        if (chart.stepSeries && !points && (key === 'ArrowUp' || key === 'ArrowDown')) {
+        if (chart.stepSeries && (key === 'ArrowUp' || key === 'ArrowDown')) {
           return at(index, chart.stepSeries(index, series, key === 'ArrowUp' ? -1 : 1))
         }
-        // Points placed by two values step by x along it, and by y up and down; cells step
-        // by column along it, and by row up and down.
-        const next = points
-          ? stepPoint(points, index, key, direction)
-          : grid
-            ? stepCell(grid.cells, index, key, direction)
-            : stepIndex(key, index, count, orientation, direction)
-        if (next === null) return null
-        if (points) setAlong(keyAxis(key))
-        return at(next, series)
+        // Cells step by column along it, and by row up and down.
+        const next = grid
+          ? stepCell(grid.cells, index, key, direction)
+          : stepIndex(key, index, count, orientation, direction)
+        return next === null ? null : at(next, series)
       },
       rank: (target) => {
         const index = indexOf(target) ?? 0
-        if (points) return pointRank(points, index, along)
         if (chart.keys) return chart.keys.rank(index)
         if (grid) return index + 1
         return sliderValue(index, Math.max(1, count), orientation)
@@ -664,9 +526,8 @@ interface CategoryRowOptions {
   heightFromData?: boolean
   /**
    * The series each row is of, for a chart whose rows each belong to one,
-   * such as a donut's slices, keyed by their category, or a scatter's
-   * points: hiding a series takes its rows out, so they leave as a removed
-   * category does.
+   * such as a donut's slices, keyed by their category: hiding a series
+   * takes its rows out, so they leave as a removed category does.
    */
   seriesOfRow?: (row: ChartDatum) => string
   /**
@@ -680,8 +541,8 @@ interface CategoryRowOptions {
   ) => readonly ChartDatum[]
   /**
    * What tells each row's category apart from the rest, its `index` value by
-   * default: a scatter's rows in series of their own may share a name, as
-   * the same month for each team does.
+   * default: rows in series of their own may share a name, as the same
+   * month for each team does.
    */
   keyOf?: (row: ChartDatum) => string
 }
@@ -690,11 +551,6 @@ interface CategoryRowOptions {
 interface CategoryLayout {
   orientation: ChartOrientation
   stack: ChartStack
-  /**
-   * The px kept clear inside the plot's edges, on both axes, for marks drawn
-   * around a point, such as a scatter's bubbles; none by default.
-   */
-  inset?: number
 }
 
 interface CategoryChartOptions<Shapes> extends CategoryRowOptions, CategoryLayout {
@@ -730,8 +586,7 @@ function useCategoryRows(props: CategoryChartProps, options: CategoryRowOptions)
       ? rowsShown(rows, options.seriesOfRow, hidden)
       : rows
   const shown = series.filter((key) => !hidden.includes(key))
-  const declared = chartParts(props.children, cartesianSignature)
-  const parts = { ...declared, ...cartesianParts(declared.declarations) }
+  const parts = useCartesianParts(props.children)
   const keyOf = options.keyOf ?? ((row: ChartDatum) => String(row[props.index]))
   return {
     state,
@@ -766,7 +621,6 @@ function useCategoryValue(
   { state, load, rows, drawn, shown, parts }: CategoryRows,
   { categories, current }: { categories: ChartCategory[]; current: ChartCategory[] },
   frame: ChartFrame,
-  xyOf: (index: number) => ChartXYPoint | null,
 ) {
   const {
     format,
@@ -787,19 +641,7 @@ function useCategoryValue(
   const keys = current.map((category) => category.key)
   const pick = useChartPick(props, keys)
 
-  const textOf = (value: unknown, write: (value: number) => string) =>
-    writeDatum(value, write, messages.noValue)
-  const datumText = (value: unknown) => textOf(value, valueText)
-  // A series reads in its value axis's own format, where it has one.
-  const writers = new Map<string, (value: number) => string>()
-  const writerOf = (key: string) => {
-    const axis = frame.axisOf(key)
-    const own = frame.y[axis]?.format
-    if (own === undefined) return valueText
-    const made = writers.get(axis) ?? formatterOf(state.locale, own)
-    writers.set(axis, made)
-    return made
-  }
+  const datumText = (value: unknown) => writeDatum(value, valueText, messages.noValue)
   const chart: ChartContextValue = {
     ...state,
     format,
@@ -808,16 +650,14 @@ function useCategoryValue(
     orientation: options.orientation,
     stack: options.stack,
     frame,
-    xyOf,
-    inset: options.inset ?? 0,
+    // No mark here is drawn round a point.
+    inset: 0,
     datumText,
-    seriesText: (category, key) => textOf(category.datum[key], writerOf(key)),
-    seriesChange: (category, before, key) => {
-      const own = frame.y[frame.axisOf(key)]?.format ?? format
-      return typeof own === 'object' && own.style === 'percent'
+    seriesText: (category, key) => datumText(category.datum[key]),
+    seriesChange: (category, before, key) =>
+      typeof format === 'object' && format.style === 'percent'
         ? null
-        : changeSince(category.datum[key], before.datum[key])
-    },
+        : changeSince(category.datum[key], before.datum[key]),
     categoryText: categoryFormat,
     activeProps: { activeIndex, defaultActiveIndex, onActiveIndexChange },
     selected: indexOfKey(keys, pick.picked),
@@ -891,305 +731,22 @@ function useCategoryChart<Shapes>(
     measuring: false,
     live: null,
   }
-  const value = useCategoryValue(
-    props,
-    options,
-    base,
-    { categories, current },
-    frame,
-    noPlace,
-  )
+  const value = useCategoryValue(props, options, base, { categories, current }, frame)
   return { ...value, shapes, room, addRoom: rooms.add }
-}
-
-function noPlace() {
-  return null
-}
-
-/** The props a chart on the cartesian frame takes, such as a line chart, beside those every chart with categories takes. */
-interface CartesianChartProps extends CategoryChartProps {
-  /**
-   * What `index` holds: categories, laid out evenly in the data's order, or
-   * times, each where it falls, so a missing date stays a gap. A time is a
-   * `yyyy-mm-dd` date, a `yyyy-mm` month or a `yyyy-mm-ddTHH:mm[:ss]` date
-   * and time, each the same everywhere, or an instant: an ISO string with
-   * `Z` or an offset, a `Date`, or milliseconds. Rows come in time order.
-   */
-  indexType?: 'category' | 'time'
-  /**
-   * The IANA time zone instants are written in, such as `Europe/London`;
-   * the visitor's own by default, after the page loads, and UTC on the
-   * server. Give one, so the server and the browser agree. Dates and times
-   * with no zone are written as they are.
-   */
-  timeZone?: string
-}
-
-/** The props of a chart on the cartesian frame whose x of times can show a window of them, still or live. */
-interface LiveChartProps {
-  /**
-   * How much time the plot shows, in ms, of an x of times: the latest, from
-   * the newest row back, or with `live`, from now back. It sets how fast a
-   * live chart scrolls.
-   */
-  window?: number
-  /** The plot's end is now, and it scrolls with the clock: a stream, such as requests per second. Needs a `window`. */
-  live?: boolean
-  /** Holds a live chart still, as hovering or focusing its plot does; rows keep arriving past its end. */
-  paused?: boolean
-}
-
-/** The props of a chart on the cartesian frame that aren't its `<figure>`'s. */
-const cartesianChartKeys = [
-  'indexType',
-  'timeZone',
-  'window',
-  'live',
-  'paused',
-] as const satisfies readonly (keyof (CartesianChartProps & LiveChartProps))[]
-
-/** A value axis other than the chart's own: how it fits what its series reach, and how it writes and titles its values. */
-interface NamedValueAxis extends Pick<
-  ValueAxisOptions,
-  'domain' | 'tickCount' | 'zero' | 'align' | 'allowDecimals'
-> {
-  /** How its values are written, on the axis, in the tooltip, the table and what is read out; the chart's `format` by default. */
-  format?: ChartFormat
-  /** What it measures, which titles it unless its `ChartYAxis` is given a `label`. */
-  label?: string
-}
-
-interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
-  /** The kinds of mark the chart draws, its own first: a series that names no mark is drawn as that. */
-  kinds: readonly [MarkKind, ...MarkKind[]]
-  /** Along numbers, the x axis, in place of the categories. */
-  x?: Omit<Extract<CartesianX, { kind: 'number' }>, 'kind'> & {
-    format?: ChartFormat
-    label?: string
-  }
-  /** The chart's own value axis, beside the root's `domain`, `tickCount`, `tickValues` and `allowDecimals`. */
-  y?: Pick<ValueAxisOptions, 'nice' | 'zero' | 'base'> & { label?: string }
-  /** Every other value axis a series names, by its id: how it fits, writes and titles its values. */
-  axes?: Readonly<Record<string, NamedValueAxis>>
-  /** Gaps between the bands of categories, when its bars stand in them. */
-  gaps?: BandGaps
-}
-
-/**
- * A cartesian chart: its rows, the frame the cartesian model fits to them,
- * its parts and their declarations, its categories, and what is picked. A
- * chart's root adds where its tooltip sits and draws its marks inside
- * `CategoryChartFrame`.
- */
-function useCartesianChart(
-  props: CartesianChartProps & LiveChartProps,
-  options: CartesianChartOptions,
-) {
-  const { index, config, domain, tickCount, tickValues, allowDecimals } = props
-  const times = props.indexType === 'time'
-  if (props.window !== undefined && !times) {
-    throw new Error('A `window` is a stretch of time: give `indexType="time"` too.')
-  }
-  if (props.live && props.window === undefined) {
-    throw new Error(
-      'A live chart scrolls through a `window` of time: give one, in ms, such as `window={60_000}`.',
-    )
-  }
-  if (times && options.x) {
-    throw new Error('A chart whose x is a number of its own takes no `indexType`.')
-  }
-  if (times && options.orientation === 'horizontal') {
-    throw new Error(
-      'Lying bars take categories down the side, not times: give `indexType="time"` to upright bars.',
-    )
-  }
-  const timeZone = useTimeZone(props.timeZone)
-  // The week starts on the same day on the server and on the first paint in the browser.
-  const firstDay = weekStart(useLocale(localeTag(props.locale)))
-  const base = useCategoryRows(
-    props,
-    times ? { ...options, keyOf: (row) => timeKey(row[index]) } : options,
-  )
-  const { state, parts, keyOf } = base
-  const { moves, plotSize, hidden } = state
-  // A window keeps the rows the app lets go while they still show, so the line runs on to the
-  // plot's start; nothing while it loads or failed.
-  const clock = useLiveClock({
-    window: props.window ?? null,
-    live: props.live ?? false,
-    paused: props.paused ?? false,
-    rows: base.drawn,
-    timeOf: (row) => readTime(row[index])?.time ?? Number.NaN,
-    root: state.root,
-    plot: state.plot,
-    direction: state.direction,
-  })
-  const drawn = base.placeholder || base.failed ? base.drawn : clock.rows
-  const rows = drawn === base.drawn ? base : { ...base, rows: drawn, drawn }
-  checkSeries(config, parts.marks, options.kinds[0].mark)
-  const numbersAlong = options.x !== undefined
-  // A value given for an x of categories or times marks the value axis.
-  const references = parts.references.map((ref) =>
-    ref.axis === 'x' && !numbersAlong ? { ...ref, axis: VALUE_AXIS } : ref,
-  )
-  const roomState: ChartRoomState = {
-    ...state,
-    rows: drawn,
-    stack: options.stack,
-    orientation: options.orientation,
-    format: props.format,
-  }
-  const room = Math.max(0, ...parts.rooms.map((room) => room(roomState)))
-  const valueLength =
-    options.orientation === 'vertical' ? plotSize.height : plotSize.width
-  const model = cartesianModel({
-    rows: drawn,
-    config,
-    hidden,
-    kinds: options.kinds,
-    stack: options.stack,
-    x: options.x
-      ? { kind: 'number', ...options.x }
-      : times
-        ? {
-            kind: 'time',
-            key: index,
-            timeZone,
-            firstDay,
-            gaps: options.gaps,
-            window: clock.scaleWindow,
-          }
-        : { kind: 'category', keys: drawn.map(keyOf), gaps: options.gaps },
-    y: {
-      domain,
-      tickCount,
-      tickValues,
-      allowDecimals,
-      ...options.y,
-    },
-    axes: options.axes,
-    references,
-    room: { px: room, length: valueLength },
-  })
-  const x = model.x
-  const { categories, current } = useCategories(moves, drawn, index, model.bandOf, keyOf)
-  const previousY = usePreviousScales(model.y)
-  const previousX = usePreviousScales({ x }).x ?? x
-  const frame: ChartFrame = {
-    x: {
-      scale: x,
-      previous: previousX,
-      format: options.x?.format,
-      label: options.x?.label,
-    },
-    y: {
-      ...Object.fromEntries(
-        Object.entries(model.y).map(([axis, scale]) => [
-          axis,
-          {
-            scale,
-            previous: previousY[axis] ?? scale,
-            format: options.axes?.[axis]?.format,
-            label: options.axes?.[axis]?.label,
-          },
-        ]),
-      ),
-      value: {
-        scale: model.y.value,
-        previous: previousY.value ?? model.y.value,
-        label: options.y?.label,
-      },
-    },
-    baselines: model.baselines,
-    axisOf: model.axisOf,
-    totals: model.totals,
-    measuring: room > 0 && valueLength <= 0 && drawn.length > 0,
-    live: clock.live,
-  }
-  // A row's time is written as fine as the chart's times are, and on one day, as its time of day alone.
-  const oneDay =
-    x.kind === 'time' &&
-    onOneDay(
-      current.flatMap((category) => readTime(category.value)?.time ?? []),
-      x.timeZone,
-    )
-  const timeText =
-    x.kind === 'time'
-      ? (value: unknown) => {
-          const read = readTime(value)
-          return read
-            ? timeLabel(read.time, x.unit, props.locale, x.timeZone, oneDay)
-            : String(value)
-        }
-      : undefined
-  const value = useCategoryValue(
-    timeText && props.categoryFormat === undefined
-      ? { ...props, categoryFormat: timeText }
-      : props,
-    options,
-    rows,
-    { categories, current },
-    frame,
-    model.point,
-  )
-  return { ...value, model }
-}
-
-/** Where a row with no shown value sits among points, so the keys still reach it. */
-const NO_POINT: XYValue = { x: 0, y: 0 }
-
-/** The rows whose series isn't hidden, for a chart whose rows each belong to one. */
-function rowsShown(
-  rows: readonly ChartDatum[],
-  seriesOf: (row: ChartDatum) => string,
-  hidden: readonly string[],
-) {
-  return rows.filter((row) => !hidden.includes(seriesOf(row)))
-}
-
-/** A fraction of a plot's whole length as a fraction of its inner length, inside `inset` px at each end. */
-function placeFromFraction(fraction: number, length: number, inset: number) {
-  const inner = length - inset * 2
-  if (inner <= 0) return 0.5
-  return (fraction * length - inset) / inner
 }
 
 /**
  * The category under `at` in a plot whose box is `box`: by the chart's own
- * `pickAt` where it has one; among `points`, placed by both values, the one
- * nearest it in both directions; or else the nearest along the category
- * axis.
+ * `pickAt` where it has one, or else the nearest along the category axis.
  */
 function pickIndex(
-  chart: Pick<ChartContextValue, 'orientation' | 'direction' | 'inset'> &
+  chart: Pick<ChartContextValue, 'orientation' | 'direction'> &
     Pick<CategoryReaderParts, 'pickAt'>,
   at: { x: number; y: number },
   box: DOMRect,
   centres: readonly number[],
-  points: readonly XYValue[] | null,
 ) {
   if (chart.pickAt) return chart.pickAt(at, box)
-  if (points) {
-    return nearestPoint(
-      points.map((point) => plotPlace(point, chart.direction)),
-      {
-        x: placeFromFraction(
-          box.width === 0 ? 0 : (at.x - box.left) / box.width,
-          box.width,
-          chart.inset,
-        ),
-        y: placeFromFraction(
-          box.height === 0 ? 0 : (at.y - box.top) / box.height,
-          box.height,
-          chart.inset,
-        ),
-      },
-      {
-        width: Math.max(0, box.width - chart.inset * 2),
-        height: Math.max(0, box.height - chart.inset * 2),
-      },
-    )
-  }
   return indexAt(alongCategories(at, box, chart.orientation, chart.direction), centres)
 }
 
@@ -1225,11 +782,8 @@ function CategoryChartFrame({
   browse?: boolean
   ref?: Ref<HTMLElement>
 }) {
-  const [along, setAlong] = useState<'x' | 'y'>('x')
   const [opens] = useState(() => new WeakMap<ChartTarget, () => void>())
-  const own = categoryReader(chart, along, setAlong, opens)
-  const live = chart.frame.live
-  const read = live ? liveReader(own, live, chart.direction) : own
+  const read = categoryReader(chart, opens)
   const reader = browse ? read : { ...read, browse: null }
   const { current, selected, toggleSelected } = chart
   const keys = current.map((category) => category.key)
@@ -1237,7 +791,7 @@ function CategoryChartFrame({
   const root: ChartRootValue = {
     ...chart,
     reader,
-    markerOf: (key) => chart.markerOf?.(key) ?? null,
+    markerOf: () => null,
     picked: pickedKey === undefined ? null : { kind: 'x', key: pickedKey },
     togglePicked: (target) => {
       const index = target.kind === 'node' ? null : indexOfKey(keys, target.key)
@@ -1306,7 +860,6 @@ function CategoryChartFrame({
                 active={chart.activeProps}
                 toldRef={toldRef}
               >
-                {live && <LiveHold hold={live.hold} />}
                 {children}
                 {placeholder}
               </IndexActive>
@@ -1363,23 +916,15 @@ function axesOf(chart: ChartContextValue): ChartAxesValue {
     format: chart.categoryText,
     keepInside: true,
   }
-  const numbersAlong = frame.x.scale.kind === 'linear'
   return {
     frame,
     orientation,
     inset: chart.inset,
     names: {
-      x: !numbersAlong && orientation === 'vertical' ? named : null,
-      y: !numbersAlong && orientation === 'horizontal' ? named : null,
+      x: orientation === 'vertical' ? named : null,
+      y: orientation === 'horizontal' ? named : null,
     },
     summaryValues: (axis) => {
-      // Points placed by both values each have a value on either axis.
-      if (numbersAlong) {
-        return current.map((category) => {
-          const point = chart.xyOf(category.index)?.value
-          return point ? (axis === 'x' ? point.x : point.y) : null
-        })
-      }
       // Only the series read against the axis.
       const shown = series.filter(
         (key) => !hidden.includes(key) && frame.axisOf(key) === axis,
@@ -1392,70 +937,6 @@ function axesOf(chart: ChartContextValue): ChartAxesValue {
     },
     percent,
   }
-}
-
-/**
- * The reader of a chart whose plot shows a window of time: its marks sit in
- * a layer the clock moves, so what is under the pointer is read where the
- * layer is now, and a tooltip sits where its mark is on the plot.
- */
-function liveReader(
-  reader: ChartReader,
-  live: ChartLive,
-  direction: ReadingDirection,
-): ChartReader {
-  const { browse } = reader
-  if (!browse) return reader
-  // The layer moves toward the reading start: left, or right in right to left.
-  const sign = direction === 'rtl' ? -1 : 1
-  const anchor = (target: ChartTarget) => {
-    const at = browse.anchor(target)
-    return at && { ...at, x: at.x - sign * live.offset() }
-  }
-  // The keys reach only what the plot shows: rows kept past its start, or arrived past its end
-  // while it is held, are out of view.
-  const shown = (target: ChartTarget | null) => {
-    const at = target && anchor(target)
-    return at !== null && at.x >= -1e-6 && at.x <= 1 + 1e-6
-  }
-  const back = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft'
-  const on = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'
-  /** From `target`, stepping `key` while it is out of view, the first in view, or null. */
-  const toView = (target: ChartTarget | null, key: string) => {
-    let at = target
-    for (let steps = 0; at && !shown(at) && steps < browse.stops; steps += 1) {
-      const next = browse.step(at, key)
-      if (!next || next === at) return null
-      at = next
-    }
-    return at && shown(at) ? at : null
-  }
-  return {
-    ...reader,
-    browse: {
-      ...browse,
-      targetAt: (point) =>
-        browse.targetAt({ ...point, x: point.x + sign * live.offset() * point.width }),
-      anchor,
-      start: toView(browse.start, back),
-      step: (from, key) => {
-        const next = browse.step(from, key)
-        if (!next) return null
-        if (key === 'Home') return toView(next, on) ?? from
-        if (key === 'End') return toView(next, back) ?? from
-        return shown(next) ? next : from
-      },
-    },
-  }
-}
-
-/** Holds a live plot still while anything on it is lit, by the pointer or the keys, so it can be read. */
-function LiveHold({ hold }: { hold: (held: boolean) => void }) {
-  const lit = useChartActive().spotlit !== null
-  useLayoutEffect(() => {
-    hold(lit)
-  }, [hold, lit])
-  return null
 }
 
 /** The corners beside the axes along the top and bottom of a chart that scrolls sideways, which hold still with the axes down its sides, so the names passing under them hide there too. */
@@ -1477,10 +958,6 @@ function ScrollCorners({ direction }: { direction: ReadingDirection }) {
 }
 
 export {
-  type CartesianChartProps,
-  cartesianChartKeys,
-  type CartesianParts,
-  cartesianSignature,
   CategoryChartFrame,
   type CategoryChartInput,
   type CategoryReaderParts,
@@ -1491,15 +968,8 @@ export {
   type ChartCellGrid,
   type ChartContextValue,
   type ChartGridAxis,
-  type ChartPartDeclaration,
-  type ChartRoomState,
-  type ChartXYPoint,
   columnLabel,
-  type LiveChartProps,
-  type NamedValueAxis,
   pickIndex,
-  rowsShown,
-  useCartesianChart,
   useCategoryChart,
   useChart,
 }

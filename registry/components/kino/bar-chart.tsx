@@ -20,20 +20,25 @@ import {
   trackClip,
   useBarFrame,
 } from '@/registry/lib/chart-bars'
-import { figureProps, useChartActive, useDeclared } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
+  figureProps,
+  seriesWords,
+  useChartActive,
+  useDeclared,
+} from '@/registry/lib/chart-base'
+import {
+  CartesianChartFrame,
   type CartesianChartProps,
-  type ChartCategory,
-  type ChartContextValue,
+  type CartesianChartValue,
+  cartesianChartKeys,
+  cartesianSignature,
+  type CartesianStop,
+  cartesianWords,
   type ChartPartDeclaration,
   type ChartRoomState,
+  useCartesian,
   useCartesianChart,
-  useChart,
-  cartesianSignature,
-  cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+} from '@/registry/lib/chart-cartesian'
 import { markLayer, VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   type ChartLive,
@@ -52,6 +57,8 @@ import {
 } from '@/registry/lib/chart-math'
 import {
   type ChartFormat,
+  type ChartItem,
+  type ChartRootState,
   formatterOf,
   patternImage,
   plotLayerClassName,
@@ -107,6 +114,14 @@ const barChartKeys = [
   'describe',
 ]
 
+/** Every series at a stop, read along x. */
+const X_BROWSE = { kind: 'x' } as const
+
+/** The legend's keys are plain swatches. */
+function noMarker() {
+  return null
+}
+
 /**
  * The chart's root: it works out each series' bars from the data, and
  * lays out the frame its parts draw in.
@@ -127,62 +142,42 @@ function BarChart(props: BarChartProps) {
     ref,
   } = props
   const gaps: BandGaps = categoryGap === undefined ? {} : { gap: categoryGap }
-  const { chart, model, rows, placeholder, fromPlaceholder, phase } = useCartesianChart(
-    props,
-    {
-      kinds: [barMarks],
-      orientation,
-      stack,
-      entrance: entrance !== 'none',
-      cascade:
-        entrance === 'cascade'
-          ? { variable: '--bar-chart-cascade', fallback: 0.8 }
-          : undefined,
-      gaps,
-    },
-  )
+  const cartesian = useCartesianChart(props, {
+    kinds: [barMarks],
+    orientation,
+    stack,
+    entrance: entrance !== 'none',
+    cascade:
+      entrance === 'cascade'
+        ? { variable: '--bar-chart-cascade', fallback: 0.8 }
+        : undefined,
+    gaps,
+  })
+  const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
+  const stops = chart.current
   // The cascade's order reads the bars against the chart's own value axis.
   const shown = totalled(chart)
-  const reaches = rows.map((_, at) => farEnd(model.spans, shown, at))
+  const reaches = stops.map((_, at) => farEnd(model.spans, shown, at))
   const order = reaches
     .map((reach, at) => ({ at, size: Math.abs(reach) }))
     .toSorted((a, b) => b.size - a.size)
-  const cascade = rows.map((_, at) =>
+  const cascade = stops.map((_, at) =>
     cascadeFrom === 'value'
       ? cascadeAt(
           at,
-          rows.length,
+          stops.length,
           'start',
           order.findIndex((o) => o.at === at),
         )
-      : cascadeAt(at, rows.length, cascadeFrom),
+      : cascadeAt(at, stops.length, cascadeFrom),
   )
-  const full: CategoryChartInput = {
-    ...chart,
-    ...(describe && {
-      describe: (at: number) => {
-        const category = chart.current[at]
-        return category ? describe.text(category.datum) : ''
-      },
-      table: {
-        columns: [describe.name],
-        cells: (category: ChartCategory) => [describe.text(category.datum)],
-      },
-    }),
-    // The tooltip sits on the far end of the category's bars: the tallest, or the stack's top.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const along = chart.entered ? model.reach(category.index) : null
-      return plotPoint(
-        category.band,
-        along ?? model.baselines.value,
-        orientation,
-        chart.direction,
-      )
-    },
-  }
-
+  // What each stop holds, read out and in the data table, in place of each series' value.
+  const own = describe
+    ? {
+        name: describe.name,
+        text: (stop: ChartItem) => (stop.datum ? describe.text(stop.datum) : ''),
+      }
+    : null
   return (
     <BarFrameContext
       value={{
@@ -195,38 +190,51 @@ function BarChart(props: BarChartProps) {
         barGap,
       }}
     >
-      <CategoryChartFrame
-        chart={full}
+      <CartesianChartFrame
+        chart={cartesian}
         ref={ref}
         slot='bar-chart'
         description={description}
         empty={empty}
         className={className}
-        placeholder={placeholder && <BarPlaceholder chart={full} />}
+        placeholder={placeholder && <BarPlaceholder chart={chart} />}
+        markerOf={noMarker}
+        // The tooltip sits on the far end of the stop's bars: the tallest, or the stack's top.
+        anchor={(stop) => {
+          const along = chart.entered ? model.reach(stop.index) : null
+          return plotPoint(
+            stop.band,
+            along ?? model.baselines.value,
+            orientation,
+            chart.direction,
+          )
+        }}
+        words={seriesWords(chart, cartesianWords(chart, own))}
+        browse={X_BROWSE}
         {...figureProps(props, barChartKeys)}
       >
         {children}
-      </CategoryChartFrame>
+      </CartesianChartFrame>
     </BarFrameContext>
   )
 }
 
 /**
- * Where the bar of `key` in `category` stands: in its slot of the band
+ * Where the bar of `key` at `stop` stands: in its slot of the band
  * side by side, or across the band stacked, beside the chart's other stacks.
  * A hidden series, a missing value, a bar that hasn't risen yet and a
  * category that leaves all stand at zero.
  */
 function barPlace(
-  chart: ChartContextValue,
+  chart: CartesianChartValue,
   bar: BarFrameValue,
-  category: ChartCategory,
+  stop: CartesianStop,
   key: string,
 ): BarPlace {
   const { model } = bar
   const bars = chart.series.filter((k) => model.markOf(k) === 'bar')
   const band = barBand(
-    category.band,
+    stop.band,
     key,
     bars,
     chart.hidden,
@@ -235,32 +243,32 @@ function barPlace(
     bar.barGap,
   )
   const { scale, baseline: zero } = model.valueAxisOf(key)
-  const span = category.leaving ? null : model.spans[key]?.[category.index]
+  const span = stop.leaving ? null : model.spans[key]?.[stop.index]
   if (!span || !chart.entered) return { band, from: zero, to: zero }
   return { band, from: scale.place(span[0]), to: scale.place(span[1]) }
 }
 
 /** Whether the bar of `key` is the last of its stack on its side of zero, which takes the round end. */
 function isOutermost(
-  chart: ChartContextValue,
+  chart: CartesianChartValue,
   bar: BarFrameValue,
-  category: ChartCategory,
+  stop: CartesianStop,
   key: string,
 ) {
   if (chart.stack === 'none') return true
   const { spans, stackOf } = bar.model
-  const own = spans[key]?.[category.index]
-  if (!own || rangeOf(category.datum[key])) return true
+  const own = spans[key]?.[stop.index]
+  if (!own || rangeOf(chart.valueOf(key, stop))) return true
   const positive = own[1] >= own[0]
   const shown = chart.series.filter(
     (k) => !chart.hidden.includes(k) && stackOf(k) === stackOf(key),
   )
   const after = shown.slice(shown.indexOf(key) + 1)
   return !after.some((k) => {
-    const span = spans[k]?.[category.index]
+    const span = spans[k]?.[stop.index]
     return (
       span &&
-      !rangeOf(category.datum[k]) &&
+      !rangeOf(chart.valueOf(k, stop)) &&
       span[1] !== span[0] &&
       span[1] >= span[0] === positive
     )
@@ -313,7 +321,7 @@ function Bar(props: BarProps) {
     ...rest
   } = props
   useDeclared('Bar', Bar.declare(props), cartesianSignature)
-  const chart = useChart()
+  const chart = useCartesian()
   const { spotlit } = useChartActive()
   const bar = useBarFrame()
   const position = labelPosition(label)
@@ -329,8 +337,8 @@ function Bar(props: BarProps) {
       : undefined
   const images = [pattern, gradient].filter(Boolean).join(', ')
   const live = chart.frame.live
-  const dimmed = (category: ChartCategory) =>
-    (spotlit !== null && spotlit !== category.index) ||
+  const dimmed = (stop: CartesianStop) =>
+    (spotlit !== null && spotlit !== stop.index) ||
     (chart.emphasis !== null && chart.emphasis !== dataKey)
   return (
     <>
@@ -351,37 +359,34 @@ function Bar(props: BarProps) {
             }
           >
             {/* A live plot's rows that leave have scrolled out already, so only the rows still in it draw. */}
-            {(live ? chart.current : chart.categories).map((category) => {
-              const place = liveBand(barPlace(chart, bar, category, dataKey), live)
-              const value = numberOf(category.datum[dataKey])
-              const range = rangeOf(category.datum[dataKey])
+            {(live ? chart.current : chart.stops).map((stop) => {
+              const place = liveBand(barPlace(chart, bar, stop, dataKey), live)
+              const raw = chart.valueOf(dataKey, stop)
+              const value = numberOf(raw)
+              const range = rangeOf(raw)
               const below = range ? range[1] < range[0] : value !== null && value < 0
               const own =
-                color?.(category.datum, category.index) ??
+                (stop.datum && color?.(stop.datum, stop.index)) ??
                 (below && negativeColor ? negativeColor : undefined)
-              const clip = barClip(
-                chart,
-                place,
-                isOutermost(chart, bar, category, dataKey),
-              )
-              const at = Math.min(category.index, PLACEHOLDER_COUNT - 1)
+              const clip = barClip(chart, place, isOutermost(chart, bar, stop, dataKey))
+              const at = Math.min(stop.index, PLACEHOLDER_COUNT - 1)
               // A bar that arrives grows out of the placeholder in its place, or up from zero.
               const from = bar.fromPlaceholder
                 ? placeholderClip(chart, at, placeholderValues(PLACEHOLDER_COUNT)[at]!)
                 : barClip(chart, { band: place.band, from: zero, to: zero }, true)
               const missing =
-                !category.leaving &&
+                !stop.leaving &&
                 chart.entered &&
                 !chart.hidden.includes(dataKey) &&
                 value === null &&
                 range === null
-              const delay = cascadeDelay(bar, category.index)
+              const delay = cascadeDelay(bar, stop.index)
               return (
                 <BarShape
-                  key={category.key}
+                  key={stop.key}
                   clip={clip}
                   from={from}
-                  dim={dimmed(category)}
+                  dim={dimmed(stop)}
                   entering={bar.phase === 'entering'}
                   delay={delay}
                   color={own ?? seriesColor(dataKey)}
@@ -451,7 +456,7 @@ Bar.declare = ({
     : {}),
 })
 
-/** How long the bars of the category at `index` wait in a cascade's entrance; none otherwise. */
+/** How long the bars of the stop at `index` wait in a cascade's entrance; none otherwise. */
 function cascadeDelay(bar: BarFrameValue, index: number) {
   return bar.entrance === 'cascade' && bar.phase === 'entering'
     ? `calc(var(--motion-draw-duration) * ${bar.cascadeSpan} * ${bar.cascade[index] ?? 0})`
@@ -472,20 +477,20 @@ function BarLabels({
   dataKey: string
   position: BarLabelPosition
   write: (value: number) => string
-  dimmed: (category: ChartCategory) => boolean
+  dimmed: (stop: CartesianStop) => boolean
 }) {
-  const chart = useChart()
+  const chart = useCartesian()
   const bar = useBarFrame()
   if (chart.hidden.includes(dataKey)) return null
   return (
     <>
-      {chart.categories.map((category) => {
-        const place = barPlace(chart, bar, category, dataKey)
-        const span = bar.model.spans[dataKey]?.[category.index]
-        const text = labelText(category.datum[dataKey], write)
-        const outermost = isOutermost(chart, bar, category, dataKey)
+      {chart.stops.map((stop) => {
+        const place = barPlace(chart, bar, stop, dataKey)
+        const span = bar.model.spans[dataKey]?.[stop.index]
+        const text = labelText(chart.valueOf(dataKey, stop), write)
+        const outermost = isOutermost(chart, bar, stop, dataKey)
         const shown =
-          !category.leaving &&
+          !stop.leaving &&
           span !== null &&
           span !== undefined &&
           text !== '' &&
@@ -493,12 +498,12 @@ function BarLabels({
           labelFits(chart, place, text, position)
         return (
           <BarLabel
-            key={category.key}
+            key={stop.key}
             {...labelPlace(chart, place, position)}
             shown={shown}
-            dim={dimmed(category)}
+            dim={dimmed(stop)}
             entering={bar.phase === 'entering'}
-            delay={cascadeDelay(bar, category.index)}
+            delay={cascadeDelay(bar, stop.index)}
           >
             {text}
           </BarLabel>
@@ -521,7 +526,7 @@ type BarTotalsProps = Omit<ComponentProps<'div'>, 'children'> & {
  * own value axis, never a line or a point beside them, or a bar on an axis
  * of its own.
  */
-function totalled(chart: Pick<ChartContextValue, 'series' | 'hidden' | 'config'>) {
+function totalled(chart: Pick<ChartRootState, 'series' | 'hidden' | 'config'>) {
   return chart.series.filter(
     (key) =>
       !chart.hidden.includes(key) &&
@@ -530,15 +535,15 @@ function totalled(chart: Pick<ChartContextValue, 'series' | 'hidden' | 'config'>
   )
 }
 
-/** The total of a category's shown series. */
-function totalOf(datum: ChartDatum, shown: readonly string[]) {
-  return shown.reduce((sum, key) => sum + (numberOf(datum[key]) ?? 0), 0)
+/** The total of a stop's shown series, each read with `valueOf`. */
+function totalOf(valueOf: (key: string) => unknown, shown: readonly string[]) {
+  return shown.reduce((sum, key) => sum + (numberOf(valueOf(key)) ?? 0), 0)
 }
 
 function BarTotals(props: BarTotalsProps) {
   const { format, className, ...rest } = props
   useDeclared('BarTotals', BarTotals.declare(props), cartesianSignature)
-  const chart = useChart()
+  const chart = useCartesian()
   const { spotlit } = useChartActive()
   const bar = useBarFrame()
   const write = formatterOf(chart.locale, format ?? chart.format)
@@ -553,22 +558,22 @@ function BarTotals(props: BarTotalsProps) {
       className={cn(plotLayerClassName, 'z-20', className)}
       {...rest}
     >
-      {chart.categories.map((category) => {
-        const total = totalOf(category.datum, shown)
+      {chart.stops.map((stop) => {
+        const total = totalOf((key) => chart.valueOf(key, stop), shown)
         const place = {
-          band: category.band,
+          band: stop.band,
           from: zero,
           to:
-            category.leaving || !chart.entered
+            stop.leaving || !chart.entered
               ? zero
-              : scale.place(farEnd(bar.model.spans, shown, category.index)),
+              : scale.place(farEnd(bar.model.spans, shown, stop.index)),
         }
         return (
           <BarLabel
-            key={category.key}
+            key={stop.key}
             {...labelPlace(chart, place, 'outside')}
-            shown={!category.leaving && labelFits(chart, place, write(total), 'outside')}
-            dim={spotlit !== null && spotlit !== category.index}
+            shown={!stop.leaving && labelFits(chart, place, write(total), 'outside')}
+            dim={spotlit !== null && spotlit !== stop.index}
           >
             {chart.stack === 'expand' ? '' : write(total)}
           </BarLabel>
@@ -585,7 +590,9 @@ BarTotals.declare = ({ format }: BarTotalsProps): ChartPartDeclaration => ({
     const shown = totalled(chart)
     return outsideRoom(
       chart,
-      chart.stack === 'expand' ? [] : chart.rows.map((row) => write(totalOf(row, shown))),
+      chart.stack === 'expand'
+        ? []
+        : chart.rows.map((row) => write(totalOf((key) => row[key], shown))),
     )
   },
 })

@@ -1,7 +1,6 @@
 'use client'
 
 import type { EntrancePhase } from '@/registry/lib/chart-base'
-import type { ChartContextValue } from '@/registry/lib/chart-core'
 import type { CartesianModel } from '@/registry/lib/chart-frame'
 import {
   type ChartOrientation,
@@ -9,7 +8,11 @@ import {
   plotPoint,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
-import { forcedSeriesColor, plotLayerClassName } from '@/registry/lib/chart-root'
+import {
+  type ChartRootState,
+  forcedSeriesColor,
+  plotLayerClassName,
+} from '@/registry/lib/chart-root'
 import { type Band, bandAt } from '@/registry/lib/chart-scale'
 import {
   placeholderBreatheClassName,
@@ -51,6 +54,16 @@ function useBarFrame() {
   return bar
 }
 
+/** Which way a chart's bars lie and its text reads, which places and rounds them. */
+interface BarLayout {
+  orientation: ChartOrientation
+  direction: ReadingDirection
+}
+
+/** What a chart's labels are fitted to: its bars' layout, the plot's size and its text, and how many stops share it. */
+type BarLabelLayout = BarLayout &
+  Pick<ChartRootState, 'plotSize' | 'textWidth'> & { current: readonly unknown[] }
+
 /** Where a bar stands: the band it takes and the span of the value axis it covers, as fractions. */
 interface BarPlace {
   band: Band
@@ -59,7 +72,7 @@ interface BarPlace {
 }
 
 /** The bar's shape as a clip, rounded at the end its value reaches. */
-function barClip(chart: ChartContextValue, place: BarPlace, outermost: boolean) {
+function barClip(chart: BarLayout, place: BarPlace, outermost: boolean) {
   const insets = barInsets(
     place.band,
     place.from,
@@ -88,7 +101,7 @@ function BarPlaceholder({
   chart,
   values = placeholderValues(PLACEHOLDER_COUNT),
 }: {
-  chart: ChartContextValue
+  chart: BarLayout
   /** The bars' lengths, as fractions of the plot. */
   values?: readonly number[]
 }) {
@@ -119,7 +132,7 @@ function BarPlaceholder({
 
 /** The placeholder's bar at `at` of `count`, `value` long, as a clip. */
 function placeholderClip(
-  chart: ChartContextValue,
+  chart: BarLayout,
   at: number,
   value: number,
   count = PLACEHOLDER_COUNT,
@@ -140,7 +153,7 @@ const OUTSIDE_ROOM = { vertical: 18, gap: 10 } as const
 
 /** The room past the bars' ends that labels reading `texts` take, in px. */
 function outsideRoom(
-  chart: Pick<ChartContextValue, 'orientation' | 'textWidth'>,
+  chart: Pick<BarLabelLayout, 'orientation' | 'textWidth'>,
   texts: readonly string[],
 ) {
   if (chart.orientation === 'vertical') return OUTSIDE_ROOM.vertical
@@ -214,7 +227,7 @@ const BarShape = memo(function BarShape({
 })
 
 /** A bar's whole length, from one end of the value axis to the other, in its band. */
-function trackClip(chart: ChartContextValue, band: Band) {
+function trackClip(chart: BarLayout, band: Band) {
   return barClipPath(
     barInsets(band, 0, 1, chart.orientation, chart.direction),
     [true, true, true, true],
@@ -223,7 +236,7 @@ function trackClip(chart: ChartContextValue, band: Band) {
 }
 
 /** Where the mark of a missing value sits: across its band, on `zero`, the fraction of the value axis bars grow from. */
-function missingMark(chart: ChartContextValue, band: Band, zero: number): CSSProperties {
+function missingMark(chart: BarLayout, band: Band, zero: number): CSSProperties {
   const start = physicalStart(
     band,
     chart.orientation === 'vertical' ? 'inline' : 'block',
@@ -244,11 +257,7 @@ function missingMark(chart: ChartContextValue, band: Band, zero: number): CSSPro
 }
 
 /** Where a label on the bar at `place` goes: the point it sits on, and which way is out from the bar's end. */
-function labelPlace(
-  chart: ChartContextValue,
-  place: BarPlace,
-  position: BarLabelPosition,
-) {
+function labelPlace(chart: BarLayout, place: BarPlace, position: BarLabelPosition) {
   const { orientation, direction } = chart
   const positive = place.to >= place.from
   const along = position === 'center' ? (place.from + place.to) / 2 : place.to
@@ -333,7 +342,7 @@ const BarLabel = memo(function BarLabel({
 
 /** Whether `text` fits where its label goes on the bar at `place`, at the chart's size. */
 function labelFits(
-  chart: ChartContextValue,
+  chart: BarLabelLayout,
   place: BarPlace,
   text: string,
   position: BarLabelPosition,

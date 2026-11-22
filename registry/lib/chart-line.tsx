@@ -9,12 +9,12 @@ import {
 } from '@/registry/lib/area-fill'
 import { type EntrancePhase, useChartActive } from '@/registry/lib/chart-base'
 import {
-  CategoryChartFrame,
-  type ChartCategory,
-  type CategoryChartInput,
-  type ChartContextValue,
-  useChart,
-} from '@/registry/lib/chart-core'
+  CartesianChartFrame,
+  type CartesianChartFrameProps,
+  type CartesianChartValue,
+  type CartesianStop,
+  useCartesian,
+} from '@/registry/lib/chart-cartesian'
 import { type CartesianModel, markLayer } from '@/registry/lib/chart-frame'
 import { seriesPoints } from '@/registry/lib/chart-line-marks'
 import {
@@ -55,7 +55,6 @@ import {
   type CSSProperties,
   memo,
   type ReactNode,
-  type Ref,
   type RefObject,
   use,
   useId,
@@ -104,9 +103,9 @@ interface LineFamilyValue {
    */
   pointsOf: (key: string, rising: boolean) => LinePoint[]
   /** Where a series' lit dot sits on `category`, as a fraction of the plot from its top, or null with no value. */
-  topOf: (key: string, category: ChartCategory) => number | null
+  topOf: (key: string, stop: CartesianStop) => number | null
   /** Where a second lit dot marks the bottom of a value given as a range, as `topOf` does its top; null for a single value. */
-  bottomOf?: (key: string, category: ChartCategory) => number | null
+  bottomOf?: (key: string, stop: CartesianStop) => number | null
   /** Where a series lies flat, such as one that arrives on an empty chart, as a fraction of the plot from its top: its axis's baseline. */
   restOf: (key: string) => number
 }
@@ -130,7 +129,7 @@ function useLineFamily() {
  * along its axis's baseline when it lies `flat`.
  */
 function framePoints(
-  chart: ChartContextValue,
+  chart: Pick<CartesianChartValue, 'current'>,
   model: CartesianModel,
   key: string,
   flat: boolean,
@@ -151,10 +150,10 @@ function framePoints(
 function frameTop(
   model: CartesianModel,
   key: string,
-  category: ChartCategory,
+  stop: CartesianStop,
   near = false,
 ): number | null {
-  const span = model.spans[key]?.[category.index]
+  const span = model.spans[key]?.[stop.index]
   const { scale } = model.valueAxisOf(key)
   return span ? 1 - scale.place(near ? span[0] : span[1]) : null
 }
@@ -176,51 +175,35 @@ function traceVariables(name: LineFamilyName) {
 }
 
 /**
- * The frame of a chart drawn as lines: the chart core's frame, with room
+ * The frame of a chart drawn as lines: the cartesian frame, with room
  * beside the plot for a dot on the first or last point, the placeholder
  * while it loads, and the dots that mark the lit category.
  */
 function LineFamilyFrame({
-  chart,
   family,
-  description,
-  empty,
-  placeholder,
   className,
   children,
-  ref,
   ...props
-}: Omit<ComponentProps<'figure'>, 'ref'> & {
-  chart: CategoryChartInput
+}: Omit<CartesianChartFrameProps, 'slot'> & {
   family: Omit<LineFamilyValue, 'litDots'>
-  description?: string
-  empty?: ReactNode
-  /** What shows while the data loads, such as a `LinePlaceholder`; nothing once it has. */
-  placeholder: ReactNode
-  ref?: Ref<HTMLElement>
 }) {
   const litDots = useRef(new Map<string, HTMLElement>())
   useLayoutEffect(registerLineProperties, [])
   return (
     <LineFamilyContext value={{ ...family, litDots }}>
-      <CategoryChartFrame
-        chart={chart}
-        ref={ref}
+      <CartesianChartFrame
         slot={family.name}
-        description={description}
-        empty={empty}
         // The columns beside the plot keep room for a dot on the first or the last point, half of
         // which reaches past the plot, even with no axis there; the pointer finds it there too.
         className={cn(
           'grid-cols-[minmax(0.375rem,auto)_minmax(0,1fr)_minmax(0.375rem,auto)] **:data-[slot=chart-columns]:before:absolute **:data-[slot=chart-columns]:before:inset-y-0 **:data-[slot=chart-columns]:before:-inset-x-1.5',
           className,
         )}
-        placeholder={placeholder}
         {...props}
       >
         {children}
         <LineLitMarks />
-      </CategoryChartFrame>
+      </CartesianChartFrame>
     </LineFamilyContext>
   )
 }
@@ -443,7 +426,7 @@ function LineSeries({
   /** Fills the area under the line, down to its baseline. */
   fill?: boolean
 }) {
-  const chart = useChart()
+  const chart = useCartesian()
   const { spotlit } = useChartActive()
   const family = useLineFamily()
   const spot = useRef<HTMLDivElement>(null)
@@ -769,7 +752,7 @@ function LineHold({
   slot: number
   dimmed: boolean
 }) {
-  const { direction } = useChart()
+  const { direction } = useCartesian()
   const newest = points.findLast((point) => point.defined)
   if (!newest) return null
   const shown = live.running && live.fresh
@@ -840,7 +823,7 @@ function mirror(direction: ReadingDirection) {
  * masked box three plots wide that its layer draws in.
  */
 function litWindow(
-  chart: ChartContextValue,
+  chart: Pick<CartesianChartValue, 'current' | 'direction'>,
   at: number | null,
   live: boolean,
 ): { from: string; to: string } {
@@ -872,7 +855,7 @@ function maskedFrame(live: boolean) {
  * in from the reading start on `draw`, and stay whole from then on.
  */
 function EntranceWipe({ children }: { children: ReactNode }) {
-  const chart = useChart()
+  const chart = useCartesian()
   const family = useLineFamily()
   if (family.entrance !== 'draw') return children
   return (
@@ -915,7 +898,7 @@ const LineDots = memo(function LineDots({
   brightFrom: number | null
   brightTo: number | null
 }) {
-  const { direction } = useChart()
+  const { direction } = useCartesian()
   const final = points.findLastIndex((point) => point.defined)
   return (
     <div className={cn('absolute inset-0', direction === 'rtl' && '-scale-x-100')}>
@@ -968,7 +951,7 @@ const LineDots = memo(function LineDots({
  * leaves.
  */
 function LineLitMarks() {
-  const chart = useChart()
+  const chart = useCartesian()
   const family = useLineFamily()
   const at = useChartActive().spotlit
   const marks = useRef<HTMLDivElement>(null)

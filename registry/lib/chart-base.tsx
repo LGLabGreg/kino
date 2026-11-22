@@ -1193,6 +1193,15 @@ function ShareTooltipContent({
   )
 }
 
+/** The rows whose series isn't hidden, for a chart whose rows each belong to one. */
+function rowsShown(
+  rows: readonly ChartDatum[],
+  seriesOf: (row: ChartDatum) => string,
+  hidden: readonly string[],
+) {
+  return rows.filter((row) => !hidden.includes(seriesOf(row)))
+}
+
 export {
   type ActiveIndexProps,
   type AxisNames,
@@ -1230,6 +1239,7 @@ export {
   plotFraction,
   plotOffset,
   plotPlace,
+  rowsShown,
   seriesWords,
   type SeriesWordsInput,
   SeriesWordsContext,

@@ -1,11 +1,11 @@
 import type { MarkKind } from '@/registry/lib/chart-frame'
 import {
-  type ChartDatum,
   type ChartStack,
   hiddenSpans,
   rangeOf,
   reachOf,
   seriesSpans,
+  type SeriesValueOf,
   spanExtent,
 } from '@/registry/lib/chart-math'
 
@@ -19,11 +19,14 @@ import {
 const areaMarks: MarkKind = {
   mark: 'area',
   stacks: true,
-  spans: ({ rows, series, shown, stack, stackOf }) => {
-    const drawn = stackedRows(rows, series, stack)
-    const spans = seriesSpans(drawn, shown, stack, stackOf)
+  spans: ({ count, valueOf, series, shown, stack, stackOf }) => {
+    const drawn = stackedValues(valueOf, stack)
+    const spans = seriesSpans(count, drawn, shown, stack, stackOf)
     return {
-      spans: { ...spans, ...hiddenSpans(drawn, series, shown, stack, stackOf) },
+      spans: {
+        ...spans,
+        ...hiddenSpans(count, drawn, series, shown, stack, stackOf),
+      },
       extent: shown.length === 0 ? null : spanExtent(spans),
     }
   },
@@ -32,22 +35,15 @@ const areaMarks: MarkKind = {
 }
 
 /**
- * The rows as the areas draw them: stacked, a missing value counts as
+ * The values as the areas draw them: stacked, a missing value counts as
  * nothing, so the areas above it stay whole; side by side it leaves a gap.
  */
-function stackedRows(
-  rows: readonly ChartDatum[],
-  series: readonly string[],
-  stack: ChartStack,
-): readonly ChartDatum[] {
-  if (stack === 'none') return rows
-  return rows.map((row) => {
-    const out = { ...row }
-    for (const key of series) {
-      if (typeof out[key] !== 'number' && !rangeOf(out[key])) out[key] = 0
-    }
-    return out
-  })
+function stackedValues(valueOf: SeriesValueOf, stack: ChartStack): SeriesValueOf {
+  if (stack === 'none') return valueOf
+  return (series, index) => {
+    const value = valueOf(series, index)
+    return typeof value === 'number' || rangeOf(value) ? value : 0
+  }
 }
 
-export { areaMarks, stackedRows }
+export { areaMarks, stackedValues }

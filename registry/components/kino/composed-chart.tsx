@@ -6,18 +6,23 @@ import { Line, type LineProps } from '@/registry/components/kino/line-chart'
 import { areaMarks } from '@/registry/lib/chart-area-marks'
 import { barMarks } from '@/registry/lib/chart-bar-marks'
 import { BarFrameContext, BarPlaceholder } from '@/registry/lib/chart-bars'
-import { figureProps, useChartActive, useDeclared } from '@/registry/lib/chart-base'
+import {
+  figureProps,
+  seriesWords,
+  useChartActive,
+  useDeclared,
+} from '@/registry/lib/chart-base'
 import {
   type CartesianChartProps,
-  type CategoryChartInput,
+  cartesianChartKeys,
+  cartesianSignature,
+  cartesianWords,
   type ChartPartDeclaration,
   type LiveChartProps,
   type NamedValueAxis,
+  useCartesian,
   useCartesianChart,
-  useChart,
-  cartesianSignature,
-  cartesianChartKeys,
-} from '@/registry/lib/chart-core'
+} from '@/registry/lib/chart-cartesian'
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   EntranceWipe,
@@ -105,6 +110,9 @@ const composedChartKeys = [
 /** A line's key in the legend: a short stroke, told apart from a bar's square. */
 const LINE_KEY = 'M-1.1,-0.3H1.1V0.3H-1.1Z'
 
+/** Every series at a stop, read along x. */
+const X_BROWSE = { kind: 'x' } as const
+
 /**
  * The chart's root: it fits each value axis to the series read against it,
  * lays out the frame its parts draw in, and places every mark at its
@@ -128,44 +136,28 @@ function ComposedChart(props: ComposedChartProps) {
   const marks = Object.values(config).map((series) => series.mark)
   const hasBars = marks.includes('bar')
   const gaps: BandGaps = categoryGap === undefined ? {} : { gap: categoryGap }
-  const { chart, model, rows, placeholder, fromPlaceholder, phase } = useCartesianChart(
-    props,
-    {
-      kinds: [barMarks, lineMarks, areaMarks, pointMarks],
-      orientation: 'vertical',
-      stack,
-      entrance: entrance !== 'none',
-      cascade:
-        entrance === 'draw' && hasBars
-          ? { variable: '--composed-chart-cascade', fallback: 0.6 }
-          : undefined,
-      gaps,
-      axes,
-    },
-  )
+  const cartesian = useCartesianChart(props, {
+    kinds: [barMarks, lineMarks, areaMarks, pointMarks],
+    orientation: 'vertical',
+    stack,
+    entrance: entrance !== 'none',
+    cascade:
+      entrance === 'draw' && hasBars
+        ? { variable: '--composed-chart-cascade', fallback: 0.6 }
+        : undefined,
+    gaps,
+    axes,
+  })
+  const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
+  const stops = chart.current
   const markOf = model.markOf
   const pointKeys = chart.series.filter((key) => markOf(key) === 'point')
-  const full: CategoryChartInput = {
-    ...chart,
-    // The tooltip sits over the highest of the category's marks, whatever they are.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const along = chart.entered ? model.reach(category.index) : null
-      return plotPoint(
-        category.band,
-        along ?? model.baselines.value,
-        'vertical',
-        chart.direction,
-      )
-    },
-    // The legend's key takes each mark's shape, so a series reads by more than its colour.
-    markerOf: (key) => {
-      const mark = markOf(key)
-      if (mark === 'line') return LINE_KEY
-      if (mark === 'point') return markerAt(pointKeys.indexOf(key))
-      return undefined
-    },
+  // The legend's key takes each mark's shape, so a series reads by more than its colour.
+  const markerOf = (key: string) => {
+    const mark = markOf(key)
+    if (mark === 'line') return LINE_KEY
+    if (mark === 'point') return markerAt(pointKeys.indexOf(key))
+    return null
   }
   const traced = (key: string) => markOf(key) === 'line' || markOf(key) === 'area'
   return (
@@ -175,13 +167,26 @@ function ComposedChart(props: ComposedChartProps) {
         phase,
         fromPlaceholder,
         entrance: entrance === 'draw' ? 'cascade' : entrance,
-        cascade: rows.map((_, at) => cascadeAt(at, rows.length, 'start')),
+        cascade: stops.map((_, at) => cascadeAt(at, stops.length, 'start')),
         cascadeSpan: 'var(--composed-chart-cascade, 0.6)',
         barGap,
       }}
     >
       <LineFamilyFrame
-        chart={full}
+        chart={cartesian}
+        markerOf={markerOf}
+        // The tooltip sits over the highest of the stop's marks, whatever they are.
+        anchor={(stop) => {
+          const along = chart.entered ? model.reach(stop.index) : null
+          return plotPoint(
+            stop.band,
+            along ?? model.baselines.value,
+            'vertical',
+            chart.direction,
+          )
+        }}
+        words={seriesWords(chart, cartesianWords(chart, null))}
+        browse={X_BROWSE}
         family={{
           name: 'composed-chart',
           phase,
@@ -189,17 +194,17 @@ function ComposedChart(props: ComposedChartProps) {
           // A hidden area folds into the one below it; a hidden line or point lies flat.
           pointsOf: (key, rising) =>
             framePoints(
-              full,
+              chart,
               model,
               key,
               rising || (markOf(key) !== 'area' && chart.hidden.includes(key)),
               markOf(key) === 'area',
             ),
           // The lit category's dot marks each line and area; a bar or a point is its own mark.
-          topOf: (key, category) => (traced(key) ? frameTop(model, key, category) : null),
-          bottomOf: (key, category) =>
-            markOf(key) === 'area' && rangeOf(category.datum[key])
-              ? frameTop(model, key, category, true)
+          topOf: (key, stop) => (traced(key) ? frameTop(model, key, stop) : null),
+          bottomOf: (key, stop) =>
+            markOf(key) === 'area' && rangeOf(chart.valueOf(key, stop))
+              ? frameTop(model, key, stop, true)
               : null,
           restOf: (key) => frameRest(model, key),
         }}
@@ -208,7 +213,7 @@ function ComposedChart(props: ComposedChartProps) {
         placeholder={
           placeholder &&
           (hasBars ? (
-            <BarPlaceholder chart={full} />
+            <BarPlaceholder chart={chart} />
           ) : (
             <LinePlaceholder name='composed-chart' fill={marks.includes('area')} />
           ))
@@ -265,7 +270,7 @@ type PointsProps = Omit<ComponentProps<'div'>, 'children'> & {
 function Points(props: PointsProps) {
   const { dataKey, radius = 5, ...rest } = props
   useDeclared('Points', Points.declare(props), cartesianSignature)
-  const chart = useChart()
+  const chart = useCartesian()
   const family = useLineFamily()
   const { spotlit } = useChartActive()
   if (chart.status !== 'ready' && chart.status !== 'hidden') return null
