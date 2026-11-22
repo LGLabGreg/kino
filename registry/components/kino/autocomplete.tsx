@@ -13,9 +13,9 @@ import {
   FilterListSeparator,
   FilterListStatus,
   FilterListTrigger,
-  matchRange,
   MatchLocaleContext,
 } from '@/registry/lib/filter-list'
+import { matchRange } from '@/registry/lib/match'
 import { Autocomplete as AutocompletePrimitive } from '@base-ui/react/autocomplete'
 import type { ComponentProps } from 'react'
 

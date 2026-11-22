@@ -306,9 +306,12 @@ function emptyInput(input: HTMLInputElement) {
 
 const plural = new Intl.PluralRules('en-US')
 
-/** “1 result”, “1,024 results”. */
-function resultsLabel(count: number) {
-  return `${numberFormatter('en-US').format(count)} ${plural.select(count) === 'one' ? 'result' : 'results'}`
+/** “1 result”, “1,024 results”, or the same with another `noun`, given as its one and its many. */
+function resultsLabel(
+  count: number,
+  noun: readonly [one: string, many: string] = ['result', 'results'],
+) {
+  return `${numberFormatter('en-US').format(count)} ${plural.select(count) === 'one' ? noun[0] : noun[1]}`
 }
 
 /**

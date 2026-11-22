@@ -9,7 +9,7 @@ import { sectionColumnClassName } from '@/registry/lib/hero-parts'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { FOLLOWS_TRANSITION } from '@/registry/lib/resize'
-import { feelStretch, useSeen } from '@/registry/lib/scene'
+import { feelStretch, onScreen, useSeen } from '@/registry/lib/scene'
 import type { SectionHeadingLevel } from '@/registry/lib/section-heading'
 import {
   type ComponentProps,
@@ -99,17 +99,6 @@ interface StatsArrivalState {
 }
 
 const StatsArrivalContext = createContext<StatsArrivalState | null>(null)
-
-/** Whether any of `element` is on screen. */
-function onScreen(element: Element) {
-  const box = element.getBoundingClientRect()
-  return (
-    box.bottom > 0 &&
-    box.top < window.innerHeight &&
-    box.right > 0 &&
-    box.left < window.innerWidth
-  )
-}
 
 /** Where a batch of numbers seen together is: how many have asked to wait, and whether its frame is still open. */
 interface ArrivalBatch {

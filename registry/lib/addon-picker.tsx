@@ -10,11 +10,8 @@ import {
 } from '@/registry/components/kino/combobox'
 import { InputGroupAddon, InputGroupButton } from '@/registry/components/kino/input-group'
 import { OutsideField } from '@/registry/lib/field-control'
-import {
-  FilterListChevron,
-  FilterListMatchedText,
-  matchRange,
-} from '@/registry/lib/filter-list'
+import { FilterListChevron, FilterListMatchedText } from '@/registry/lib/filter-list'
+import { matchRange } from '@/registry/lib/match'
 import { MenuShortcut } from '@/registry/lib/menu'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useHold } from '@/registry/lib/hold'
+import { useHold, useTurns } from '@/registry/lib/hold'
 import {
   type CustomerLogo,
   logoCloudColumnClassName,
@@ -10,9 +10,8 @@ import {
   logoCloudSectionClassName,
   LogoCloudTitle,
 } from '@/registry/lib/logo-cloud-parts'
-import { FOLLOWS_TRANSITION, roleDuration } from '@/registry/lib/resize'
 import { Swap } from '@/registry/lib/swap'
-import { type RefObject, useEffect, useId, useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -46,7 +45,7 @@ function LogoCloudSwap({
     setLastCount(logos.length)
     setState(swapStart(logos.length))
   }
-  useSwapTimer(listRef, hold.running && state.waiting.length > 0, () =>
+  useTurns(listRef, hold.running && state.waiting.length > 0, SWAP_EVERY, () =>
     setState(swapNext),
   )
   return (
@@ -137,57 +136,5 @@ function swapNext(state: SwapState): SwapState {
 
 /** How many `layout` durations a logo shows before the next slot changes: about three seconds in the default feel. */
 const SWAP_EVERY = 5
-
-/**
- * Calls `change` every `SWAP_EVERY` `layout` durations while `running`, the
- * element is in view and the page is shown. Under reduced motion it still
- * calls, and the logos change with a fade, so every customer shows.
- */
-function useSwapTimer(
-  ref: RefObject<HTMLElement | null>,
-  running: boolean,
-  change: () => void,
-) {
-  const changeRef = useRef(change)
-  useEffect(() => {
-    changeRef.current = change
-  })
-  useEffect(() => {
-    const element = ref.current
-    if (!element || !running) return
-    let seen = false
-    // The wait is a Web Animation that follows the page's transitions, so a tool that slows them slows it too.
-    let clock: Animation | undefined
-    const schedule = () => {
-      clock?.cancel()
-      clock = undefined
-      if (!seen || document.hidden) return
-      const every = roleDuration(element, 'layout') * SWAP_EVERY
-      if (!(every > 0)) return
-      const wait = element.animate([], { duration: every, id: FOLLOWS_TRANSITION })
-      clock = wait
-      wait.finished.then(
-        () => {
-          if (clock !== wait) return
-          changeRef.current()
-          schedule()
-        },
-        // Cancelled: held, out of view or gone.
-        () => {},
-      )
-    }
-    const sight = new IntersectionObserver(([entry]) => {
-      seen = entry.isIntersecting
-      schedule()
-    })
-    sight.observe(element)
-    document.addEventListener('visibilitychange', schedule)
-    return () => {
-      clock?.cancel()
-      sight.disconnect()
-      document.removeEventListener('visibilitychange', schedule)
-    }
-  }, [ref, running])
-}
 
 export { LogoCloudSwap, swapNext, swapStart }

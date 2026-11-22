@@ -68,6 +68,17 @@ function useSeen<Element extends HTMLElement>(
   return { ref, seen, landing: seen === 'reduced' && !landed }
 }
 
+/** Whether any of `element` is on screen: one that is as the page shows stays as it was painted (motion rule 6). */
+function onScreen(element: Element) {
+  const box = element.getBoundingClientRect()
+  return (
+    box.bottom > 0 &&
+    box.top < window.innerHeight &&
+    box.right > 0 &&
+    box.left < window.innerWidth
+  )
+}
+
 /** The `enter` role's duration in the default feel, Crisp, in ms: what a scene's steps are written against. */
 const CRISP_ENTER_MS = 500
 
@@ -145,4 +156,13 @@ function useScene<Element extends HTMLElement>(
   }
 }
 
-export { CRISP_ENTER_MS, feelStretch, fullView, sceneStep, useScene, useSeen }
+export {
+  type SceneSeen,
+  CRISP_ENTER_MS,
+  feelStretch,
+  fullView,
+  onScreen,
+  sceneStep,
+  useScene,
+  useSeen,
+}

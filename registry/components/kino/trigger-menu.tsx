@@ -8,8 +8,8 @@ import {
   FilterListMatchedText,
   FilterListRows,
   filterListScrollerClassName,
-  matchRange,
 } from '@/registry/lib/filter-list'
+import { matchRange } from '@/registry/lib/match'
 import {
   menuLabelClassName,
   menuNoticeClassName,
