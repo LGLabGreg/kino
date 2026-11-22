@@ -29,6 +29,7 @@ import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import { ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import {
   axisNames,
+  namePitch,
   labelBox,
   labelsMeet,
   type ChartSummary,
@@ -1030,7 +1031,7 @@ function UnmeasuredAxisNames({
     // Every few show, by their place in `--axis-name`, but those held back. A long run's
     // names show whole, as once measured; a few are cut short if they must.
     const room = cut
-      ? `; max-width: calc(100cqw * ${run.every} / ${names.length} - ${gap}px)`
+      ? `; max-width: calc(100cqw * ${run.every * namePitch(names)} - ${gap}px)`
       : ''
     const body = `${scope} { opacity: calc(1 - min(1, mod(var(--axis-name), ${run.every})))${room} }${run.held ? ` ${scope}:is(${run.held}) { opacity: 0 }` : ''}`
     rules.push(query ? `@container ${query} { ${body} }` : body)

@@ -17,12 +17,24 @@ import {
   useLeavingItems,
   writeDatum,
 } from '@/registry/lib/chart-base'
-import { type LaidCell, stepOf, stepStrength } from '@/registry/lib/chart-grid'
+import {
+  type CellBox,
+  cellBox,
+  type CellShape,
+  cellUnder,
+  gridAspect,
+  hexStepKey,
+  type LaidCell,
+  labelRoom,
+  SPOTLIGHT_RINGS,
+  spotlightRing,
+  stepOf,
+  stepStrength,
+} from '@/registry/lib/chart-grid'
 import type { GridStop } from '@/registry/lib/chart-grid-reader'
 import {
   type ChartDatum,
   type GridCell,
-  gridCellAt,
   numberOf,
   type ReadingDirection,
 } from '@/registry/lib/chart-math'
@@ -32,6 +44,7 @@ import {
   type ChartReader,
   type ChartRootState,
   type ChartRootValue,
+  labelOnClassName,
   type PlotPoint,
   plotLayerClassName,
   seriesColor,
@@ -57,6 +70,7 @@ import {
   type Ref,
   use,
   useLayoutEffect,
+  useMemo,
   useState,
 } from 'react'
 
@@ -70,8 +84,10 @@ import { cn } from '@/lib/utils'
  * cells, places them, picks the one under the pointer, gives the axes their
  * names and draws the cells, their legend and their placeholder. The cell
  * under the pointer stays bright while the rest step back, and a new range
- * fills the cells in a wave along the columns. The Waffle draws its squares
- * with the same cells.
+ * fills the cells in a wave along the columns. The cells are squares or
+ * hexagons (`CellShape`); hexagons make a surface, so the cells around the
+ * lit one step back by how far they are. The Waffle draws its squares with
+ * the same cells.
  */
 
 /** The tallest the plot grows with square cells before its cells widen instead, in px. */
@@ -87,6 +103,12 @@ const LEAST_COLUMN = 10
 
 /** The least room between two values under the legend, in px. */
 const LEGEND_GAP = 8
+
+/** The height a value written in a cell needs, in px: a line of the chart's 12px text. */
+const LABEL_HEIGHT = 14
+
+/** The room either side of a value written in a cell, in px. */
+const LABEL_PAD = 3
 
 /** Where a cell sits, and the name it takes on each axis, by its place in the axis's names. */
 interface CellAt extends GridCell {
@@ -131,13 +153,16 @@ function laidOutCells<T>(
   }))
 }
 
-/** Names that each take one line of the grid: a column or a row each. */
-function lineNames(values: readonly unknown[]): ChartAxisName[] {
+/** Names that each take one line of the grid, a column or a row, over the band `bandOf` gives each. */
+function lineNames(
+  values: readonly unknown[],
+  bandOf: (index: number) => { start: number; size: number },
+): ChartAxisName[] {
   return values.map((value, index) => ({
     key: String(value),
     value,
     index,
-    band: { start: index / values.length, size: 1 / values.length },
+    band: bandOf(index),
     leaving: false,
   }))
 }
@@ -219,12 +244,14 @@ function cellKey(cell: { key: string }) {
 function cellAt(
   point: PlotPoint,
   cells: readonly GridCell[],
+  shape: CellShape,
   columns: number,
   rows: number,
   direction: ReadingDirection,
 ): number | null {
   if (point.width === 0 || point.height === 0) return null
-  const { column, row } = gridCellAt(
+  const { column, row } = cellUnder(
+    shape,
     { x: point.x / point.width, y: point.y / point.height },
     columns,
     rows,
@@ -234,17 +261,19 @@ function cellAt(
   return index === -1 ? null : index
 }
 
-/** Where a cell's tooltip sits: over the middle of its top edge, opening above it. */
+/** Where a cell's tooltip sits: over the middle of its top edge, or a hexagon's top point, opening above it. */
 function cellAnchor(
   cell: GridCell,
+  shape: CellShape,
   columns: number,
   rows: number,
   direction: ReadingDirection,
 ): ChartPoint {
-  const along = (cell.column + 0.5) / columns
+  const box = cellBox(shape, cell, columns, rows)
+  const along = box.x + box.width / 2
   return {
     x: direction === 'rtl' ? 1 - along : along,
-    y: cell.row / rows,
+    y: box.y,
     side: 'top',
   }
 }
@@ -257,6 +286,7 @@ interface CellsContextValue {
   cells: readonly GridStop[]
   /** The cells drawn, the leaving ones too. */
   drawn: readonly (GridStop & { leaving: boolean })[]
+  shape: CellShape
   columns: number
   rows: number
   /** The key of the value that colours the cells. */
@@ -363,7 +393,8 @@ function CellsChartFrame({
   // It scrolls only while it shows its cells, so a note in their place stays in view. It takes
   // the opposite direction to the page, so it opens at its end, the latest column, from the
   // first paint, and stays there as it narrows; its parts take the page's direction again.
-  const least = cells.columns * LEAST_COLUMN
+  const least = gridAcross(cells.shape, cells.columns, cells.rows) * LEAST_COLUMN
+  const most = mostWidth(cells.shape, cells.columns, cells.rows)
   const scroller = scrolls && (status === 'ready' || status === 'hidden')
   // Whether it overflows: until it is measured, it is taken to, so the axes that hold still
   // hide what passes under them from the first paint.
@@ -402,10 +433,20 @@ function CellsChartFrame({
           (state.direction === 'rtl'
             ? '[direction:ltr] *:[direction:rtl]'
             : '[direction:rtl] *:[direction:ltr]'),
+        // Cells that keep their shape stop widening at their widest, and room either side centres
+        // the chart. That room is flexible, so the names and the legend never take it.
+        most !== null &&
+          (scroller
+            ? 'grid-cols-[minmax(0,1fr)_auto_minmax(var(--plot-least),var(--plot-most))_auto_minmax(0,1fr)] [grid-template-areas:"top_top_top_top_top"_"._._top-axis_._."_"._end-axis_plot_start-axis_."_"._._bottom-axis_._."_"bottom_bottom_bottom_bottom_bottom"]'
+            : 'grid-cols-[minmax(0,1fr)_auto_minmax(0,var(--plot-most))_auto_minmax(0,1fr)] [grid-template-areas:"top_top_top_top_top"_"._._top-axis_._."_"._start-axis_plot_end-axis_."_"._._bottom-axis_._."_"bottom_bottom_bottom_bottom_bottom"]'),
         className,
       )}
       style={
-        scroller ? ({ '--plot-least': `${least}px`, ...style } as CSSProperties) : style
+        {
+          '--plot-least': scroller ? `${least}px` : undefined,
+          '--plot-most': most === null ? undefined : `${most}px`,
+          ...style,
+        } as CSSProperties
       }
       {...props}
     >
@@ -473,20 +514,53 @@ function ScrollCorners({ direction }: { direction: ReadingDirection }) {
   )
 }
 
+/** How many cells wide a grid is: its columns, and half a cell more for hexagons' odd rows. */
+function gridAcross(shape: CellShape, columns: number, rows: number) {
+  return 1 / cellBox(shape, { column: 0, row: 0 }, columns, rows).width
+}
+
+/** The tallest a grid's plot grows, in px: a cell's most for each row, up to the plot's most. */
+function mostHeight(rows: number) {
+  return Math.min(MOST_HEIGHT, rows * MOST_CELL)
+}
+
 /**
- * Holds the plot to square cells from the first paint: up to a height, or
- * a cell's, and no shorter than a row a pointer can find.
+ * The widest the plot of cells that keep their shape grows, in px: as wide
+ * as its tallest. Null for square cells, which widen instead.
  */
-function CellGridSizer({ columns, rows }: { columns: number; rows: number }) {
+function mostWidth(shape: CellShape, columns: number, rows: number): number | null {
+  if (shape === 'square') return null
+  return mostHeight(rows) * gridAspect(shape, columns, rows)
+}
+
+/**
+ * Holds the plot to its cells' shape from the first paint. Square cells
+ * stay square up to a height, or a cell's, then widen, and are no shorter
+ * than a row a pointer can find; hexagons keep theirs at any width, and the
+ * frame stops them widening (`mostWidth`).
+ */
+function CellGridSizer({
+  shape,
+  columns,
+  rows,
+}: {
+  shape: CellShape
+  columns: number
+  rows: number
+}) {
   return (
     <div
       aria-hidden
       className='pointer-events-none w-full min-w-0 [grid-area:plot]'
-      style={{
-        aspectRatio: `${columns} / ${rows}`,
-        maxHeight: Math.min(MOST_HEIGHT, rows * MOST_CELL),
-        minHeight: rows * LEAST_CELL,
-      }}
+      style={
+        shape === 'square'
+          ? {
+              aspectRatio: `${columns} / ${rows}`,
+              maxHeight: mostHeight(rows),
+              minHeight: rows * LEAST_CELL,
+            }
+          : { aspectRatio: gridAspect(shape, columns, rows) }
+      }
     />
   )
 }
@@ -495,9 +569,44 @@ function CellGridSizer({ columns, rows }: { columns: number; rows: number }) {
  * The room between cells: the chart's `--<slot>-gap`, 2px by default, or
  * less where the cells are small, so a cell never shrinks to its gap.
  */
-function cellGap(columns: number, rows: number) {
-  return `min(var(--cells-gap, 2px), ${100 / columns}cqw * 0.15, ${100 / rows}cqh * 0.15)`
+function cellGap(box: CellBox) {
+  return `min(var(--cells-gap, 2px), ${box.width * 100}cqw * 0.15, ${box.height * 100}cqh * 0.15)`
 }
+
+/**
+ * Where a cell is drawn in its layer, as CSS lengths, inside its box by the
+ * room between cells: half of it each side. A hexagon gives up as much
+ * room across its slanted edges as across its upright ones, so it keeps
+ * its shape: `2/√3` of it down.
+ */
+function cellPlace(shape: CellShape, box: CellBox) {
+  const down = shape === 'hex' ? 2 / Math.sqrt(3) : 1
+  return {
+    gap: cellGap(box),
+    start: `calc(${box.x * 100}cqw + var(--cell-gap) / 2)`,
+    top: `calc(${box.y * 100}cqh + var(--cell-gap) * ${down / 2})`,
+    width: `calc(${box.width * 100}cqw - var(--cell-gap))`,
+    height: `calc(${box.height * 100}cqh - var(--cell-gap) * ${down})`,
+  }
+}
+
+/*
+ * A hexagon's outline, pointy-top, in its box. Its corners round as square
+ * cells' do, by the shape tokens: a corner of radius ρ starts ρ/√3 along
+ * each edge, at most half way, so the round shape turns them almost into
+ * circles, as it turns square cells into circles. A browser without CSS
+ * `shape()` draws them sharp.
+ */
+const HEX_SHARP = 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)'
+// ρ is a third of --control-radius-xs, as square cells' corners are: these are ρ/√3 along an edge, across and down.
+const HEX_X = 'min(calc(var(--control-radius-xs) / 6), 25%)'
+const HEX_SLANT = 'min(calc(var(--control-radius-xs) / 10.3923), 12.5%)'
+const HEX_UPRIGHT = 'min(calc(var(--control-radius-xs) / 5.1962), 25%)'
+const HEX_ROUND = `shape(from calc(50% + ${HEX_X}) ${HEX_SLANT}, line to calc(100% - ${HEX_X}) calc(25% - ${HEX_SLANT}), curve to 100% calc(25% + ${HEX_UPRIGHT}) with 100% 25%, line to 100% calc(75% - ${HEX_UPRIGHT}), curve to calc(100% - ${HEX_X}) calc(75% + ${HEX_SLANT}) with 100% 75%, line to calc(50% + ${HEX_X}) calc(100% - ${HEX_SLANT}), curve to calc(50% - ${HEX_X}) calc(100% - ${HEX_SLANT}) with 50% 100%, line to ${HEX_X} calc(75% + ${HEX_SLANT}), curve to 0% calc(75% - ${HEX_UPRIGHT}) with 0% 75%, line to 0% calc(25% + ${HEX_UPRIGHT}), curve to ${HEX_X} calc(25% - ${HEX_SLANT}) with 0% 25%, line to calc(50% - ${HEX_X}) ${HEX_SLANT}, curve to calc(50% + ${HEX_X}) ${HEX_SLANT} with 50% 0%, close)`
+
+/** Clips an element to a hexagon: rounded where the browser can, from `cellLayerVariables`. */
+const hexClipClassName =
+  '[clip-path:var(--hex-sharp)] supports-[clip-path:shape(from_0_0,line_to_1px_1px)]:[clip-path:var(--hex-round)]'
 
 /** A cell's colour, and how strong it is, which forced colours keep as its opacity. */
 interface CellFill {
@@ -518,21 +627,71 @@ function stepFill(key: string, step: number | null, steps: number): CellFill | n
 }
 
 /**
+ * What the cells write on themselves: each cell's value by its key, and the
+ * least room a cell is drawn at that the widest fits, so the values show on
+ * every cell or on none, never on some cells of a size.
+ */
+interface CellLabels {
+  textOf: ReadonlyMap<string, string>
+  /** The least width and height, in px. */
+  room: { width: number; height: number }
+}
+
+/** No values written on the cells: one object, so what compares it sees no change. */
+const NO_LABELS: CellLabels = { textOf: new Map(), room: { width: 0, height: 0 } }
+
+/** The values the cells write on themselves, while `on`, worked out once for the grid. */
+function useCellLabels(on: boolean): CellLabels {
+  const { textWidth, locale, format, valueText } = useChartRootValue()
+  const { cells, shape, value } = useCells()
+  return useMemo(
+    () => {
+      if (!on) return NO_LABELS
+      const textOf = new Map<string, string>()
+      for (const stop of cells) {
+        const number = numberOf(stop.datum?.[value])
+        if (number !== null) textOf.set(stop.key, valueText(number))
+      }
+      const widest = Math.max(0, ...[...new Set(textOf.values())].map(textWidth))
+      return { textOf, room: labelRoom(shape, widest + 2 * LABEL_PAD, LABEL_HEIGHT) }
+    },
+    // `valueText` is made from `locale` and `format` on every render of the root.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+    [on, cells, shape, value, textWidth, locale, format],
+  )
+}
+
+/** The least room a layer's cells write their values in, which `CellText` reads. */
+function labelRoomVariables({ room }: CellLabels) {
+  return {
+    '--cells-label-width': `${room.width}px`,
+    '--cells-label-height': `${room.height}px`,
+  } as CSSProperties
+}
+
+/**
  * The cells: one layer of the plot, a cell for each column and row, in its
- * colour, and a dashed outline where there is no value. While a cell is lit,
- * the layer steps back as one, a single filter whatever the number of cells,
- * and the lit cell is drawn again over it, bright and outlined; pointing at
- * a step of the legend brings its cells forward the same way. When the
- * pointer leaves, the copies fade as the layer comes back, so nothing blinks.
+ * colour, and a dashed outline where there is no value, or a hollow
+ * hexagon. While a cell is lit, the layer steps back as one, a single
+ * filter whatever the number of cells, and the lit cell is drawn again over
+ * it, bright and outlined; hexagons around it are drawn again too, in
+ * rings that step back less the nearer they are, a filter each. Pointing
+ * at a step of the legend brings its cells forward the same way. When the
+ * pointer leaves, the copies fade as the layer comes back, so nothing
+ * blinks. With `label`, each cell writes its value where it fits; with
+ * `glow`, the top step's cells glow onto their neighbours.
  */
 function CellGridCells({
+  label = false,
+  glow = false,
   className,
   style,
   ...props
-}: Omit<ComponentProps<'div'>, 'children'>) {
+}: Omit<ComponentProps<'div'>, 'children'> & { label?: boolean; glow?: boolean }) {
   const { status, direction } = useChartRootValue()
   const grid = useCells()
   const valueOf = useCellValue()
+  const labels = useCellLabels(label)
   const { spotlit } = useChartActive()
   const lit = spotlit === null ? undefined : grid.cells[spotlit]
   // The last cell lit and the last step brought forward, kept while their copies fade.
@@ -551,9 +710,57 @@ function CellGridCells({
       : grid.cells.filter((stop) => stepOf(valueOf(stop), grid.edges) === held.step)
   const dim = lit !== undefined || grid.emphasis !== null
   const shown = grid.cells.find((stop) => stop.key === held.lit)
+  // The rings between the lit cell and the rest, nearest first; square cells have none.
+  const rings = Array.from({ length: SPOTLIGHT_RINGS - 1 }, (_, at) =>
+    shown
+      ? grid.cells.filter((stop) => spotlightRing(grid.shape, shown, stop) === at + 1)
+      : [],
+  )
   return (
     <>
-      <CellLayer dim={dim} className={className} style={style} {...props} />
+      <CellLayer
+        dim={dim}
+        labels={labels}
+        glow={glow}
+        className={className}
+        style={style}
+        {...props}
+      />
+      {rings.map(
+        (ring, at) =>
+          ring.length > 0 && (
+            <div
+              // oxlint-disable-next-line react/no-array-index-key -- a ring is its distance
+              key={at}
+              data-slot={`${grid.slot}-ring`}
+              data-off={lit === undefined ? '' : undefined}
+              aria-hidden
+              className={cn(
+                plotLayerClassName,
+                'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) starting:opacity-0 data-off:opacity-0',
+                // Each ring keeps more of its colour the nearer it is, between the lit cell's and the rest's.
+                'not-forced-colors:[filter:saturate(calc(var(--cells-dim)+(1-var(--cells-dim))*var(--cells-ring)))]',
+              )}
+              style={
+                {
+                  ...cellLayerVariables(grid.slot),
+                  ...labelRoomVariables(labels),
+                  '--cells-ring': (SPOTLIGHT_RINGS - at - 1) / SPOTLIGHT_RINGS,
+                } as CSSProperties
+              }
+            >
+              {ring.map((stop) => (
+                <CellGridCell
+                  // By its step from the lit cell, so moving the light moves each copy rather than making new ones.
+                  key={shown ? hexStepKey(shown, stop) : stop.key}
+                  {...cellProps(grid, stop, labels)}
+                  leaving={false}
+                  still
+                />
+              ))}
+            </div>
+          ),
+      )}
       <div
         data-slot={`${grid.slot}-lit`}
         data-off={grid.emphasis === null ? '' : undefined}
@@ -562,15 +769,21 @@ function CellGridCells({
           plotLayerClassName,
           'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
         )}
-        style={cellLayerVariables(grid.slot)}
+        style={{ ...cellLayerVariables(grid.slot), ...labelRoomVariables(labels) }}
       >
         {brought.map((stop) => (
-          <CellGridCell key={stop.key} {...cellProps(grid, stop)} leaving={false} still />
+          <CellGridCell
+            key={stop.key}
+            {...cellProps(grid, stop, labels)}
+            leaving={false}
+            still
+          />
         ))}
       </div>
       {shown && (
         <LitCell
-          {...cellProps(grid, shown)}
+          {...cellProps(grid, shown, labels)}
+          labels={labels}
           on={lit !== undefined}
           direction={direction}
         />
@@ -580,44 +793,60 @@ function CellGridCells({
 }
 
 /** A cell's props, as plain values, so a cell whose colour is the same redraws nothing. */
-function cellProps(grid: CellsContextValue, stop: GridStop) {
+function cellProps(grid: CellsContextValue, stop: GridStop, labels: CellLabels) {
   const fill = grid.fillOf(stop)
   return {
     slot: grid.slot,
+    shape: grid.shape,
     column: stop.column,
     row: stop.row,
     columns: grid.columns,
     rows: grid.rows,
     color: fill?.color ?? null,
     strength: fill?.strength ?? 0,
+    label: labels.textOf.get(stop.key),
   }
 }
 
 /**
- * How far the rest steps back, how much of the `draw` role the wave waits
- * and the room between cells: the chart's own variables, such as
- * `--heatmap-chart-dim`, `--heatmap-chart-wave` and `--heatmap-chart-gap`,
- * set on its layer of cells for the cells inside.
+ * How far the rest steps back, how much of the `draw` role the wave waits,
+ * the room between cells and how strong a glow is: the chart's own
+ * variables, such as `--heatmap-chart-dim`, `--heatmap-chart-wave`,
+ * `--heatmap-chart-gap` and `--heatmap-chart-glow`, set on its layer of
+ * cells for the cells inside, with a hexagon's outline.
  */
 function cellLayerVariables(slot: string) {
   return {
     '--cells-dim': `var(--${slot}-dim, 0.3)`,
     '--cells-wave': `var(--${slot}-wave, 0.6)`,
     '--cells-gap': `var(--${slot}-gap, 2px)`,
+    '--cells-glow': `var(--${slot}-glow, 0.45)`,
+    '--hex-sharp': HEX_SHARP,
+    '--hex-round': HEX_ROUND,
   } as CSSProperties
 }
 
 /**
- * The layer of every cell, which steps back as one while `dim`. Memoised,
- * so moving from cell to cell redraws none of it.
+ * The layer of every cell, which steps back as one while `dim`, with the
+ * glow over them. Memoised, so moving from cell to cell redraws none of
+ * it.
  */
 const CellLayer = memo(function CellLayer({
   dim,
+  labels,
+  glow,
   className,
   style,
   ...props
-}: Omit<ComponentProps<'div'>, 'children'> & { dim: boolean }) {
+}: Omit<ComponentProps<'div'>, 'children'> & {
+  dim: boolean
+  labels: CellLabels
+  glow: boolean
+}) {
   const grid = useCells()
+  const valueOf = useCellValue()
+  const top = grid.edges.length - 2
+  const box = cellBox(grid.shape, { column: 0, row: 0 }, grid.columns, grid.rows)
   return (
     <div
       data-slot={`${grid.slot}-cells`}
@@ -631,14 +860,42 @@ const CellLayer = memo(function CellLayer({
       style={
         {
           ...cellLayerVariables(grid.slot),
+          ...labelRoomVariables(labels),
           ...style,
         } as CSSProperties
       }
       {...props}
     >
       {grid.drawn.map((stop) => (
-        <CellGridCell key={stop.key} {...cellProps(grid, stop)} leaving={stop.leaving} />
+        <CellGridCell
+          key={stop.key}
+          {...cellProps(grid, stop, labels)}
+          leaving={stop.leaving}
+        />
       ))}
+      {glow && (
+        // The top step's cells, blurred a third of a cell wide over the rest, so their light
+        // spills onto their neighbours: lighter on a dark page, deeper on a light one. Still, gone
+        // while a cell is lit, so the lit one reads brightest, and gone in forced colours.
+        <div
+          data-slot={`${grid.slot}-glow`}
+          className='absolute inset-0 z-2 opacity-(--cells-glow) mix-blend-multiply transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) in-data-dim:opacity-0 forced-colors:hidden dark:mix-blend-plus-lighter'
+          style={{ filter: `blur(${box.width * 30}cqw)` }}
+        >
+          {grid.drawn.map((stop) => {
+            const hot = stepOf(valueOf(stop), grid.edges) === top
+            return (
+              <CellGridCell
+                key={stop.key}
+                {...cellProps(grid, stop, NO_LABELS)}
+                // A cell that cools fades out of the glow on its wave, as its colour turns.
+                color={hot ? (grid.fillOf(stop)?.color ?? null) : 'transparent'}
+                leaving={stop.leaving}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 })
@@ -646,69 +903,146 @@ const CellLayer = memo(function CellLayer({
 /**
  * The lit cell, drawn over the rest, bright and outlined: one element that
  * moves to each cell lit with a transform, so lighting a cell lays nothing
- * out, and fades on the `layout` role as the cells come back.
+ * out, and fades on the `layout` role as the cells come back. A hexagon's
+ * outline is a hexagon of its own behind it, as square cells' outline is
+ * clear of them by a pixel.
  */
 function LitCell({
   slot,
+  shape,
   column,
   row,
   columns,
   rows,
   color,
+  label,
+  labels,
   on,
   direction,
 }: {
   slot: string
+  shape: CellShape
   column: number
   row: number
   columns: number
   rows: number
   color: string | null
   strength: number
+  label?: string
+  labels: CellLabels
   on: boolean
   direction: 'ltr' | 'rtl'
 }) {
+  const place = cellPlace(shape, cellBox(shape, { column, row }, columns, rows))
+  const sign = direction === 'rtl' ? -1 : 1
+  const hex = shape === 'hex'
+  // A hexagon's outline: 2px wide, clear of the cell by 1px, as square cells' is.
+  const out = hex ? 3 : 0
   return (
     <div
       aria-hidden
       className={cn(plotLayerClassName, 'z-11')}
-      style={cellLayerVariables(slot)}
+      style={{ ...cellLayerVariables(slot), ...labelRoomVariables(labels) }}
     >
       <span
         data-slot={`${slot}-lit-cell`}
         data-off={on ? undefined : ''}
         data-empty={color === null ? '' : undefined}
         className={cn(
-          'absolute start-0 top-0 rounded-[min(calc(var(--control-radius-xs)/3),50%)] bg-(--cell-fill) transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
-          'outline-foreground outline-2 outline-offset-1 forced-colors:outline-[Highlight]',
-          'data-empty:bg-transparent',
-          'forced-colors:bg-[CanvasText] forced-colors:data-empty:bg-transparent',
+          'absolute start-0 top-0 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
+          hex
+            ? cn('bg-foreground forced-colors:bg-[Highlight]', hexClipClassName)
+            : 'outline-foreground rounded-[min(calc(var(--control-radius-xs)/3),50%)] bg-(--cell-fill) outline-2 outline-offset-1 data-empty:bg-transparent forced-colors:bg-[CanvasText] forced-colors:outline-[Highlight] forced-colors:data-empty:bg-transparent',
         )}
         style={
           {
             '--cell-fill': color ?? undefined,
-            '--cell-gap': cellGap(columns, rows),
-            width: `calc(${100 / columns}cqw - var(--cell-gap))`,
-            height: `calc(${100 / rows}cqh - var(--cell-gap))`,
-            transform: `translate(calc(${direction === 'rtl' ? -1 : 1} * (${(column / columns) * 100}cqw + var(--cell-gap) / 2)), calc(${(row / rows) * 100}cqh + var(--cell-gap) / 2))`,
+            '--cell-gap': place.gap,
+            '--label-on': color ?? undefined,
+            width: `calc(${place.width} + ${2 * out}px)`,
+            height: `calc(${place.height} + ${(4 * out) / Math.sqrt(3)}px)`,
+            transform: `translate(calc(${sign} * (${place.start} - ${out}px)), calc(${place.top} - ${(2 * out) / Math.sqrt(3)}px))`,
           } as CSSProperties
         }
-      />
+      >
+        {hex ? (
+          // The 1px clear of the cell, then the cell: hexagons 2px and 3px inside the outline.
+          <span
+            className={cn(
+              'absolute inset-x-0.5 inset-y-[calc(4px/sqrt(3))] bg-(--chart-surface,var(--card)) forced-colors:bg-[Canvas]',
+              hexClipClassName,
+            )}
+          >
+            <span
+              className={cn(
+                'absolute inset-x-px inset-y-[calc(2px/sqrt(3))] bg-(--cell-fill) in-data-empty:bg-transparent forced-colors:bg-[CanvasText] forced-colors:in-data-empty:bg-transparent',
+                hexClipClassName,
+              )}
+            >
+              <CellText text={label} still />
+            </span>
+          </span>
+        ) : (
+          <CellText text={label} still />
+        )}
+      </span>
     </div>
   )
 }
 
 /**
+ * A cell's value, written on it while the cell is drawn at least its
+ * layer's `--cells-label-width` by `--cells-label-height`: a box that is the cell's size while it has the room and
+ * none without, so the browser decides as the plot resizes, and the first
+ * paint is right. It reads on the cell's colour, `--label-on`, and fades in
+ * on the cell's wave when the value changes.
+ */
+function CellText({
+  text,
+  still = false,
+}: {
+  text: string | undefined
+  still?: boolean
+}) {
+  if (text === undefined) return null
+  return (
+    <span
+      className='absolute start-0 top-0 h-full overflow-hidden'
+      style={{ width: 'clamp(0px, (100% - var(--cells-label-width)) * 1000, 100%)' }}
+    >
+      <span
+        className='absolute inset-x-0 top-0 flex items-center justify-center overflow-hidden'
+        style={{ height: 'clamp(0px, (100% - var(--cells-label-height)) * 1000, 100%)' }}
+      >
+        <span
+          key={text}
+          className={cn(
+            'leading-none font-medium whitespace-nowrap tabular-nums',
+            labelOnClassName,
+            !still &&
+              'transition-none group-data-mounted/chart:[transition:opacity_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay)] group-data-mounted/chart:starting:opacity-0 motion-reduce:group-data-mounted/chart:[transition:opacity_var(--motion-draw-duration)_var(--motion-draw-fade-easing)]',
+          )}
+        >
+          {text}
+        </span>
+      </span>
+    </span>
+  )
+}
+
+/**
  * One cell, at `column` and `row` of a grid `columns` by `rows`, in its
- * `fill`, or with none, a dashed outline. Its colour fades on the `draw`
- * role, later and quicker the further `along` it is, its column by default,
- * so a new range sweeps across and every cell lands within one `draw`. One that arrives
- * fades in the same way, over one that leaves from its place, which waits
- * below until the new one has landed. A `still` one, a copy over the rest,
- * is simply there. Memoised, so lighting a cell redraws none of them.
+ * `fill`, or with none, a dashed outline, or a hollow hexagon. Its colour
+ * fades on the `draw` role, later and quicker the further `along` it is,
+ * its column by default, so a new range sweeps across and every cell lands
+ * within one `draw`. One that arrives fades in the same way, over one that
+ * leaves from its place, which waits below until the new one has landed. A
+ * `still` one, a copy over the rest, is simply there. Memoised, so lighting
+ * a cell redraws none of them.
  */
 const CellGridCell = memo(function CellGridCell({
   slot,
+  shape,
   column,
   row,
   columns,
@@ -720,8 +1054,10 @@ const CellGridCell = memo(function CellGridCell({
   along: given,
   image,
   forced,
+  label,
 }: {
   slot: string
+  shape: CellShape
   column: number
   row: number
   columns: number
@@ -737,6 +1073,8 @@ const CellGridCell = memo(function CellGridCell({
   image?: string
   /** The cell's colour under forced colours, a class; the text colour, as strong as its fill, by default. */
   forced?: string
+  /** The value it writes on itself where its layer's room fits it (`useCellLabels`), if any. */
+  label?: string
 }) {
   const along = given ?? (columns <= 1 ? 0 : column / (columns - 1))
   // The pattern shown before this one, kept while it fades out as the new one fades in.
@@ -744,6 +1082,8 @@ const CellGridCell = memo(function CellGridCell({
   if (patterns.now !== image) setPatterns({ now: image, was: patterns.now })
   const shown =
     color === null ? [] : [patterns.was, image].filter((one) => one !== undefined)
+  const hex = shape === 'hex'
+  const place = cellPlace(shape, cellBox(shape, { column, row }, columns, rows))
   return (
     <span
       data-slot={`${slot}-cell`}
@@ -751,29 +1091,46 @@ const CellGridCell = memo(function CellGridCell({
       data-still={still ? '' : undefined}
       data-empty={color === null ? '' : undefined}
       className={cn(
-        'absolute z-1 rounded-[min(calc(var(--control-radius-xs)/3),50%)] bg-(--cell-fill) transition-none group-data-mounted/chart:[transition:background-color_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay),opacity_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay)] motion-reduce:group-data-mounted/chart:[transition:background-color_var(--motion-draw-duration)_var(--motion-draw-fade-easing),opacity_var(--motion-draw-duration)_var(--motion-draw-fade-easing)] group-data-mounted/chart:starting:opacity-0 data-still:transition-none!',
+        'absolute z-1 bg-(--cell-fill) transition-none group-data-mounted/chart:[transition:background-color_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay),opacity_var(--cell-span)_var(--motion-draw-fade-easing)_var(--cell-delay)] motion-reduce:group-data-mounted/chart:[transition:background-color_var(--motion-draw-duration)_var(--motion-draw-fade-easing),opacity_var(--motion-draw-duration)_var(--motion-draw-fade-easing)] group-data-mounted/chart:starting:opacity-0 data-still:transition-none!',
         // A cell that leaves waits under the one arriving in its place, then goes.
         'data-leaving:z-0 data-leaving:opacity-0 group-data-mounted/chart:data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-fade-easing)_var(--motion-draw-duration)]',
-        'data-empty:outline-border data-empty:bg-transparent data-empty:outline-1 data-empty:-outline-offset-1 data-empty:outline-dashed',
-        // Forced colours take the fills away, so each cell is the text colour, as strong as its fill.
-        'forced-colors:bg-[CanvasText] forced-colors:opacity-(--cell-strength) forced-colors:data-empty:bg-transparent forced-colors:data-empty:opacity-100 forced-colors:data-empty:outline-[GrayText]',
+        // Forced colours take the fills away, so each cell is the text colour, as strong as its fill:
+        // the page over it where it is weaker, so a value written on it keeps its contrast.
+        "forced-colors:bg-[CanvasText] forced-colors:before:absolute forced-colors:before:inset-0 forced-colors:before:rounded-[inherit] forced-colors:before:bg-[Canvas] forced-colors:before:opacity-[calc(1-var(--cell-strength))] forced-colors:before:content-[''] forced-colors:data-empty:before:hidden",
+        hex
+          ? cn(
+              // A hexagon with no value is hollow: its outline is the cell, and a hexagon inside it the page.
+              'data-empty:bg-border forced-colors:data-empty:bg-[GrayText]',
+              hexClipClassName,
+            )
+          : 'rounded-[min(calc(var(--control-radius-xs)/3),50%)] data-empty:bg-transparent data-empty:outline-1 data-empty:-outline-offset-1 data-empty:outline-border data-empty:outline-dashed forced-colors:data-empty:bg-transparent forced-colors:data-empty:outline-[GrayText]',
         forced,
       )}
       style={
         {
           '--cell-fill': color ?? undefined,
           '--cell-strength': strength,
+          '--label-on': color ?? undefined,
           // The wave: a cell further along waits longer and fades quicker, so all land within one `draw`.
           '--cell-delay': `calc(var(--motion-draw-duration) * var(--cells-wave) * ${along})`,
           '--cell-span': `calc(var(--motion-draw-duration) * (1 - var(--cells-wave) * ${along}))`,
-          '--cell-gap': cellGap(columns, rows),
-          insetInlineStart: `calc(${(column / columns) * 100}cqw + var(--cell-gap) / 2)`,
-          top: `calc(${(row / rows) * 100}cqh + var(--cell-gap) / 2)`,
-          width: `calc(${100 / columns}cqw - var(--cell-gap))`,
-          height: `calc(${100 / rows}cqh - var(--cell-gap))`,
+          '--cell-gap': place.gap,
+          insetInlineStart: place.start,
+          top: place.top,
+          width: place.width,
+          height: place.height,
         } as CSSProperties
       }
     >
+      {hex && color === null && (
+        // 1px in across its upright edges, and as far across its slanted ones.
+        <span
+          className={cn(
+            'absolute inset-x-px inset-y-[calc(2px/sqrt(3))] bg-(--chart-surface,var(--card)) forced-colors:bg-[Canvas]',
+            hexClipClassName,
+          )}
+        />
+      )}
       {/* A pattern can't fade into another, so each is a layer of its own that fades in or out on the cell's wave. */}
       {shown.map((pattern) => (
         <span
@@ -783,6 +1140,7 @@ const CellGridCell = memo(function CellGridCell({
           style={{ background: pattern }}
         />
       ))}
+      <CellText text={label} still={still} />
     </span>
   )
 })
@@ -923,16 +1281,19 @@ function CellStepLegend({
 
 /**
  * The placeholder while the data loads: the grid's cells, breathing slowly,
- * in the box the cells take, the whole plot by default.
+ * where the cells will land, in the box the cells take, the whole plot by
+ * default.
  */
 function CellGridPlaceholder({
   slot,
+  shape,
   columns,
   rows,
   className,
   style,
 }: {
   slot: string
+  shape: CellShape
   columns: number
   rows: number
   className?: string
@@ -949,31 +1310,42 @@ function CellGridPlaceholder({
       )}
     >
       <div
-        className={cn(
-          'absolute inset-0 grid gap-(--cell-gap)',
-          placeholderBreatheClassName,
-          className,
-        )}
-        style={
-          {
-            ...style,
-            // The cells' own room between them, so the cells land where the placeholder's were.
-            '--cell-gap': cellGap(columns, rows),
-            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-          } as CSSProperties
-        }
+        className={cn('absolute inset-0', placeholderBreatheClassName, className)}
+        style={style}
       >
-        {Array.from({ length: columns * rows }, (_, at) => (
-          <span
-            // oxlint-disable-next-line react/no-array-index-key -- a cell is its place
-            key={at}
-            className={cn(
-              'rounded-[min(calc(var(--control-radius-xs)/3),50%)]',
-              placeholderFillClassName,
-            )}
-          />
-        ))}
+        {Array.from({ length: columns * rows }, (_, at) => {
+          const place = cellPlace(
+            shape,
+            cellBox(
+              shape,
+              { column: at % columns, row: Math.floor(at / columns) },
+              columns,
+              rows,
+            ),
+          )
+          return (
+            <span
+              // oxlint-disable-next-line react/no-array-index-key -- a cell is its place
+              key={at}
+              className={cn(
+                'absolute',
+                shape === 'hex'
+                  ? hexClipClassName
+                  : 'rounded-[min(calc(var(--control-radius-xs)/3),50%)]',
+                placeholderFillClassName,
+              )}
+              style={
+                {
+                  '--cell-gap': place.gap,
+                  insetInlineStart: place.start,
+                  top: place.top,
+                  width: place.width,
+                  height: place.height,
+                } as CSSProperties
+              }
+            />
+          )
+        })}
       </div>
     </div>
   )

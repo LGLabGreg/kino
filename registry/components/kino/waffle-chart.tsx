@@ -336,6 +336,7 @@ function WaffleChart(props: WaffleChartProps) {
           load.placeholder && (
             <CellGridPlaceholder
               slot='waffle-chart'
+              shape='square'
               columns={columns}
               rows={rows}
               className={waffleBoxClassName}
@@ -345,7 +346,7 @@ function WaffleChart(props: WaffleChartProps) {
         }
         {...figureProps(props, waffleChartKeys)}
       >
-        <CellGridSizer columns={columns} rows={rows} />
+        <CellGridSizer shape='square' columns={columns} rows={rows} />
         <WaffleSquares />
         {props.children}
       </ListChartFrame>
@@ -505,6 +506,7 @@ const SquareLayer = memo(function SquareLayer({
               // oxlint-disable-next-line react/no-array-index-key -- a square is its place in the fill
               key={order}
               slot='waffle-chart'
+              shape='square'
               column={square.column}
               row={square.row}
               columns={columns}
@@ -572,6 +574,7 @@ const LitShare = memo(function LitShare({
             // oxlint-disable-next-line react/no-array-index-key -- a square is its place in the fill
             key={order}
             slot='waffle-chart'
+            shape='square'
             column={square.column}
             row={square.row}
             columns={columns}

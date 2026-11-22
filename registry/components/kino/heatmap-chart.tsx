@@ -26,7 +26,10 @@ import {
 } from '@/registry/lib/chart-cells'
 import {
   calendarGrid,
+  type CellShape,
+  columnBand,
   keyedGrid,
+  rowBand,
   stepEdges,
   stepExtent,
   stepOf,
@@ -51,12 +54,14 @@ import { cn } from '@/lib/utils'
 /*
  * The Heatmap chart: values as coloured cells, in a grid named by two of
  * each row's values, such as days by hours, or as a calendar of days, as a
- * year of activity is. Each value takes one of a few steps of its colour,
- * at the value axis's round numbers, and the legend names them. It is drawn
- * on the cells (`chart-cells`) with the grid reader: the cell under the pointer stays bright
- * while the rest step back, the axes mark its column and its row, and the
- * arrows step through the cells by column and by row. A new range fills the
- * cells in a wave along the columns.
+ * year of activity is. The cells are squares, or hexagons in offset rows,
+ * so a dense field of values reads as a surface. Each value takes one of a
+ * few steps of its colour, at the value axis's round numbers, and the
+ * legend names them. It is drawn on the cells (`chart-cells`) with the grid
+ * reader: the cell under the pointer stays bright while the rest step back,
+ * hexagons by how far they are, the axes mark its column and its row, and
+ * the arrows step through the cells by column and by row. A new range fills
+ * the cells in a wave along the columns.
  */
 
 interface HeatmapChartBaseProps extends Omit<
@@ -65,6 +70,8 @@ interface HeatmapChartBaseProps extends Omit<
 > {
   /** The key of each row's value, a key of the config, which colours its cell. */
   value: string
+  /** The cells' shape: squares, or pointy-top hexagons whose odd rows sit half a cell toward the inline end. */
+  cell?: CellShape
 }
 
 /** A grid named by two of each row's values, such as days by hours. */
@@ -105,6 +112,7 @@ type HeatmapChartProps = HeatmapChartBaseProps & (HeatmapGridProps | HeatmapCale
 
 const heatmapChartKeys = [
   'value',
+  'cell',
   'layout',
   'x',
   'y',
@@ -117,6 +125,7 @@ const heatmapChartKeys = [
 ]
 
 function gridLayout(
+  shape: CellShape,
   data: readonly ChartDatum[],
   x: string,
   y: string,
@@ -126,6 +135,8 @@ function gridLayout(
   yValues: readonly unknown[] | undefined,
 ): CellGridLayout {
   const grid = keyedGrid(data, x, y, { columns: xValues, rows: yValues })
+  const columns = grid.columns.length
+  const rows = grid.rows.length
   return {
     cells: laidOutCells(
       grid.cells,
@@ -133,10 +144,16 @@ function gridLayout(
       (cell) => cellKey(cell.at.x, cell.at.y),
       ({ column, row }) => ({ column, row, x: column, y: row }),
     ),
-    columns: grid.columns.length,
-    rowCount: grid.rows.length,
-    x: { names: lineNames(grid.columns), format: xFormat },
-    y: { names: lineNames(grid.rows), format: yFormat },
+    columns,
+    rowCount: rows,
+    x: {
+      names: lineNames(grid.columns, (at) => columnBand(shape, at, at, columns, rows)),
+      format: xFormat,
+    },
+    y: {
+      names: lineNames(grid.rows, (at) => rowBand(shape, at, rows)),
+      format: yFormat,
+    },
   }
 }
 
@@ -149,6 +166,7 @@ function cellKey(x: unknown, y: unknown) {
 }
 
 function calendarLayout(
+  shape: CellShape,
   data: readonly ChartDatum[],
   date: string,
   first: Weekday,
@@ -184,13 +202,16 @@ function calendarLayout(
         key: month,
         value: month,
         index,
-        band: { start: from / columns, size: (to - from + 1) / columns },
+        band: columnBand(shape, from, to, columns, 7),
         leaving: false,
       })),
       format: (value) => monthName(String(value), locale),
     },
     y: {
-      names: lineNames(days.map((_, row) => row)),
+      names: lineNames(
+        days.map((_, row) => row),
+        (row) => rowBand(shape, row, 7),
+      ),
       format: (value) => days[Number(value)] ?? String(value),
     },
   }
@@ -198,12 +219,14 @@ function calendarLayout(
 
 /**
  * The chart's root: it lays the rows out as cells, works out the colour's
- * steps, and sizes the plot so its cells are square, up to a height.
+ * steps, and sizes the plot so its cells keep their shape: squares up to a
+ * height, and hexagons always.
  */
 function HeatmapChart(props: HeatmapChartProps) {
   const {
     data,
     value,
+    cell: shape = 'square',
     config,
     domain,
     tickCount = 5,
@@ -228,9 +251,30 @@ function HeatmapChart(props: HeatmapChartProps) {
   const layout = useMemo(
     () =>
       dateKey !== undefined
-        ? calendarLayout(data, dateKey, first, dateLocale)
-        : gridLayout(data, xKey ?? '', yKey ?? '', xFormat, yFormat, xValues, yValues),
-    [data, dateKey, first, dateLocale, xKey, yKey, xFormat, yFormat, xValues, yValues],
+        ? calendarLayout(shape, data, dateKey, first, dateLocale)
+        : gridLayout(
+            shape,
+            data,
+            xKey ?? '',
+            yKey ?? '',
+            xFormat,
+            yFormat,
+            xValues,
+            yValues,
+          ),
+    [
+      shape,
+      data,
+      dateKey,
+      first,
+      dateLocale,
+      xKey,
+      yKey,
+      xFormat,
+      yFormat,
+      xValues,
+      yValues,
+    ],
   )
   const values = layout.cells.map((cell) => numberOf(cell.datum?.[value]))
   const scale = linearScale(stepExtent(values), {
@@ -257,6 +301,7 @@ function HeatmapChart(props: HeatmapChartProps) {
     slot: 'heatmap-chart',
     cells: chart.cells,
     drawn: chart.drawn,
+    shape,
     columns,
     rows,
     value,
@@ -273,8 +318,8 @@ function HeatmapChart(props: HeatmapChartProps) {
     current: chart.cells,
     layout: squareLayout,
     direction: state.direction,
-    hit: (point) => cellAt(point, chart.cells, columns, rows, state.direction),
-    anchor: (stop) => cellAnchor(stop, columns, rows, state.direction),
+    hit: (point) => cellAt(point, chart.cells, shape, columns, rows, state.direction),
+    anchor: (stop) => cellAnchor(stop, shape, columns, rows, state.direction),
     words: {
       describe: (stop) =>
         `${pickedName(stop.value, chart.picked === stop.key, state.messages)}: ${valueName} ${valueText(stop)}`,
@@ -318,12 +363,17 @@ function HeatmapChart(props: HeatmapChartProps) {
         className={cn('h-auto', className)}
         placeholder={
           chart.placeholder && (
-            <CellGridPlaceholder slot='heatmap-chart' columns={columns} rows={rows} />
+            <CellGridPlaceholder
+              slot='heatmap-chart'
+              shape={shape}
+              columns={columns}
+              rows={rows}
+            />
           )
         }
         {...figureProps(props, heatmapChartKeys)}
       >
-        <CellGridSizer columns={columns} rows={rows} />
+        <CellGridSizer shape={shape} columns={columns} rows={rows} />
         {children}
       </CellsChartFrame>
     </StepLegendContext>
@@ -332,11 +382,18 @@ function HeatmapChart(props: HeatmapChartProps) {
 
 /**
  * The cells: a cell for each column and row, in its step of the value's
- * colour, and a dashed outline where there is no value. While a cell is
- * lit, the rest step back and it is outlined; new values fill the cells in
- * a wave along the columns.
+ * colour, and a dashed outline, or a hollow hexagon, where there is no
+ * value. While a cell is lit, the rest step back and it is outlined; new
+ * values fill the cells in a wave along the columns.
  */
-function Heatmap(props: Omit<ComponentProps<'div'>, 'children'>) {
+function Heatmap(
+  props: Omit<ComponentProps<'div'>, 'children'> & {
+    /** Each cell writes its value on itself where it fits. */
+    label?: boolean
+    /** The cells in the colour’s top step glow onto their neighbours. */
+    glow?: boolean
+  },
+) {
   return <CellGridCells {...props} />
 }
 

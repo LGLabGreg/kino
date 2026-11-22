@@ -410,6 +410,20 @@ export function labelsMeet(a: Span, b: Span, gap = 4): boolean {
 }
 
 /**
+ * How far apart a category axis's names sit, as a share of the axis: an even
+ * share each, or less where they don't fill it, as the columns of a grid of
+ * hexagons don't, half a cell short of its end.
+ */
+export function namePitch(names: readonly { centre: number }[]): number {
+  if (names.length === 0) return 0
+  const even = 1 / names.length
+  if (names.length === 1) return even
+  // Evenly spread names sit an even share apart, give or take the float's last digits.
+  const apart = Math.abs(names[1]!.centre - names[0]!.centre)
+  return apart < even - 1e-9 ? apart : even
+}
+
+/**
  * The names a category axis `length` px long shows, as `skipped` indexes, and
  * the room each has, in px: every few in a long run, each `minLength` px or
  * more apart, and none that would meet the lit name or the last one shown, as
@@ -421,8 +435,10 @@ export function axisNames(
   length: number,
   { minLength, gap, lit = null }: { minLength: number; gap: number; lit?: number | null },
 ): { every: number; room: number; skipped: Set<number> } {
-  const every = labelStep(names.length, length, minLength)
-  const room = names.length === 0 ? 0 : Math.max(0, (length / names.length) * every - gap)
+  const pitch = namePitch(names) * length
+  // Less a hair, so a name that fits exactly isn't pushed to the next step by the float's last digits.
+  const every = pitch <= 0 ? 1 : Math.max(1, Math.ceil(minLength / pitch - 1e-9))
+  const room = names.length === 0 ? 0 : Math.max(0, pitch * every - gap)
   const skipped = new Set<number>()
   const litName = lit === null ? undefined : names[lit]
   const litBox = litName ? labelBox(litName.centre, litName.width, length) : null
