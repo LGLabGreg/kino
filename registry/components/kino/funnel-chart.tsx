@@ -14,16 +14,18 @@ import {
   placeholderClip,
 } from '@/registry/lib/chart-bars'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
   type CategoryChartProps,
-  type ChartCategory,
-  type ChartContextValue,
   type EntrancePhase,
   figureProps,
+  useChartActive,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  CategoryChartFrame,
+  type ChartCategory,
+  type ChartContextValue,
   useCategoryChart,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import {
   cascadeAt,

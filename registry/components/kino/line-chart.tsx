@@ -1,13 +1,14 @@
 'use client'
 
+import { figureProps, useDeclared } from '@/registry/lib/chart-base'
 import {
   type CategoryChartInput,
   type CartesianChartProps,
   type ChartPartDeclaration,
-  figureProps,
   type LiveChartProps,
   useCartesianChart,
-  useDeclared,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import {
   framePoints,
@@ -43,7 +44,7 @@ interface LineChartProps extends CartesianChartProps, LiveChartProps {
   zero?: boolean
 }
 
-const lineChartKeys = ['entrance', 'zero']
+const lineChartKeys = [...cartesianChartKeys, 'entrance', 'zero']
 
 /**
  * The chart's root: it lays out the frame its parts draw in, places each
@@ -118,7 +119,7 @@ type LineProps = LineSeriesProps
  * category, a window that glides with the axis's pill.
  */
 function Line(props: LineProps) {
-  useDeclared('Line', Line.declare(props))
+  useDeclared('Line', Line.declare(props), cartesianSignature)
   return <LineSeries {...props} />
 }
 

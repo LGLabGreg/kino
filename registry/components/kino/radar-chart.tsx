@@ -1,18 +1,20 @@
 'use client'
 
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
   type CategoryChartProps,
-  type ChartCategory,
-  type ChartContextValue,
   figureProps,
   tickMove,
-  useCategoryChart,
-  useChart,
   useChartActive,
   useRegistry,
   useTicks,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  CategoryChartFrame,
+  type ChartCategory,
+  type ChartContextValue,
+  useCategoryChart,
+  useChart,
 } from '@/registry/lib/chart-core'
 import {
   type ChartDatum,
@@ -859,7 +861,7 @@ function RadarGrid({
   const layer = useRef<HTMLDivElement>(null)
   const litSpoke = useRef<SVGLineElement>(null)
   const fromRest = useFromRest(spotlit)
-  const ticks = useTicks()
+  const ticks = useTicks(chart.frame.y.value.scale)
   const framePath = useRef<SVGPathElement>(null)
   const id = useId().replaceAll(':', '')
   const { edge, centre } = radar
@@ -1119,7 +1121,7 @@ function RadarValueAxis({
   const chart = useChart()
   const radar = useRadar()
   const layer = useRef<HTMLDivElement>(null)
-  const all = useTicks()
+  const all = useTicks(chart.frame.y.value.scale)
   const own = chart.format
   const write = formatterOf(
     chart.locale,

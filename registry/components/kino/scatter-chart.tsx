@@ -1,20 +1,24 @@
 'use client'
 
 import {
-  type CategoryChartInput,
   type CategoryChartProps,
-  type ChartCategory,
-  type ChartContextValue,
-  type ChartPartDeclaration,
   figureProps,
-  CategoryChartFrame,
   numberAxis,
   plotPlace,
-  useCartesianChart,
-  useChart,
   useChartActive,
   useDeclared,
   plotFraction,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  type ChartCategory,
+  type ChartContextValue,
+  type ChartPartDeclaration,
+  CategoryChartFrame,
+  useCartesianChart,
+  useChart,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import {
   allWhole,
@@ -87,6 +91,7 @@ interface ScatterChartProps extends Omit<CategoryChartProps, 'ordered' | 'patter
 }
 
 const scatterChartKeys = [
+  ...cartesianChartKeys,
   'x',
   'y',
   'size',
@@ -440,7 +445,7 @@ type ScatterProps = Omit<ComponentProps<'div'>, 'children'> & {
 
 function Scatter(props: ScatterProps) {
   const { dataKey, ...rest } = props
-  useDeclared('Scatter', Scatter.declare(props))
+  useDeclared('Scatter', Scatter.declare(props), cartesianSignature)
   const chart = useChart()
   const scatter = useScatter()
   const { spotlit } = useChartActive()

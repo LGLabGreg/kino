@@ -1,13 +1,12 @@
 'use client'
 
+import { type ChartAxisName, useChartActive } from '@/registry/lib/chart-base'
 import {
-  type ChartAxisName,
   type ChartCategory,
   type CategoryReaderParts,
   type ChartContextValue,
   type ChartGridAxis,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import { type LaidCell, stepOf, stepStrength } from '@/registry/lib/chart-grid'
 import {

@@ -7,14 +7,13 @@ import {
   fillPeak,
   paintFill,
 } from '@/registry/lib/area-fill'
+import { type EntrancePhase, useChartActive } from '@/registry/lib/chart-base'
 import {
   CategoryChartFrame,
   type ChartCategory,
   type CategoryChartInput,
   type ChartContextValue,
-  type EntrancePhase,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import { type CartesianModel, markLayer } from '@/registry/lib/chart-frame'
 import { seriesPoints } from '@/registry/lib/chart-line-marks'

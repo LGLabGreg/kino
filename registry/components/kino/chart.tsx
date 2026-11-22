@@ -2,27 +2,26 @@
 
 import { TooltipPopup } from '@/registry/components/kino/tooltip'
 import {
+  type AxisNames,
   axisLayerClassName,
   axisSlide,
-  plotOffset,
+  type ChartAxesValue,
   type ChartAxis,
-  type ChartAxisName,
-  type ChartCategory,
-  type ChartContextValue,
-  type ChartPartDeclaration,
+  type ChartFrame,
   ChartTooltipContent,
   ChartTooltipTotal,
   numberAxis,
+  plotOffset,
   slideLine,
-  timeAxis,
+  stickTo,
   TICK_SPACING,
   tickMove,
-  useChart,
-  useChartActive,
+  timeAxis,
+  useChartAxes,
   useDeclared,
   useTicks,
-  stickTo,
-} from '@/registry/lib/chart-core'
+} from '@/registry/lib/chart-base'
+import { cartesianSignature, type ChartPartDeclaration } from '@/registry/lib/chart-core'
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import { ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import {
@@ -30,7 +29,6 @@ import {
   labelBox,
   labelsMeet,
   type ChartSummary,
-  numberOf,
   physicalStart,
   summaryOf,
 } from '@/registry/lib/chart-math'
@@ -39,6 +37,7 @@ import {
   ChartGroup,
   ChartLegendToggles,
   formatterOf,
+  type ChartItem,
   type ChartPoint,
   plotLayerClassName,
   tooltipTriggerId,
@@ -47,7 +46,7 @@ import {
   useChartRootValue,
 } from '@/registry/lib/chart-root'
 import { bandCentre, tickLadder, timeLadder } from '@/registry/lib/chart-scale'
-import { type ChartTarget, indexOfKey, sameTarget } from '@/registry/lib/chart-state'
+import { type ChartTarget, sameTarget } from '@/registry/lib/chart-state'
 import { timeTickLabel } from '@/registry/lib/dates'
 import { GlideGroupMemory } from '@/registry/lib/glide'
 import {
@@ -86,7 +85,8 @@ import { cn } from '@/lib/utils'
  * changes, and new ones fade in from where they would have been.
  */
 function ChartGrid({ className, ...props }: Omit<ComponentProps<'div'>, 'children'>) {
-  const chart = useChart()
+  const axes = useChartAxes()
+  const frame = framed(axes, 'ChartGrid')
   const valueLayer = useRef<HTMLDivElement>(null)
   const xLayer = useRef<HTMLDivElement>(null)
   return (
@@ -99,11 +99,9 @@ function ChartGrid({ className, ...props }: Omit<ComponentProps<'div'>, 'childre
       <GridLines
         layer={valueLayer}
         axis={VALUE_AXIS}
-        line={chart.orientation === 'vertical' ? 'y' : 'x'}
+        line={axes.orientation === 'vertical' ? 'y' : 'x'}
       />
-      {chart.frame.x.scale.kind === 'linear' && (
-        <GridLines layer={xLayer} axis='x' line='x' />
-      )}
+      {frame.x.scale.kind === 'linear' && <GridLines layer={xLayer} axis='x' line='x' />}
     </div>
   )
 }
@@ -118,16 +116,17 @@ function GridLines({
   axis: ChartAxis
   line: 'x' | 'y'
 }) {
-  const chart = useChart()
-  const frame = numberAxis(chart, axis)
+  const { status, direction } = useChartRootValue()
+  const axes = useChartAxes()
+  const frame = numberAxis({ frame: framed(axes, 'ChartGrid') }, axis)
   const ladder = frame && tickLadder(frame.scale, tickSpacing[line])
-  const ticks = useTicks(axis, ladder?.ticks)
+  const ticks = useTicks(frame?.scale ?? null, ladder?.ticks)
   const id = useId()
   if (!frame || !ladder) return null
   const { scale, previous } = frame
   return (
     <div ref={layer} data-ticks={id} className='absolute inset-0 [container-type:size]'>
-      {chart.status === 'ready' && (
+      {status === 'ready' && (
         <TickSteps
           id={id}
           ladder={ladder}
@@ -135,30 +134,31 @@ function GridLines({
           line={line}
         />
       )}
-      {chart.status === 'ready' &&
+      {status === 'ready' &&
         ticks.map(({ value: tick, leaving }) => (
           <div
             key={tick}
             data-leaving={leaving ? '' : undefined}
             data-tick={tick}
             // The line at the axis's start sits on the plot's edge, unless the chart keeps an inset.
-            data-edge={tick === scale.domain[0] && !chart.inset ? '' : undefined}
+            data-edge={tick === scale.domain[0] && !axes.inset ? '' : undefined}
             className={cn(
               'border-border border-dashed data-edge:opacity-0 forced-colors:border-[GrayText]',
               tickMove,
               slideLine[line],
               line === 'y' ? 'border-t' : 'border-l',
             )}
-            style={axisSlide(
-              line,
-              scale.place(tick),
-              previous.place(tick),
-              chart.direction,
-            )}
+            style={axisSlide(line, scale.place(tick), previous.place(tick), direction)}
           />
         ))}
     </div>
   )
+}
+
+/** The chart's scales, for a part that reads them, which throws on a chart that has none, such as the Heatmap. */
+function framed(axes: ChartAxesValue, part: string): ChartFrame {
+  if (!axes.frame) throw new Error(`\`${part}\` needs a chart with a value axis.`)
+  return axes.frame
 }
 
 /** How far apart ticks stand at least, by the way they stack: values one over another, or side by side. */
@@ -234,14 +234,18 @@ function ChartYAxis({
   /** The value axis it shows, by the id series name in the config; the chart's own by default. */
   axis?: string
 }) {
-  const { orientation, grid } = useChart()
-  const values = !grid && orientation === 'vertical'
-  if (!values) categoriesOnly('ChartYAxis', axis)
-  return values ? (
-    <ValueAxis side={side} format={format} axis={axis} {...props} />
-  ) : (
-    // A grid of cells names its rows down the side, and lying bars their categories.
-    <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
+  const { names } = useChartAxes()
+  if (names.y === null)
+    return <ValueAxis side={side} format={format} axis={axis} {...props} />
+  categoriesOnly('ChartYAxis', axis)
+  // A grid of cells names its rows down the side, and lying bars their categories.
+  return (
+    <CategoryAxis
+      side={side}
+      names={names.y}
+      categoryFormat={categoryFormat}
+      {...props}
+    />
   )
 }
 
@@ -269,20 +273,35 @@ function ChartXAxis({
   /** On lying bars, the value axis it shows, by the id series name in the config; the chart's own by default. */
   axis?: string
 }) {
-  const { orientation, grid, frame } = useChart()
-  const numbers = !grid && frame.x.scale.kind === 'linear'
-  const values = !grid && !numbers && orientation === 'horizontal'
-  if (!values) categoriesOnly('ChartXAxis', axis)
-  if (frame.x.scale.kind === 'time')
+  const { names, frame } = useChartAxes()
+  const along = frame?.x.scale.kind
+  if (along === 'time' || along === 'linear' || names.x !== null) {
+    categoriesOnly('ChartXAxis', axis)
+  }
+  if (along === 'time') {
+    if (names.x === null) throw new Error('`TimeAxis` names the times along x.')
     return (
-      <TimeAxis side={side} format={format} categoryFormat={categoryFormat} {...props} />
+      <TimeAxis
+        side={side}
+        names={names.x}
+        format={format}
+        categoryFormat={categoryFormat}
+        {...props}
+      />
     )
-  if (numbers) return <ValueAxis side={side} format={format} axis='x' {...props} />
-  return values ? (
-    <ValueAxis side={side} format={format} axis={axis} {...props} />
-  ) : (
-    // A grid of cells names its columns along it, and upright bars their categories.
-    <CategoryAxis side={side} categoryFormat={categoryFormat} {...props} />
+  }
+  if (along === 'linear')
+    return <ValueAxis side={side} format={format} axis='x' {...props} />
+  if (names.x === null)
+    return <ValueAxis side={side} format={format} axis={axis} {...props} />
+  // A grid of cells names its columns along it, and upright bars their categories.
+  return (
+    <CategoryAxis
+      side={side}
+      names={names.x}
+      categoryFormat={categoryFormat}
+      {...props}
+    />
   )
 }
 
@@ -306,7 +325,7 @@ function AxisFrame({
   label?: ReactNode
   slot: string
 }) {
-  const { direction } = useChart()
+  const { direction } = useChartRootValue()
   const across = side === 'start' || side === 'end'
   const title = label && (
     <span
@@ -355,14 +374,15 @@ function ValueAxis({
   className,
   ...props
 }: AxisProps & { side: AxisSide; axis?: ChartAxis }) {
-  const chart = useChart()
-  const { markerOf } = useChartRootValue()
-  const { stack, locale, status, direction } = chart
+  const chart = useChartRootValue()
+  const axes = useChartAxes()
+  const { markerOf, locale, status, direction } = chart
   const id = useId()
-  const frame = numberAxis(chart, axis)
+  const chartFrame = framed(axes, 'ValueAxis')
+  const frame = numberAxis({ frame: chartFrame }, axis)
   const across = side === 'start' || side === 'end'
   const ladder = frame && tickLadder(frame.scale, tickSpacing[across ? 'y' : 'x'])
-  const all = useTicks(axis, ladder?.ticks)
+  const all = useTicks(frame?.scale ?? null, ladder?.ticks)
   if (!frame || !ladder) {
     throw new Error(
       `The chart has no value axis \`${axis}\`: no series in its config names it.`,
@@ -374,7 +394,7 @@ function ValueAxis({
   const write = formatterOf(
     locale,
     format ??
-      (stack === 'expand' && axis === VALUE_AXIS
+      (axes.percent && axis === VALUE_AXIS
         ? { style: 'percent' }
         : typeof own === 'function'
           ? own
@@ -389,12 +409,12 @@ function ValueAxis({
   const layer = useRef<HTMLSpanElement>(null)
   // Beside another value axis, one that holds a single series is titled with it and its key, so
   // which axis reads which series never rests on colour.
-  const onAxis = chart.series.filter((key) => chart.frame.axisOf(key) === axis)
+  const onAxis = chart.series.filter((key) => chartFrame.axisOf(key) === axis)
   // An axis whose series are all hidden reads nothing, so its ticks fade until one shows again.
   const reads = axis === 'x' || onAxis.some((key) => !chart.hidden.includes(key))
   const ticks = status === 'ready' && reads ? all : []
   const keyed =
-    axis !== 'x' && Object.keys(chart.frame.y).length > 1 && onAxis.length === 1
+    axis !== 'x' && Object.keys(chartFrame.y).length > 1 && onAxis.length === 1
       ? onAxis[0]
       : undefined
   const title = label ?? frame.label ?? (keyed && (chart.config[keyed]?.label ?? keyed))
@@ -503,23 +523,25 @@ const TIME_TICK_GAP = 16
  */
 function TimeAxis({
   side,
+  names,
   format,
   categoryFormat,
   label,
   className,
   ...props
-}: AxisProps & { side: 'top' | 'bottom' }) {
-  const chart = useChart()
-  const { locale, status, direction, textWidth, categoryText } = chart
-  const frame = timeAxis(chart)
+}: AxisProps & { side: 'top' | 'bottom'; names: AxisNames }) {
+  const { locale, status, direction, textWidth } = useChartRootValue()
+  const axes = useChartAxes()
+  const chartFrame = framed(axes, 'TimeAxis')
+  const frame = timeAxis({ frame: chartFrame })
   const own = format ?? frame?.format
   const zone = frame?.scale.timeZone ?? 'UTC'
   const write =
     typeof own === 'function' ? own : (time: number) => timeTickLabel(time, locale, zone)
   const tickWidth = (tick: number) => textWidth(write(tick))
   const ladder = frame && timeLadder(frame.scale, tickWidth, TIME_TICK_GAP)
-  const all = useTicks('x', ladder?.ticks)
-  const { current, spotlit } = useAxisNames(chart, 'x')
+  const all = useTicks(frame?.scale ?? null, ladder?.ticks)
+  const { current, spotlit, format: categoryText } = useAxisNames(names)
   const ref = useRef<HTMLDivElement>(null)
   const pill = useRef<HTMLSpanElement>(null)
   const target = useRef<HTMLSpanElement>(null)
@@ -557,7 +579,7 @@ function TimeAxis({
   const { scale } = frame
   // A window of time scrolls by its layer: a tick stays where its time is, with nothing to
   // slide, and goes past the axis's ends rather than being kept inside them.
-  const live = chart.frame.live
+  const live = chartFrame.live
   const previous = live ? scale : frame.previous
   // How far the layer has moved, which a held plot shows still, as the lit name is shown.
   const along = live ? live.offset() : 0
@@ -726,16 +748,15 @@ const LABEL_GAP = 6
  */
 function CategoryAxis({
   side,
+  names: axisNamesOf,
   categoryFormat,
   label,
   className,
   ...props
-}: AxisProps & { side: AxisSide }) {
-  const chart = useChart()
-  const { direction, status, textWidth, categoryText } = chart
+}: AxisProps & { side: AxisSide; names: AxisNames }) {
+  const { direction, status, textWidth } = useChartRootValue()
   const across = side === 'start' || side === 'end'
-  const axis = across === (chart.orientation === 'vertical') ? 'y' : 'x'
-  const { names: all, current, spotlit, active } = useAxisNames(chart, axis)
+  const { all, current, spotlit, active, format, keepInside } = useAxisNames(axisNamesOf)
   const ref = useRef<HTMLDivElement>(null)
   const pill = useRef<HTMLSpanElement>(null)
   const names = useRef(new Map<string, HTMLElement>())
@@ -772,9 +793,9 @@ function CategoryAxis({
     const key = spotlit === null ? undefined : current[spotlit]?.key
     highlight.current?.move(key === undefined ? null : (names.current.get(key) ?? null))
   }, [spotlit, current, length])
-  const write = categoryFormat ?? chart.grid?.[axis].format ?? categoryText
+  const write = categoryFormat ?? format
   // How wide a name is with its padding, measured in the chart's font.
-  const nameLength = (name: ChartAxisName) => textWidth(write(name.value)) + 12
+  const nameLength = (name: AxisNames['all'][number]) => textWidth(write(name.value)) + 12
   // A few categories each keep a name, cut short if they must; a long run, such as days,
   // shows every few in full instead.
   const longest =
@@ -782,7 +803,7 @@ function CategoryAxis({
       ? Math.max(MIN_LABEL, ...current.map(nameLength))
       : MIN_LABEL
   const shown = status === 'loading' ? [] : all
-  const centreOf = (name: ChartAxisName) =>
+  const centreOf = (name: AxisNames['all'][number]) =>
     across
       ? name.band.start + name.band.size / 2
       : physicalStart(name.band, 'inline', direction) + name.band.size / 2
@@ -854,7 +875,7 @@ function CategoryAxis({
                 // grid's rows are each a name's height or more, so each centres on its row, and
                 // names that `AcrossAxisNames` spaces never meet at the ends.
                 translate: across
-                  ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} ${chart.grid ? `calc(${centre * 100}cqh - 50%)` : `clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)`}`
+                  ? `${(side === 'start') === (direction === 'ltr') ? 'calc(100cqw - 100% - 0.125rem)' : '0.125rem'} ${keepInside ? `clamp(0px, ${centre * 100}cqh - 50%, 100cqh - 100%)` : `calc(${centre * 100}cqh - 50%)`}`
                   : `clamp(0px, ${centre * 100}cqw - 50%, 100cqw - 100%) 0`,
                 // Before the axis is measured, `UnmeasuredAxisNames` gives the room.
                 maxWidth: across || isLit || length === 0 ? undefined : `${room}px`,
@@ -934,26 +955,16 @@ function CategoryAxis({
 }
 
 /**
- * The names on a category axis, and which is under the pointer or the
- * focus (`active`) and which stays lit (`spotlit`), by place among the names
- * still in the data: the categories, or on a grid of cells, the names of
- * its columns (`x`) or its rows (`y`) over the cell lit.
+ * The names on an axis that names things, and which is under the pointer or
+ * the focus (`active`) and which stays lit (`spotlit`), by place among the
+ * names still in the data.
  */
-function useAxisNames(chart: ChartContextValue, axis: 'x' | 'y') {
-  const { spotlit, active } = useChartActive()
-  const { grid } = chart
-  if (!grid) {
-    return { names: chart.categories, current: chart.current, spotlit, active }
-  }
-  const { nameOf } = grid[axis]
-  // A grid's names come from its layout, so they wait for the cells as a category's do.
-  const names =
-    chart.status === 'ready' || chart.status === 'hidden' ? grid[axis].names : []
+function useAxisNames(names: AxisNames) {
+  const { focus, spotlit } = useChartFocus()
   return {
-    names,
-    current: names,
-    spotlit: spotlit === null ? null : nameOf(spotlit),
-    active: active === null ? null : nameOf(active),
+    ...names,
+    spotlit: spotlit === null ? null : names.nameOf(spotlit),
+    active: focus === null ? null : names.nameOf(focus),
   }
 }
 
@@ -1052,30 +1063,12 @@ const NAMES_SAMPLE_UP_TO = 2560
 
 /** The value a reference line marks: worked out from the data, or the number given. */
 function referenceValue(
-  chart: ChartContextValue,
+  axes: ChartAxesValue,
   value: number | ChartSummary | undefined,
   axis: ChartAxis,
 ) {
   if (value === undefined || typeof value === 'number') return value ?? null
-  const { current, series, hidden, stack, frame } = chart
-  const onX = axis === 'x'
-  // Only the series read against the axis the line marks.
-  const shown = series.filter(
-    (key) => !hidden.includes(key) && frame.axisOf(key) === axis,
-  )
-  // Points placed by both values each have a value on either axis.
-  const values =
-    frame.x.scale.kind === 'linear'
-      ? current.map((category) => {
-          const point = chart.xyOf(category.index)?.value
-          return point ? (onX ? point.x : point.y) : null
-        })
-      : stack === 'none'
-        ? current.flatMap((category) => shown.map((key) => category.datum[key]))
-        : current.map((category) =>
-            shown.reduce((sum, key) => sum + (numberOf(category.datum[key]) ?? 0), 0),
-          )
-  return summaryOf(values, value)
+  return summaryOf(axes.summaryValues(axis), value)
 }
 
 /** The axis a reference's values are on: the chart's own value axis unless it names another. */
@@ -1087,17 +1080,18 @@ function referenceOn(axis: ChartAxis | undefined): ChartAxis {
  * The frame's axis a reference marks: `'x'` on a chart whose x is a
  * number, or the value axis named, which an x of categories means too.
  */
-function referenceAxis(chart: ChartContextValue, given: ChartAxis | undefined) {
+function referenceAxis(axes: ChartAxesValue, part: string, given: ChartAxis | undefined) {
+  const chartFrame = framed(axes, part)
   const axis = referenceOn(given)
-  const onX = axis === 'x' && chart.frame.x.scale.kind === 'linear'
+  const onX = axis === 'x' && chartFrame.x.scale.kind === 'linear'
   const id = onX ? 'x' : axis === 'x' ? VALUE_AXIS : axis
-  const frame = numberAxis(chart, id)
+  const frame = numberAxis({ frame: chartFrame }, id)
   if (!frame) {
     throw new Error(
       `The chart has no value axis \`${axis}\` for its reference: no series in its config names it.`,
     )
   }
-  return { id, onX, ...frame }
+  return { id, onX, live: chartFrame.live, ...frame }
 }
 
 /** A reference's name, which crossfades as it changes while the line slides. */
@@ -1169,11 +1163,18 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
     className,
     ...rest
   } = props
-  useDeclared('ChartReferenceLine', ChartReferenceLine.declare(props))
-  const chart = useChart()
-  const { orientation, direction, status, current } = chart
-  const { id, onX, scale, previous } = referenceAxis(chart, axis)
-  const marked = referenceValue(chart, value, id)
+  useDeclared('ChartReferenceLine', ChartReferenceLine.declare(props), cartesianSignature)
+  const { direction, status } = useChartRootValue()
+  const axes = useChartAxes()
+  const { orientation } = axes
+  const {
+    id,
+    onX,
+    scale,
+    previous,
+    live: frameLive,
+  } = referenceAxis(axes, 'ChartReferenceLine', axis)
+  const marked = referenceValue(axes, value, id)
   // Which way the line runs: a value on an x axis, or a category along one, makes a line
   // down the plot, whose label sits above it.
   const along =
@@ -1191,7 +1192,7 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
   const named = typeof label === 'function' ? marked !== null && label(marked) : label
   // A line down a live plot scrolls with its rows, so its label centres on it rather than being
   // kept inside an axis that moves under it.
-  const live = along === 'x' ? chart.frame.live : null
+  const live = along === 'x' ? frameLive : null
   const scrollWith = (node: ReactNode) => (
     <ChartLiveLayer live={live} direction={direction} reach='label' fade='ends'>
       {node}
@@ -1203,7 +1204,9 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
   const labelAcross = live ? 'left-0 [translate:-50%_0]' : lineLabelAcross
 
   if (category !== undefined) {
-    const at = current.find((c) => c.key === category)
+    const at = axes.names[orientation === 'vertical' ? 'x' : 'y']?.current.find(
+      (name) => name.key === category,
+    )
     if (!at) return room
     // Across the value axis, at the category's centre.
     const line = along
@@ -1332,12 +1335,12 @@ type ChartReferenceAreaProps = Omit<ComponentProps<'div'>, 'children'> & {
 
 function ChartReferenceArea(props: ChartReferenceAreaProps) {
   const { from, to, axis, label, className, ...rest } = props
-  useDeclared('ChartReferenceArea', ChartReferenceArea.declare(props))
-  const chart = useChart()
-  const { direction, status } = chart
-  const { onX, scale } = referenceAxis(chart, axis)
+  useDeclared('ChartReferenceArea', ChartReferenceArea.declare(props), cartesianSignature)
+  const { direction, status } = useChartRootValue()
+  const axes = useChartAxes()
+  const { onX, scale } = referenceAxis(axes, 'ChartReferenceArea', axis)
   // A band on an x axis runs down the plot, as a lying bar chart's values do.
-  const orientation = onX ? 'horizontal' : chart.orientation
+  const orientation = onX ? 'horizontal' : axes.orientation
   if (status !== 'ready') return null
   const low = scale.place(Math.min(from, to))
   const high = scale.place(Math.max(from, to))
@@ -1418,9 +1421,16 @@ function ChartLegend({
   className,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & { position?: 'top' | 'bottom' }) {
-  const { series, config, hidden, setHidden, setEmphasis, patternOf, messages } =
-    useChart()
-  const { markerOf } = useChartRootValue()
+  const {
+    series,
+    config,
+    hidden,
+    setHidden,
+    setEmphasis,
+    patternOf,
+    messages,
+    markerOf,
+  } = useChartRootValue()
   return (
     <div
       data-slot='chart-legend'
@@ -1446,11 +1456,12 @@ function ChartLegend({
   )
 }
 
-/** What a tooltip of your own gets for the category it shows. */
+/** What a tooltip of your own gets for what it shows. */
 interface ChartTooltipItem {
-  /** The category's place in the data. */
+  /** Its place in the data. */
   index: number
-  category: ChartCategory
+  /** What it shows: its key, its value under the chart's `index`, and its row, which is null for what isn't a row of the data. */
+  category: ChartItem
 }
 
 type ChartTooltipProps = Omit<
@@ -1478,25 +1489,23 @@ function ChartTooltip({
   children,
   ...props
 }: ChartTooltipProps) {
-  const { setActive } = useChartActive()
-  const chart = useChart()
-  const { reader } = useChartRootValue()
-  const { focus } = useChartFocus()
-  const { tooltip, id, status, stack, orientation, plot, current } = chart
-  const open = focus !== null && status === 'ready'
+  const { reader, tooltip, id, status, plot } = useChartRootValue()
+  const { focus, setFocus } = useChartFocus()
+  const { browse } = reader
+  const open = browse !== null && focus !== null && status === 'ready'
   // What it last showed, which it keeps showing while it closes.
   const [shown, setShown] = useState<ChartTarget | null>(null)
   if (focus !== null && !sameTarget(focus, shown)) setShown(focus)
+  if (!browse) return null
   const target = focus ?? shown
-  const index =
-    target === null || target.kind === 'node'
+  const item = target === null ? null : reader.item(target)
+  const content =
+    target === null
       ? null
-      : indexOfKey(
-          current.map((category) => category.key),
-          target.key,
-        )
-  const category = index === null ? undefined : current[index]
-  const point = target === null ? null : reader.anchor(target)
+      : children && item
+        ? children({ index: item.index, category: item })
+        : browse.tooltip(target)
+  const point = target === null ? null : browse.anchor(target)
   return (
     <GlideGroupMemory>
       <TooltipPrimitive.Root
@@ -1509,7 +1518,7 @@ function ChartTooltip({
           // away from the chart close it here. A press on the chart, or on another chart in its
           // group, leaves the values showing.
           if (details.reason === 'escape-key') {
-            setActive(null)
+            setFocus(null)
             return
           }
           if (details.reason !== 'outside-press') return
@@ -1520,29 +1529,21 @@ function ChartTooltip({
             (figure?.contains(pressed) || pressed.closest("[data-slot='chart-columns']"))
           )
             return
-          setActive(null)
+          setFocus(null)
         }}
         disableHoverablePopup
       >
-        {target !== null && index !== null && category && (
+        {target !== null && (item !== null || content != null) && (
           <ChartTooltipPopup
             // A new side starts the popup afresh there, rather than sliding it across the marks.
             key={point?.side}
             point={point}
-            side={
-              side ?? point?.side ?? (orientation === 'vertical' ? 'top' : 'inline-end')
-            }
+            side={side ?? point?.side}
             align={align}
             className={className}
             {...props}
           >
-            {children ? (
-              children({ index, category })
-            ) : (
-              <ChartTooltipTotal value={total ?? stack !== 'none'}>
-                {reader.tooltip(target)}
-              </ChartTooltipTotal>
-            )}
+            <ChartTooltipTotal value={total}>{content}</ChartTooltipTotal>
           </ChartTooltipPopup>
         )}
       </TooltipPrimitive.Root>
@@ -1560,7 +1561,7 @@ function ChartTooltipPopup({
   className,
   ...props
 }: ComponentProps<typeof TooltipPopup> & { point: ChartPoint | null }) {
-  const { plot } = useChart()
+  const { plot } = useChartRootValue()
   const x = point?.x ?? 0
   const y = point?.y ?? 0
   const anchor = useMemo(

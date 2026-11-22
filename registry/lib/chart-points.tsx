@@ -1,6 +1,6 @@
 'use client'
 
-import { plotOffset } from '@/registry/lib/chart-core'
+import { plotOffset } from '@/registry/lib/chart-base'
 import { markLayer } from '@/registry/lib/chart-frame'
 import {
   forcedSeriesTextColor,

@@ -1205,12 +1205,14 @@ function KpiHistory({
         color={(datum) => DAY_COLOR[(datum.state as KpiDayState) ?? 'none']}
       />
       <ChartTooltip side='bottom'>
-        {({ category }) => (
+        {({ category: { value, datum } }) => (
           <div className='grid gap-0.5'>
-            <div className='font-medium'>{categoryFormat(category.value)}</div>
-            <div className='text-background/75 forced-colors:text-[CanvasText]'>
-              {stateText(category.datum)}
-            </div>
+            <div className='font-medium'>{categoryFormat(value)}</div>
+            {datum && (
+              <div className='text-background/75 forced-colors:text-[CanvasText]'>
+                {stateText(datum)}
+              </div>
+            )}
           </div>
         )}
       </ChartTooltip>

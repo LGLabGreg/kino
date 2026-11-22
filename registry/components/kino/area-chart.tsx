@@ -1,14 +1,15 @@
 'use client'
 
 import { areaMarks } from '@/registry/lib/chart-area-marks'
+import { figureProps, useDeclared } from '@/registry/lib/chart-base'
 import {
   type CategoryChartInput,
   type CartesianChartProps,
   type ChartPartDeclaration,
-  figureProps,
   type LiveChartProps,
   useCartesianChart,
-  useDeclared,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import {
   framePoints,
@@ -49,7 +50,7 @@ interface AreaChartProps extends CartesianChartProps, LiveChartProps {
   entrance?: 'rise' | 'draw' | 'none'
 }
 
-const areaChartKeys = ['stack', 'entrance']
+const areaChartKeys = [...cartesianChartKeys, 'stack', 'entrance']
 
 /**
  * The chart's root: it lays out the frame its parts draw in, places each
@@ -135,7 +136,7 @@ type AreaProps = Omit<LineSeriesProps, 'forecastFrom' | 'connectNulls' | 'dashed
  * that glides with the axis's pill.
  */
 function Area(props: AreaProps) {
-  useDeclared('Area', Area.declare(props))
+  useDeclared('Area', Area.declare(props), cartesianSignature)
   return <LineSeries {...props} fill />
 }
 

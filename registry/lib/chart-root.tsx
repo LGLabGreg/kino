@@ -5,6 +5,7 @@ import { Button, buttonVariants } from '@/registry/components/kino/button'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
   type ChartConfig,
+  type ChartDatum,
   type ChartPattern,
   labelLength,
   type ReadingDirection,
@@ -73,16 +74,42 @@ interface PlotPoint {
 interface ChartPoint {
   x: number
   y: number
-  side?: 'top' | 'bottom' | 'left' | 'right'
+  side: 'top' | 'bottom' | 'left' | 'right' | 'inline-start' | 'inline-end'
+}
+
+/** One thing a chart's API counts and hands back: a category, a tile, a slice, a flow. */
+interface ChartItem {
+  key: string
+  /** As the data has it: the category, or a tile's or a node's name. */
+  value: unknown
+  /** Its row of your data, or null where none sits: a Sankey node, the Waffle's remaining share, a heatmap cell the data leaves out, a stop only a series' own data has. */
+  datum: ChartDatum | null
+  /** Its place in the chart's items: what `activeIndex` counts. */
+  index: number
 }
 
 /**
- * What a family of charts answers for its marks, so the root can take the
- * pointer and the keys, place the tooltip and read the chart out.
+ * What a family of charts answers for its marks, so the root can keep the
+ * focus, bring series forward and hand items back through the chart's API.
  */
 interface ChartReader {
   /** Whether `target` is one of the chart's now: a stop the keys reach and the tooltip shows. */
   holds: (target: ChartTarget) => boolean
+  /** The series `target` brings forward, or null. */
+  lights: (target: ChartTarget) => string | null
+  /** The item `target` is on, as the public API hands it back, or null. */
+  item: (target: ChartTarget) => ChartItem | null
+  /** Every item, in the order `activeIndex` counts. */
+  items: readonly ChartTarget[]
+  /** What the pointer, the keys, the tooltip and the data table read, or null on a chart they don't reach, such as the Bar list. */
+  browse: ChartBrowseReader | null
+}
+
+/**
+ * How the pointer and the keys move through a chart's marks, where its
+ * tooltip sits and what it says, and how the chart is read out.
+ */
+interface ChartBrowseReader {
   /** What is under the pointer, or null for nothing. */
   targetAt: (point: PlotPoint) => ChartTarget | null
   /** Where the keys start when nothing is reached or picked yet. */
@@ -97,8 +124,6 @@ interface ChartReader {
   orientation: 'horizontal' | 'vertical'
   /** Where the tooltip of `target` sits, or null before the plot is measured. */
   anchor: (target: ChartTarget) => ChartPoint | null
-  /** The series `target` brings forward, or null. */
-  lights: (target: ChartTarget) => string | null
   /** What a screen reader hears on `target`. */
   describe: (target: ChartTarget) => string
   /** What the tooltip shows on `target`. */
@@ -1463,9 +1488,9 @@ function plotPointOf(event: {
  * press, Enter or Space picks the one reached. The tooltip's one trigger
  * fills it.
  */
-function ChartBrowse() {
+function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
   const {
-    reader,
+    reader: { holds },
     status,
     messages,
     plot,
@@ -1482,7 +1507,7 @@ function ChartBrowse() {
   const [restart, setRestart] = useState(false)
   const ready = status === 'ready'
   const held = (target: ChartTarget | null) =>
-    target !== null && reader.holds(target) ? target : null
+    target !== null && holds(target) ? target : null
   const resting = held(last) ?? held(picked) ?? reader.start
   const reached = focus ?? resting
   useLayoutEffect(() => {
@@ -1647,10 +1672,9 @@ function tooltipTriggerId(id: string) {
 }
 
 /** The data as a table for screen readers, which the chart's picture doesn't reach. */
-function ChartDataTable() {
-  const { reader, status, messages } = useChartRootValue()
+function ChartDataTable({ table }: { table: ChartTable }) {
+  const { status, messages } = useChartRootValue()
   if (status !== 'ready') return null
-  const { table } = reader
   // The table sits in a hidden box: a table grows to fit its cells past `sr-only`'s 1px.
   return (
     <div className='sr-only'>
@@ -1769,8 +1793,11 @@ function ChartStatusOverlay({ empty }: { empty?: ReactNode }) {
 
 /**
  * The chart's `<figure>`, named by its `label`: the series' colours, the
- * parts written inside it, then the layer that takes the pointer and the
- * keys, the status, and the data table.
+ * parts written inside it, then, on a chart the pointer and the keys browse
+ * (`reader.browse`), the layer that takes them, the status, and the data
+ * table. A chart whose marks are read and reached as they are, such as a bar
+ * list's rows, each a link or a button of its own, gives `plot` to the
+ * element that holds them.
  */
 function ChartFrame({
   root,
@@ -1778,7 +1805,8 @@ function ChartFrame({
   slot,
   description,
   empty,
-  browse = true,
+  measuring,
+  inset,
   className,
   children,
   ref,
@@ -1791,18 +1819,19 @@ function ChartFrame({
   description?: string
   empty?: ReactNode
   /**
-   * Whether the plot is one stop that the pointer and the keys step through,
-   * read as a data table, as on most charts. Off for a chart whose marks are
-   * read and reached as they are, such as a bar list's rows, each a link or
-   * a button of its own: the chart then gives `plot` to the element that
-   * holds them.
+   * Whether its scales wait for the plot's size, as labels past the bars
+   * do: until the plot is measured, everything but the legend holds its
+   * place unseen rather than show a range that then shifts.
    */
-  browse?: boolean
+  measuring: boolean
+  /** The px kept clear inside each edge of the plot, as `--chart-inset`, for marks drawn round a point. */
+  inset: number
   ref?: Ref<HTMLElement>
 }) {
   const figure = root.root
   const figureRef = useMemo(() => mergeRefs(figure, ref, markMounted), [figure, ref])
   const descriptionId = `${root.id}-description`
+  const { browse } = root.reader
   return (
     <ChartRootContext value={root}>
       <ChartFocus root={root} {...focus}>
@@ -1810,10 +1839,18 @@ function ChartFrame({
           ref={figureRef}
           data-slot={slot}
           data-chart={root.id}
+          data-measuring={measuring ? '' : undefined}
           aria-label={root.label}
           aria-describedby={description ? descriptionId : undefined}
-          className={cn(chartFrameClassName, className)}
-          style={style}
+          className={cn(
+            chartFrameClassName,
+            // Waiting for the plot's size, everything but the legend holds its place unseen.
+            'data-measuring:*:not-data-[slot=chart-legend]:invisible',
+            className,
+          )}
+          style={
+            inset ? ({ '--chart-inset': `${inset}px`, ...style } as CSSProperties) : style
+          }
           {...props}
         >
           <ChartStyle id={root.id} config={root.config} series={root.series} />
@@ -1823,9 +1860,9 @@ function ChartFrame({
             </p>
           )}
           {children}
-          {browse && <ChartBrowse />}
+          {browse && <ChartBrowse reader={browse} />}
           <ChartStatusOverlay empty={empty} />
-          {browse && <ChartDataTable />}
+          {browse && <ChartDataTable table={browse.table} />}
         </figure>
       </ChartFocus>
     </ChartRootContext>
@@ -1834,6 +1871,8 @@ function ChartFrame({
 
 export {
   SeriesKey,
+  type ChartBrowseReader,
+  type ChartItem,
   type ChartFocusProps,
   type ChartFocusValue,
   ChartFrame,

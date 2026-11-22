@@ -3,7 +3,7 @@
 import { Area, AreaChart } from '@/registry/components/kino/area-chart'
 import { Bar, BarChart } from '@/registry/components/kino/bar-chart'
 import { Line, LineChart } from '@/registry/components/kino/line-chart'
-import type { CategoryChartProps } from '@/registry/lib/chart-core'
+import type { CategoryChartProps } from '@/registry/lib/chart-base'
 import { type ChartDatum, numberOf, rangeOf } from '@/registry/lib/chart-math'
 import type { DomainEnd } from '@/registry/lib/chart-scale'
 import type { LineCurve } from '@/registry/lib/line-path'

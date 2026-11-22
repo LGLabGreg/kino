@@ -1,6 +1,11 @@
 'use client'
 
 import {
+  type CategoryChartProps,
+  figureProps,
+  localeTag,
+} from '@/registry/lib/chart-base'
+import {
   CELL_NAME,
   type CellAt,
   CellGridCells,
@@ -19,10 +24,7 @@ import {
 } from '@/registry/lib/chart-cells'
 import {
   type CategoryChartInput,
-  type CategoryChartProps,
   CategoryChartFrame,
-  figureProps,
-  localeTag,
   useCategoryChart,
 } from '@/registry/lib/chart-core'
 import {

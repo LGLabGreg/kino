@@ -208,19 +208,20 @@ export function physicalStart(
 /**
  * The point on a category at `along` of the value axis, centred across its
  * `band`, as fractions of the plot from its physical left and top: where a
- * tooltip or a value label sits.
+ * tooltip or a value label sits. A tooltip there opens past the marks' far
+ * end: above upright ones, and after lying ones in reading order.
  */
 export function plotPoint(
   band: Band,
   along: number,
   orientation: ChartOrientation,
   direction: ReadingDirection,
-): { x: number; y: number } {
+): { x: number; y: number; side: 'top' | 'inline-end' } {
   const centre =
     physicalStart(band, orientation === 'vertical' ? 'inline' : 'block', direction) +
     band.size / 2
-  if (orientation === 'vertical') return { x: centre, y: 1 - along }
-  return { x: direction === 'rtl' ? 1 - along : along, y: centre }
+  if (orientation === 'vertical') return { x: centre, y: 1 - along, side: 'top' }
+  return { x: direction === 'rtl' ? 1 - along : along, y: centre, side: 'inline-end' }
 }
 
 /**

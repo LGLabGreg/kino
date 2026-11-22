@@ -3,13 +3,15 @@
 import { AnimatedNumber } from '@/registry/components/kino/animated-number'
 import { Button } from '@/registry/components/kino/button'
 import {
-  CategoryChartFrame,
   type CategoryChartProps,
-  type ChartCategory,
   figureProps,
+  useChartActive,
+} from '@/registry/lib/chart-base'
+import {
+  CategoryChartFrame,
+  type ChartCategory,
   useCategoryChart,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import {
   cascadeAt,

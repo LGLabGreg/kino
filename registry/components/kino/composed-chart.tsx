@@ -6,17 +6,17 @@ import { Line, type LineProps } from '@/registry/components/kino/line-chart'
 import { areaMarks } from '@/registry/lib/chart-area-marks'
 import { barMarks } from '@/registry/lib/chart-bar-marks'
 import { BarFrameContext, BarPlaceholder } from '@/registry/lib/chart-bars'
+import { figureProps, useChartActive, useDeclared } from '@/registry/lib/chart-base'
 import {
   type CartesianChartProps,
   type CategoryChartInput,
   type ChartPartDeclaration,
-  figureProps,
   type LiveChartProps,
   type NamedValueAxis,
   useCartesianChart,
   useChart,
-  useChartActive,
-  useDeclared,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
@@ -93,7 +93,14 @@ interface ComposedChartProps extends Omit<CartesianChartProps, 'config'>, LiveCh
   barGap?: number
 }
 
-const composedChartKeys = ['axes', 'stack', 'entrance', 'categoryGap', 'barGap']
+const composedChartKeys = [
+  ...cartesianChartKeys,
+  'axes',
+  'stack',
+  'entrance',
+  'categoryGap',
+  'barGap',
+]
 
 /** A line's key in the legend: a short stroke, told apart from a bar's square. */
 const LINE_KEY = 'M-1.1,-0.3H1.1V0.3H-1.1Z'
@@ -257,7 +264,7 @@ type PointsProps = Omit<ComponentProps<'div'>, 'children'> & {
  */
 function Points(props: PointsProps) {
   const { dataKey, radius = 5, ...rest } = props
-  useDeclared('Points', Points.declare(props))
+  useDeclared('Points', Points.declare(props), cartesianSignature)
   const chart = useChart()
   const family = useLineFamily()
   const { spotlit } = useChartActive()

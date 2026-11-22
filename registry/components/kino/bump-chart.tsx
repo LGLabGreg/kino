@@ -1,16 +1,20 @@
 'use client'
 
 import {
-  type CategoryChartInput,
   axisLayerClassName,
   type CategoryChartProps,
-  type ChartCategory,
-  type ChartPartDeclaration,
   figureProps,
   slideLine,
+  useDeclared,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  type ChartCategory,
+  type ChartPartDeclaration,
   useCartesianChart,
   useChart,
-  useDeclared,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import {
   framePoints,
@@ -119,7 +123,7 @@ interface BumpChartProps extends Omit<
   messages?: Partial<BumpChartMessages>
 }
 
-const bumpChartKeys = ['rankBy', 'entrance']
+const bumpChartKeys = [...cartesianChartKeys, 'rankBy', 'entrance']
 
 /** Each period's ranks, and the row each series sits on. */
 interface BumpRanking {
@@ -526,7 +530,7 @@ type BumpProps = Omit<
  * another item is brought forward, it steps back.
  */
 function Bump({ dots = true, ...props }: BumpProps) {
-  useDeclared('Bump', Bump.declare(props))
+  useDeclared('Bump', Bump.declare(props), cartesianSignature)
   return <LineSeries {...props} curve='bump' dots={dots} />
 }
 

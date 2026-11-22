@@ -1,18 +1,20 @@
 'use client'
 
+import {
+  type CategoryChartProps,
+  figureProps,
+  shareColor,
+  ShareTooltipContent,
+  useChartActive,
+  useRegistry,
+} from '@/registry/lib/chart-base'
 import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
   type CategoryChartInput,
   CategoryChartFrame,
-  type CategoryChartProps,
   type ChartCategory,
-  figureProps,
-  shareColor,
-  ShareTooltipContent,
   useCategoryChart,
   useChart,
-  useChartActive,
-  useRegistry,
 } from '@/registry/lib/chart-core'
 import { type ChartDatum, type ChartPattern, numberOf } from '@/registry/lib/chart-math'
 import {

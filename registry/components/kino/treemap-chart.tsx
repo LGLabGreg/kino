@@ -10,17 +10,19 @@ import {
 } from '@/registry/components/kino/breadcrumb'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
   type CategoryChartProps,
-  type ChartCategory,
-  type ChartContextValue,
   type EntrancePhase,
   figureProps,
   ShareTooltipContent,
+  useChartActive,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  CategoryChartFrame,
+  type ChartCategory,
+  type ChartContextValue,
   useCategoryChart,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import type { ChartConfig, ChartDatum } from '@/registry/lib/chart-math'
 import {

@@ -20,6 +20,7 @@ import {
   trackClip,
   useBarFrame,
 } from '@/registry/lib/chart-bars'
+import { figureProps, useChartActive, useDeclared } from '@/registry/lib/chart-base'
 import {
   type CategoryChartInput,
   CategoryChartFrame,
@@ -28,11 +29,10 @@ import {
   type ChartContextValue,
   type ChartPartDeclaration,
   type ChartRoomState,
-  figureProps,
   useCartesianChart,
   useChart,
-  useChartActive,
-  useDeclared,
+  cartesianSignature,
+  cartesianChartKeys,
 } from '@/registry/lib/chart-core'
 import { markLayer, VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
@@ -97,6 +97,7 @@ interface BarChartProps extends CartesianChartProps {
 }
 
 const barChartKeys = [
+  ...cartesianChartKeys,
   'orientation',
   'stack',
   'entrance',
@@ -311,7 +312,7 @@ function Bar(props: BarProps) {
     style,
     ...rest
   } = props
-  useDeclared('Bar', Bar.declare(props))
+  useDeclared('Bar', Bar.declare(props), cartesianSignature)
   const chart = useChart()
   const { spotlit } = useChartActive()
   const bar = useBarFrame()
@@ -536,7 +537,7 @@ function totalOf(datum: ChartDatum, shown: readonly string[]) {
 
 function BarTotals(props: BarTotalsProps) {
   const { format, className, ...rest } = props
-  useDeclared('BarTotals', BarTotals.declare(props))
+  useDeclared('BarTotals', BarTotals.declare(props), cartesianSignature)
   const chart = useChart()
   const { spotlit } = useChartActive()
   const bar = useBarFrame()

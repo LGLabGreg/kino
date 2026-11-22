@@ -1,15 +1,17 @@
 'use client'
 
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
   type CategoryChartProps,
   type EntrancePhase,
   figureProps,
   ShareTooltipContent,
+  useChartActive,
+} from '@/registry/lib/chart-base'
+import {
+  type CategoryChartInput,
+  CategoryChartFrame,
   useCategoryChart,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import {
   type FlowAlign,

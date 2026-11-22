@@ -1,6 +1,14 @@
 'use client'
 
 import {
+  type CategoryChartProps,
+  figureProps,
+  shareColor,
+  ShareTooltipContent,
+  shareValue,
+  useChartActive,
+} from '@/registry/lib/chart-base'
+import {
   CellGridCell,
   cellLayerVariables,
   CellGridPlaceholder,
@@ -9,16 +17,10 @@ import {
 import {
   type CategoryChartInput,
   CategoryChartFrame,
-  type CategoryChartProps,
   type ChartCategory,
   type ChartContextValue,
-  figureProps,
-  shareColor,
-  ShareTooltipContent,
-  shareValue,
   useCategoryChart,
   useChart,
-  useChartActive,
 } from '@/registry/lib/chart-core'
 import { gridCellAt } from '@/registry/lib/chart-math'
 import {

@@ -1,6 +1,7 @@
 'use client'
 
-import type { ChartContextValue, EntrancePhase } from '@/registry/lib/chart-core'
+import type { EntrancePhase } from '@/registry/lib/chart-base'
+import type { ChartContextValue } from '@/registry/lib/chart-core'
 import type { CartesianModel } from '@/registry/lib/chart-frame'
 import {
   type ChartOrientation,

@@ -1,6 +1,36 @@
 'use client'
 
-import { useSpinner } from '@/registry/components/kino/spinner'
+import {
+  type AxisNames,
+  type CategoryChartProps,
+  ChartAxesContext,
+  type ChartAxesValue,
+  type ChartAxisName,
+  type ChartForecast,
+  type ChartFrame,
+  type ChartParts,
+  ChartPartsContext,
+  chartParts,
+  checkSeries,
+  IndexActive,
+  isForecast,
+  localeTag,
+  pickedName,
+  plotPlace,
+  SeriesWordsContext,
+  type SeriesWordsInput,
+  seriesWords,
+  stickTo,
+  timeKey,
+  useChartActive,
+  useChartLife,
+  useChartLoad,
+  useChartPick,
+  useIndexFocus,
+  useLeavingItems,
+  usePreviousScales,
+  useRegistry,
+} from '@/registry/lib/chart-base'
 import {
   type CartesianX,
   cartesianModel,
@@ -14,7 +44,6 @@ import {
   allWhole,
   alongCategories,
   changeSince,
-  type ChartConfig,
   type ChartDatum,
   type ChartMark,
   type ChartOrientation,
@@ -34,31 +63,16 @@ import {
   type XYValue,
 } from '@/registry/lib/chart-math'
 import {
-  ChangeText,
-  type ChartFocusProps,
-  ChartFrame,
+  ChartFrame as RootFrame,
   type ChartFormat,
-  type ChartMessages,
   type ChartMoves,
   type ChartPoint,
   type ChartReader,
   type ChartRootState,
   type ChartRootValue,
-  forcedSeriesColor,
   formatterOf,
-  percent,
   type PlotPoint,
-  SeriesKey,
-  swatchClassName,
-  swatchStyle,
-  tooltipQuietClassName,
-  useBefore,
-  useChartFocus,
-  useChartGroup,
-  useChartMoves,
   useChartRoot,
-  useChartRootValue,
-  useLeaving,
 } from '@/registry/lib/chart-root'
 import {
   type Band,
@@ -66,18 +80,12 @@ import {
   bandCentre,
   bandScale,
   baselineOf,
-  type ChartScale,
-  type DomainEnd,
   extentWith,
   extentWithRoom,
   indexAt,
   linearScale,
-  type LinearScale,
-  scaleSignature,
-  type TimeScale,
 } from '@/registry/lib/chart-scale'
 import {
-  chartStatus,
   type ChartStatus,
   type ChartTable,
   type ChartTarget,
@@ -85,9 +93,7 @@ import {
   targetKey,
   targetSeries,
 } from '@/registry/lib/chart-state'
-import { useControllable } from '@/registry/lib/controllable'
 import {
-  isoInstant,
   onOneDay,
   readTime,
   timeLabel,
@@ -96,20 +102,13 @@ import {
   weekStart,
 } from '@/registry/lib/dates'
 import {
-  Children,
   type ComponentProps,
   createContext,
   type CSSProperties,
-  Fragment,
-  isValidElement,
   type ReactNode,
   type Ref,
-  type RefObject,
   use,
-  useCallback,
   useLayoutEffect,
-  useMemo,
-  useRef,
   useState,
 } from 'react'
 
@@ -144,66 +143,6 @@ interface ChartCategory {
 interface ChartXYPoint {
   value: XYValue
   place: XYValue
-}
-
-/**
- * One axis of the frame: its scale, the one before its last change, so what
- * arrives starts where it would have been, and how it writes and titles its
- * values when its part is given neither.
- */
-interface FrameAxis<Scale extends ChartScale> {
-  scale: Scale
-  previous: Scale
-  /** How it writes its values; the chart's `format` by default. */
-  format?: ChartFormat
-  /** What it measures, which titles it unless its part is given a `label`. */
-  label?: string
-}
-
-/**
- * The frame the marks stand in: the x axis, categories or numbers, and the
- * value axes by their ids, `'value'` the chart's own. The axes, the grid and
- * reference lines read it, and the pointer and the keys find what is under
- * them by it: along the categories, or among points by both values.
- */
-interface ChartFrame {
-  x: FrameAxis<ChartScale>
-  /** Each value axis, by its id: the chart's own, `value`, always. */
-  y: Readonly<Record<string, FrameAxis<LinearScale>>> & { value: FrameAxis<LinearScale> }
-  /** Where marks grow from on each value axis, as a fraction of it. */
-  baselines: Readonly<Record<string, number>> & { value: number }
-  /** The id of the value axis a series is read against. */
-  axisOf: (key: string) => string
-  /** Whether a series adds to its category's total, as the tooltip's total row sums it: one that stacks on the chart's own value axis. */
-  totals: (key: string) => boolean
-  /**
-   * Whether its range waits for the plot's size, because a part keeps room
-   * in px past the value axis's end, as labels past the bars do: until the
-   * plot is measured, as in the server's HTML, the plot and its axes hold
-   * their place unseen rather than show a range that then shifts.
-   */
-  measuring: boolean
-  /**
-   * An x of times that shows a window of them, still or live: the clock the
-   * layers placed by x move with (`ChartLiveLayer`). Null for an x that
-   * shows all of it.
-   */
-  live: ChartLive | null
-}
-
-/**
- * A name on a category axis: a category's, or on a grid of cells, a
- * column's or a row's, over the band of the axis it names, such as a month
- * over its weeks.
- */
-interface ChartAxisName {
-  key: string
-  /** The name as the data has it, which the axis writes. */
-  value: unknown
-  /** Its place among the axis's names. */
-  index: number
-  band: Band
-  leaving: boolean
 }
 
 /** One axis of a grid of cells: its names, and which one each cell is under. */
@@ -287,7 +226,7 @@ interface ChartContextValue extends ChartRootState {
   /** The categories run in order, such as days, so a change since the one before means something. */
   ordered: boolean
   /** What the parts written inside the chart say about themselves, read as it renders. */
-  parts: ChartParts
+  parts: CartesianParts
   /** The series whose values from a category on are projected. */
   forecasts: readonly ChartForecast[]
 }
@@ -384,12 +323,6 @@ interface CategoryTable {
   }
 }
 
-/** A series whose values from the category keyed `from` on are projected. */
-interface ChartForecast {
-  series: string
-  from: string
-}
-
 /**
  * What a part written inside a chart tells it before anything draws, so the
  * chart fits its range, reads its forecasts and keeps its room as it renders,
@@ -419,270 +352,47 @@ type ChartRoomState = Pick<
   | 'textWidth'
 > & { rows: readonly ChartDatum[] }
 
-/** A component that tells the chart about itself as it renders. */
-type DeclaringPart<Props> = ((props: Props) => ReactNode) & {
-  declare: (props: Props) => ChartPartDeclaration
-}
-
-/** Everything the parts inside a chart declared. */
-interface ChartParts {
-  declarations: readonly ChartPartDeclaration[]
-  /** The series drawn by a part, by key, and as what. */
-  marks: ReadonlyMap<string, ChartMark>
-  /** Each declaration's signature, which the part looks for to know it was read. */
-  signatures: ReadonlySet<string>
-}
-
-/**
- * What the parts in `children` declare: straight inside the chart, in a
- * fragment, or in an array. A part wrapped in a component of yours can't be
- * read, and says so when it renders (`useDeclared`).
- */
-function chartParts(children: ReactNode): ChartParts {
-  const declarations: ChartPartDeclaration[] = []
-  const visit = (nodes: ReactNode) => {
-    Children.forEach(nodes, (node) => {
-      if (!isValidElement<{ children?: ReactNode }>(node)) return
-      if (node.type === Fragment) {
-        visit(node.props.children)
-        return
-      }
-      // A part a server component wrote reaches the chart not yet loaded, so it can't be read.
-      if ((node.type as { $$typeof?: symbol }).$$typeof === LAZY) {
-        throw new Error(
-          "A chart's parts are read as it renders, so it is written in a client component: put `'use client'` at the top of the file that composes it.",
-        )
-      }
-      const declare = (
-        node.type as { declare?: (props: unknown) => ChartPartDeclaration }
-      ).declare
-      if (typeof declare === 'function') declarations.push(declare(node.props))
-    })
-  }
-  visit(children)
-  const marks = new Map<string, ChartMark>()
-  for (const { series } of declarations) if (series) marks.set(series.key, series.mark)
-  return {
-    declarations,
-    marks,
-    signatures: new Set(declarations.map(signatureOf)),
-  }
-}
-
-/** What React marks a component that is still loading with. */
-const LAZY = Symbol.for('react.lazy')
-
-/** What tells a declaration apart, but for its room, which is a function. */
-function signatureOf(declaration: ChartPartDeclaration) {
+/** What tells a declaration apart, but for its room, which is a function; empty for one that says nothing. */
+function cartesianSignature(declaration: ChartPartDeclaration) {
+  const { series, forecast, references, room } = declaration
+  if (!series && !forecast && !references?.length && !room) return ''
   return JSON.stringify([
-    declaration.series ?? null,
-    declaration.forecast ?? null,
-    declaration.references ?? null,
-    declaration.room ? 'room' : null,
+    series ?? null,
+    forecast ?? null,
+    references ?? null,
+    room ? 'room' : null,
   ])
 }
 
-/**
- * Throws when a part that declares something wasn't read by its chart,
- * because it sits inside a component of yours: the chart would draw a range
- * that leaves it out, or a series it doesn't know.
- */
-function useDeclared(name: string, declaration: ChartPartDeclaration) {
-  const { parts } = useChart()
-  const says =
-    declaration.series ||
-    declaration.forecast ||
-    declaration.references?.length ||
-    declaration.room
-  if (says && !parts.signatures.has(signatureOf(declaration))) {
-    throw new Error(
-      `\`${name}\` goes straight inside its chart, or in a fragment there, so the chart reads it as it renders; inside a component of yours, the chart can't see it.`,
-    )
-  }
+/** What the parts of a chart with categories declared, read by what each says. */
+interface CartesianParts extends ChartParts<ChartPartDeclaration> {
+  /** The series the parts draw, and as what. */
+  marks: ReadonlyMap<string, ChartMark>
+  forecasts: readonly ChartForecast[]
+  references: readonly ChartReference[]
+  rooms: readonly ((chart: ChartRoomState) => number)[]
 }
 
-/**
- * Throws when the config and the parts disagree: a series in the config no
- * part draws, a part's series the config doesn't name, or a part that draws
- * a series as other than the config says.
- */
-function checkSeries(config: ChartConfig, parts: ChartParts, own: ChartMark) {
-  for (const [key, mark] of parts.marks) {
-    const entry = config[key]
-    if (!entry) {
-      throw new Error(
-        `A part draws the series \`${key}\`, which the chart's \`config\` doesn't name. Add it to the config.`,
-      )
-    }
-    const says = entry.mark ?? own
-    if (says !== mark) {
-      throw new Error(
-        `The config draws the series \`${key}\` as \`${says}\`, but its part draws it as \`${mark}\`. Set its \`mark\` in the config to \`${mark}\`.`,
-      )
-    }
-  }
-  for (const key of Object.keys(config)) {
-    if (!parts.marks.has(key)) {
-      throw new Error(
-        `The config names the series \`${key}\`, but no part inside the chart draws it. Add one, such as \`<Bar dataKey='${key}' />\`, or take it out of the config.`,
-      )
-    }
+/** What `declarations` say, gathered by kind. */
+function cartesianParts(
+  declarations: readonly ChartPartDeclaration[],
+): Omit<CartesianParts, keyof ChartParts<ChartPartDeclaration>> {
+  const marks = new Map<string, ChartMark>()
+  for (const { series } of declarations) if (series) marks.set(series.key, series.mark)
+  return {
+    marks,
+    forecasts: declarations.flatMap((part) => (part.forecast ? [part.forecast] : [])),
+    references: declarations.flatMap((part) => part.references ?? []),
+    rooms: declarations.flatMap((part) => (part.room ? [part.room] : [])),
   }
 }
 
 const ChartContext = createContext<ChartContextValue | null>(null)
 
-/** Whether the value of `series` at `index` is a forecast. */
-function isForecast(chart: ChartContextValue, series: string, index: number) {
-  return chart.forecasts.some((forecast) => {
-    if (forecast.series !== series) return false
-    const from = chart.current.findIndex((category) => category.key === forecast.from)
-    return from !== -1 && index >= from
-  })
-}
-
 function useChart() {
   const chart = use(ChartContext)
   if (!chart) throw new Error('Chart parts go inside a chart, such as a `BarChart`.')
   return chart
-}
-
-/**
- * What is under the pointer, kept apart from the rest of the chart, so a
- * hover re-renders only the parts that show it, never the data table or
- * each category's column.
- */
-interface ChartActiveValue {
-  /** The category under the pointer or the focus, by its place in the data. */
-  active: number | null
-  setActive: (index: number | null) => void
-  /** The category that stays bright: the one under the pointer, or else the one picked. */
-  spotlit: number | null
-}
-
-const ChartActiveContext = createContext<ChartActiveValue | null>(null)
-
-function useChartActive() {
-  const value = use(ChartActiveContext)
-  if (!value) throw new Error('Chart parts go inside a chart, such as a `BarChart`.')
-  return value
-}
-
-/** A line along the plot's height, or across its width, that `axisSlide` moves. */
-const slideLine = {
-  x: 'absolute inset-y-0 left-0 w-0',
-  y: 'absolute inset-x-0 top-0 h-0',
-} as const
-
-/** A layer over an axis's area that its sliding labels measure their slide in. */
-const axisLayerClassName = 'pointer-events-none absolute inset-0 [container-type:size]'
-
-/**
- * A tick, a grid line or a reference sliding along the value axis: in from
- * where the old range put it, and fading as it leaves. The resting place is
- * a variable too, so an inline style never overrules the starting one.
- */
-const tickMove =
-  '[translate:var(--tick-to)] transition-none group-data-mounted/chart:transition-[translate,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-mounted/chart:starting:[translate:var(--tick-from)] group-data-mounted/chart:starting:opacity-0 data-leaving:opacity-0 motion-reduce:group-data-mounted/chart:transition-opacity'
-
-/**
- * A line of no thickness slid to `place` along one axis of the size
- * container it sits in, a fraction of the value axis from its start, from
- * where `from` put it. Across the page, values run from the reading start;
- * up the page, from the bottom. Being no thicker than a line, it never makes
- * the page scroll wherever it slides. What sits on it is placed from its
- * physical top left.
- */
-function axisSlide(
-  axis: 'x' | 'y',
-  place: number,
-  from: number,
-  direction: ReadingDirection,
-): CSSProperties {
-  return {
-    '--tick-to': slideTo(axis, place, direction),
-    '--tick-from': slideTo(axis, from, direction),
-  } as CSSProperties
-}
-
-/** The `translate` that puts a line at `place` along the value axis. */
-function slideTo(axis: 'x' | 'y', place: number, direction: ReadingDirection) {
-  return axis === 'x'
-    ? `${plotOffset(direction === 'rtl' ? 1 - place : place, 'cqw')} 0`
-    : `0 ${plotOffset(1 - place, 'cqh')}`
-}
-
-/**
- * Where `place`, a fraction of the plot from its physical left or top, sits
- * along it in CSS, with `unit` the plot's width (`cqw`) or height (`cqh`).
- * A chart with an `inset`, such as a scatter, keeps that many px clear
- * inside each edge, as `--chart-inset`, so a point at either end of an axis
- * is drawn whole; on any other chart it is the place itself.
- */
-function plotOffset(place: number, unit: 'cqw' | 'cqh') {
-  const share = Math.round(place * 1e6) / 1e6
-  return `calc(var(--chart-inset, 0px) + ${share} * (100${unit} - 2 * var(--chart-inset, 0px)))`
-}
-
-/**
- * The same place as a fraction of the plot's whole `length` in px, for what
- * JavaScript places, such as a tooltip; and with `toPlace`, back from one.
- */
-function plotFraction(place: number, length: number, inset: number) {
-  if (length <= 0) return place
-  return (inset + place * Math.max(0, length - inset * 2)) / length
-}
-
-function placeFromFraction(fraction: number, length: number, inset: number) {
-  const inner = length - inset * 2
-  if (inner <= 0) return 0.5
-  return (fraction * length - inset) / inner
-}
-
-/**
- * The ticks to draw, `drawn` or the scale's own, and, until the move their range
- * changed in has ended, every one drawn before that the scale no longer
- * has, which fades as it slides toward where the new scale puts it, so the
- * change of range shows. A tick still fading in when the range turns back
- * fades out from where it is. In value order, so no tick's element moves in
- * the page, which would make it jump.
- */
-function useTicks(axis: ChartAxis = VALUE_AXIS, drawn?: readonly number[]) {
-  const scale = numberAxis(useChart(), axis)?.scale
-  const ticks = drawn ?? scale?.ticks ?? NO_TICKS
-  const leaving = useLeaving(useChartMoves(), ticks, String)
-  return [
-    ...ticks.map((value) => ({ value, leaving: false })),
-    ...leaving.map((value) => ({ value, leaving: true })),
-  ].toSorted((a, b) => a.value - b.value)
-}
-
-const NO_TICKS: readonly number[] = []
-
-/** An axis of the frame by its id: `'x'`, or a value axis's, `'value'` the chart's own. */
-type ChartAxis = string
-
-/**
- * The frame's axis `axis` when it runs along numbers: a value axis, or the x
- * axis of a chart whose x is a number, such as a scatter. None for an x
- * axis of categories, or an id the chart has no axis for.
- */
-function numberAxis(
-  chart: Pick<ChartContextValue, 'frame'>,
-  axis: ChartAxis,
-): FrameAxis<LinearScale> | null {
-  if (axis !== 'x') return chart.frame.y[axis] ?? null
-  const { scale, previous, format, label } = chart.frame.x
-  if (scale.kind !== 'linear') return null
-  // A new x of numbers slides from where the same range put it.
-  return { scale, previous: previous.kind === 'linear' ? previous : scale, format, label }
-}
-
-/** The frame's x axis when it runs along times, such as a year of days on a line chart; none otherwise. */
-function timeAxis(chart: Pick<ChartContextValue, 'frame'>): FrameAxis<TimeScale> | null {
-  const { scale, previous, format, label } = chart.frame.x
-  if (scale.kind !== 'time') return null
-  return { scale, previous: previous.kind === 'time' ? previous : scale, format, label }
 }
 
 /**
@@ -734,6 +444,7 @@ function categoryReader(
               : count - 1),
           count - 1,
         )
+  const words = seriesWords(chart, categoryWords(chart))
   return {
     holds: (target) => {
       if (indexOf(target) === null) return false
@@ -744,89 +455,133 @@ function categoryReader(
           !chart.hidden.includes(target.series))
       )
     },
-    targetAt: (point: PlotPoint) => {
-      // The plot's own box, from its top left, which the chart's own picking reads as the page's.
-      const box = new DOMRect(0, 0, point.width, point.height)
-      const index = pickIndex(chart, point, box, centres, places)
-      const series =
-        chart.seriesAt?.({
-          x: alongCategories(point, box, 'vertical', direction),
-          y: point.height === 0 ? 0 : point.y / point.height,
-        }) ?? null
-      // Off every category, what lights a series is the series' own place, such as a
-      // treemap's group header.
-      const target: ChartTarget | null =
-        index === null
-          ? series === null
-            ? null
-            : { kind: 'node', id: series }
-          : at(index, series)
-      const open = target && chart.zoomAt?.(point, box)
-      if (target && open) opens.set(target, open)
-      return target
-    },
-    start: start === null ? null : at(start, null),
-    step: (from, key) => {
-      const index = indexOf(from)
-      if (index === null) return null
-      const series = targetSeries(from)
-      if (chart.keys) return at(chart.keys.step(index, key), null)
-      if (chart.stepSeries && !points && (key === 'ArrowUp' || key === 'ArrowDown')) {
-        return at(index, chart.stepSeries(index, series, key === 'ArrowUp' ? -1 : 1))
-      }
-      // Points placed by two values step by x along it, and by y up and down; cells step
-      // by column along it, and by row up and down. Round the circle, Right steps
-      // clockwise, the way the marks run, as they aren't mirrored in right to left.
-      const next = points
-        ? stepPoint(points, index, key, direction)
-        : grid
-          ? stepCell(grid.cells, index, key, direction)
-          : stepIndex(key, index, count, orientation, chart.round ? 'ltr' : direction)
-      if (next === null) return null
-      if (points) setAlong(keyAxis(key))
-      return at(next, series)
-    },
-    rank: (target) => {
-      const index = indexOf(target) ?? 0
-      if (points) return pointRank(points, index, along)
-      if (chart.keys) return chart.keys.rank(index)
-      if (grid) return index + 1
-      return sliderValue(index, Math.max(1, count), orientation)
-    },
-    stops: chart.keys?.stops ?? count,
-    orientation: orientation === 'vertical' ? 'horizontal' : 'vertical',
-    anchor: (target) => {
-      const index = indexOf(target)
-      return index === null ? null : chart.pointOf(index)
-    },
     lights: (target) => (target.kind === 'node' ? target.id : targetSeries(target)),
-    describe: (target) => {
+    item: (target) => {
       const index = indexOf(target)
-      return index === null ? '' : columnLabel(chart, index)
+      const category = index === null ? undefined : current[index]
+      if (!category) return null
+      const { key, value, datum } = category
+      return { key, value, datum, index: category.index }
     },
-    tooltip: (target) => {
-      const index = indexOf(target)
-      if (index === null) return null
-      return chart.tooltipContent ? (
-        chart.tooltipContent(index)
-      ) : (
-        <ChartTooltipContent index={index} />
-      )
+    items: keys.map((key) => ({ kind: 'x', key })),
+    browse: {
+      targetAt: (point: PlotPoint) => {
+        // The plot's own box, from its top left, which the chart's own picking reads as the page's.
+        const box = new DOMRect(0, 0, point.width, point.height)
+        const index = pickIndex(chart, point, box, centres, places)
+        const series =
+          chart.seriesAt?.({
+            x: alongCategories(point, box, 'vertical', direction),
+            y: point.height === 0 ? 0 : point.y / point.height,
+          }) ?? null
+        // Off every category, what lights a series is the series' own place, such as a
+        // treemap's group header.
+        const target: ChartTarget | null =
+          index === null
+            ? series === null
+              ? null
+              : { kind: 'node', id: series }
+            : at(index, series)
+        const open = target && chart.zoomAt?.(point, box)
+        if (target && open) opens.set(target, open)
+        return target
+      },
+      start: start === null ? null : at(start, null),
+      step: (from, key) => {
+        const index = indexOf(from)
+        if (index === null) return null
+        const series = targetSeries(from)
+        if (chart.keys) return at(chart.keys.step(index, key), null)
+        if (chart.stepSeries && !points && (key === 'ArrowUp' || key === 'ArrowDown')) {
+          return at(index, chart.stepSeries(index, series, key === 'ArrowUp' ? -1 : 1))
+        }
+        // Points placed by two values step by x along it, and by y up and down; cells step
+        // by column along it, and by row up and down. Round the circle, Right steps
+        // clockwise, the way the marks run, as they aren't mirrored in right to left.
+        const next = points
+          ? stepPoint(points, index, key, direction)
+          : grid
+            ? stepCell(grid.cells, index, key, direction)
+            : stepIndex(key, index, count, orientation, chart.round ? 'ltr' : direction)
+        if (next === null) return null
+        if (points) setAlong(keyAxis(key))
+        return at(next, series)
+      },
+      rank: (target) => {
+        const index = indexOf(target) ?? 0
+        if (points) return pointRank(points, index, along)
+        if (chart.keys) return chart.keys.rank(index)
+        if (grid) return index + 1
+        return sliderValue(index, Math.max(1, count), orientation)
+      },
+      stops: chart.keys?.stops ?? count,
+      orientation: orientation === 'vertical' ? 'horizontal' : 'vertical',
+      anchor: (target) => {
+        const index = indexOf(target)
+        return index === null ? null : chart.pointOf(index)
+      },
+      describe: (target) => {
+        const index = indexOf(target)
+        return index === null ? '' : columnLabel(chart, index)
+      },
+      tooltip: (target) => {
+        const index = indexOf(target)
+        const category = index === null ? undefined : current[index]
+        if (index === null || !category) return null
+        return chart.tooltipContent
+          ? chart.tooltipContent(index)
+          : words.tooltip(category)
+      },
+      table: categoryTable(chart),
+      open: (target) => {
+        const own = opens.get(target)
+        if (own) return own
+        const index = indexOf(target)
+        return index === null ? null : (chart.zoomIn?.(index) ?? null)
+      },
+      back: chart.zoomOut ?? null,
     },
-    table: categoryTable(chart),
-    open: (target) => {
-      const own = opens.get(target)
-      if (own) return own
-      const index = indexOf(target)
-      return index === null ? null : (chart.zoomIn?.(index) ?? null)
-    },
-    back: chart.zoomOut ?? null,
   }
 }
 
 /**
- * The data as a table: a row for each category and a column for each shown
- * series, or the chart's own columns, or its own rows.
+ * The words of a chart with categories as `seriesWords` reads them: its
+ * categories as the stops, each series' value as the chart writes it, and
+ * the total of what stacks.
+ */
+function categoryWords(chart: ChartContextValue): SeriesWordsInput {
+  const byKey = new Map(chart.current.map((category) => [category.key, category]))
+  const shown = chart.series.filter((key) => !chart.hidden.includes(key))
+  // Only what stacks adds up, never a line or a point beside it or a series on another axis.
+  const summed = shown.filter((key) => chart.frame.totals(key))
+  return {
+    stops: chart.current,
+    seriesText: (item, key) => {
+      const category = byKey.get(item.key)
+      return category ? chart.seriesText(category, key) : chart.messages.noValue
+    },
+    seriesChange: (item, before, key) => {
+      const category = byKey.get(item.key)
+      const was = byKey.get(before.key)
+      return category && was ? chart.seriesChange(category, was, key) : null
+    },
+    stopText: (item) => chart.categoryText(item.value),
+    ordered: chart.ordered,
+    totals: (item) =>
+      summed.length > 1
+        ? summed.reduce((all, key) => all + (numberOf(item.datum?.[key]) ?? 0), 0)
+        : null,
+    totalByDefault: chart.stack !== 'none',
+    forecast: (series, item) => isForecast(chart, series, item.index),
+    picked: chart.selected === null ? null : (chart.current[chart.selected]?.key ?? null),
+    alone: null,
+    own: null,
+  }
+}
+
+/**
+ * The data as a table: the chart's own columns, or its own rows, or else a
+ * row for each category and a column for each shown series.
  */
 function categoryTable(chart: CategoryChartInput): ChartTable {
   const { table, current, categoryText, messages } = chart
@@ -850,20 +605,7 @@ function categoryTable(chart: CategoryChartInput): ChartTable {
       footer: table.footer ?? [],
     }
   }
-  const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  return {
-    header: messages.category,
-    columns: shown.map((key) => chart.config[key]?.label ?? key),
-    rows: current.map((category) => ({
-      key: category.key,
-      name: categoryText(category.value),
-      cells: shown.map(
-        (key) =>
-          `${chart.seriesText(category, key)}${isForecast(chart, key, category.index) ? `, ${messages.forecast}` : ''}`,
-      ),
-    })),
-    footer: [],
-  }
+  return seriesWords(chart, categoryWords(chart)).table
 }
 
 /**
@@ -886,13 +628,7 @@ function useCategories(
     band: bandOf(index, data.length),
     leaving: false,
   }))
-  const leaving = useLeaving(moves, current, categoryKey)
-  // Drawn in one fixed order, whatever the data's: an element moved in the page starts
-  // again with no transition, so a sort would jump instead of sliding.
-  const categories = [
-    ...current,
-    ...leaving.map((category) => ({ ...category, leaving: true })),
-  ].toSorted((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  const categories = useLeavingItems(moves, current, categoryKey)
   return { categories, current }
 }
 
@@ -907,93 +643,14 @@ function columnLabel(
 ) {
   const category = chart.current[index]
   if (!category) return ''
-  const picked = chart.selected === index ? `, ${chart.messages.selected}` : ''
-  const name = `${chart.categoryText(category.value)}${picked}`
-  if (chart.describe) return `${name}: ${chart.describe(index)}`
-  const before = chart.ordered ? chart.current[index - 1] : undefined
-  const values = chart.series
-    .filter((key) => !chart.hidden.includes(key))
-    .map((key) => {
-      const name = chart.config[key]?.label
-      const change = before ? chart.seriesChange(category, before, key) : null
-      const said =
-        change === null
-          ? ''
-          : `, ${chart.messages.change(change, percent(chart.locale).format(Math.abs(change)))}`
-      const projected = isForecast(chart, key, index)
-        ? `, ${chart.messages.forecast}`
-        : ''
-      return `${typeof name === 'string' ? name : key} ${chart.seriesText(category, key)}${projected}${said}`
-    })
-  return `${name}: ${values.join(', ')}`
+  if (!chart.describe) return seriesWords(chart, categoryWords(chart)).describe(category)
+  const name = pickedName(
+    chart.categoryText(category.value),
+    chart.selected === index,
+    chart.messages,
+  )
+  return `${name}: ${chart.describe(index)}`
 }
-
-/** The least room between two value ticks, in px: up the axis, and along it. */
-const TICK_SPACING = { upright: 32, across: 56 } as const
-
-/** The props every chart with categories takes on its root. */
-interface CategoryChartProps extends Omit<
-  ComponentProps<'figure'>,
-  'children' | 'onSelect'
-> {
-  /** One row per category: the category under `index`, and a value under each series' key. */
-  data: readonly ChartDatum[]
-  /** The key of each row's category. */
-  index: string
-  config: ChartConfig
-  /** What the chart shows, for screen readers: a short title, such as "Visitors by month". */
-  label: string
-  /** A longer account for screen readers, such as the trend the chart shows. */
-  description?: string
-  /** How values are written in the tooltip, the labels and the table, and the value axis by default. */
-  format?: ChartFormat
-  /**
-   * The categories run in order, such as days or months, so the tooltip and
-   * the screen reader give each value's change since the category before.
-   */
-  ordered?: boolean
-  /** How a category is written; `String` by default. */
-  categoryFormat?: (value: unknown) => string
-  /** The locale numbers are written in. Give one, so the server and the browser agree. */
-  locale?: Intl.LocalesArgument
-  /** The values at the ends of the value axis; `'auto'` fits the data. */
-  domain?: readonly [DomainEnd, DomainEnd]
-  /** About how many ticks the value axis marks. */
-  tickCount?: number
-  /** The ticks to mark, in place of round ones. */
-  tickValues?: readonly number[]
-  /** Ticks between whole numbers, such as 0.5; off by default when every value is whole. */
-  allowDecimals?: boolean
-  /** Gives each series after the first a pattern over its colour, so series differ by more than colour. */
-  patterns?: boolean
-  /** The series hidden, for a legend you control. */
-  hiddenSeries?: string[]
-  defaultHiddenSeries?: string[]
-  onHiddenSeriesChange?: (hidden: string[]) => void
-  /** The category under the pointer or the focus, by its place in `data`, for a chart you control. */
-  activeIndex?: number | null
-  defaultActiveIndex?: number | null
-  onActiveIndexChange?: (index: number | null) => void
-  /** The category picked, by its key; giving this, `defaultSelected` or `onSelectedChange` lets a press pick one. */
-  selected?: string | null
-  defaultSelected?: string | null
-  onSelectedChange?: (key: string | null) => void
-  /** Waiting for the data: a placeholder shows, and the marks grow out of it when the data arrives. */
-  loading?: boolean
-  /** The data couldn't load: `true` for the chart's own words, or what to say. */
-  error?: ReactNode
-  /** Shows a button that tries again, with `error`. */
-  onRetry?: () => void
-  /** What shows when `data` is empty. */
-  empty?: ReactNode
-  /** Every word the chart says or reads out, for a chart in another language. */
-  messages?: Partial<ChartMessages>
-  ref?: Ref<HTMLElement>
-  children?: ReactNode
-}
-
-/** Where the entrance is: waiting to be seen, playing, or over. */
-type EntrancePhase = 'waiting' | 'entering' | 'settled'
 
 /** What every chart with categories says about how it keeps its rows and plays its entrance. */
 interface CategoryRowOptions {
@@ -1056,48 +713,51 @@ interface CategoryChartOptions<Shapes> extends CategoryRowOptions, CategoryLayou
   nice: boolean
 }
 
-/**
- * What every chart with categories keeps before its scales: the root's
- * state, the rows it draws, what its parts declare, and whether it loads.
- */
 /** The rows of a chart that loads or failed: one array, so what compares rows sees no change. */
 const NO_ROWS: readonly ChartDatum[] = []
 
+/**
+ * What every chart with categories keeps before its scales: the root's
+ * state, whether it loads, the rows it draws, and what its parts declare.
+ */
 function useCategoryRows(props: CategoryChartProps, options: CategoryRowOptions) {
-  const { data, loading = false, error } = props
+  const { data } = props
   const state = useChartRoot(props, {
     entrance: options.entrance,
     heightFromData: options.heightFromData ?? false,
   })
   const { hidden, series } = state
-  // A chart that mounts loading shows its placeholder from the first paint. Later, the
-  // placeholder shows once loading has lasted, then long enough to be seen; until then the
-  // marks there are stay.
-  const [firstLoad, setFirstLoad] = useState(loading)
-  if (firstLoad && !loading) setFirstLoad(false)
-  const placeholder = useSpinner(loading) || firstLoad
-  const failed = Boolean(error) && !loading
-  const rows = placeholder || failed ? NO_ROWS : data
+  const load = useChartLoad(props)
+  const rows = load.placeholder || load.failed ? NO_ROWS : data
   const drawn = options.rowsShown
     ? options.rowsShown(rows, hidden)
     : options.seriesOfRow
       ? rowsShown(rows, options.seriesOfRow, hidden)
       : rows
   const shown = series.filter((key) => !hidden.includes(key))
-  const parts = chartParts(props.children)
+  const declared = chartParts(props.children, cartesianSignature)
+  const parts = { ...declared, ...cartesianParts(declared.declarations) }
   const keyOf = options.keyOf ?? ((row: ChartDatum) => String(row[props.index]))
-  return { state, placeholder, failed, rows, drawn, shown, parts, keyOf }
+  return {
+    state,
+    load,
+    placeholder: load.placeholder,
+    failed: load.failed,
+    rows,
+    drawn,
+    shown,
+    parts,
+    keyOf,
+  }
 }
 
 type CategoryRows = ReturnType<typeof useCategoryRows>
 
 /** Each value a part declares for the value axis of a chart with one: on it, or on an x of categories, which marks it too. */
-function valueReferences(parts: ChartParts) {
-  return parts.declarations.flatMap((part) =>
-    (part.references ?? [])
-      .filter((ref) => ref.axis === VALUE_AXIS || ref.axis === 'x')
-      .map((ref) => ref.value),
-  )
+function valueReferences(references: readonly ChartReference[]) {
+  return references
+    .filter((ref) => ref.axis === VALUE_AXIS || ref.axis === 'x')
+    .map((ref) => ref.value)
 }
 
 /**
@@ -1108,81 +768,29 @@ function valueReferences(parts: ChartParts) {
 function useCategoryValue(
   props: CategoryChartProps,
   options: CategoryRowOptions & CategoryLayout,
-  { state, placeholder, failed, rows, drawn, shown, parts }: CategoryRows,
+  { state, load, rows, drawn, shown, parts }: CategoryRows,
   { categories, current }: { categories: ChartCategory[]; current: ChartCategory[] },
   frame: ChartFrame,
   xyOf: (index: number) => ChartXYPoint | null,
 ) {
   const {
-    data,
     format,
     ordered = false,
     categoryFormat = String,
     activeIndex,
     defaultActiveIndex = null,
     onActiveIndexChange,
-    selected: selectedKey,
-    defaultSelected = null,
-    onSelectedChange,
-    loading = false,
   } = props
-  const { moves, messages, valueText } = state
-  const status = chartStatus({
-    placeholder,
-    loading,
-    failed,
-    rows: rows.length,
-    shown: shown.length,
-    drawn: drawn.length,
-  })
-
-  const selectable =
-    selectedKey !== undefined ||
-    props.defaultSelected !== undefined ||
-    onSelectedChange !== undefined
-  const [picked, setPicked] = useControllable(
-    selectedKey,
-    defaultSelected,
-    onSelectedChange,
+  const { messages, valueText } = state
+  const { status, fromPlaceholder, phase, entered } = useChartLife(
+    props,
+    state,
+    load,
+    { rows: rows.length, shown: shown.length, drawn: drawn.length },
+    { entrance: options.entrance, cascade: options.cascade ?? null },
   )
-  const selected = indexOfKey(
-    current.map((category) => category.key),
-    picked,
-  )
-
-  // The data that arrived as the placeholder went: until it changes, its marks grow out of the
-  // placeholder's.
-  const [loaded, setLoaded] = useState({
-    placeholder,
-    data: null as typeof data | null,
-  })
-  if (loaded.placeholder !== placeholder) {
-    setLoaded({ placeholder, data: placeholder ? null : data })
-  }
-  const fromPlaceholder = !placeholder && loaded.data === data
-  const [phase, setPhase] = useState<EntrancePhase>(
-    options.entrance ? 'waiting' : 'settled',
-  )
-  if (phase === 'waiting' && (state.seen || fromPlaceholder) && status !== 'loading') {
-    setPhase(fromPlaceholder ? 'settled' : 'entering')
-  }
-  // The entrance is over once its move has run, its cascade too.
-  const entering = phase === 'entering'
-  const figure = state.root
-  const cascade = options.cascade?.variable
-  const cascadeFallback = options.cascade?.fallback ?? 0
-  useLayoutEffect(() => {
-    if (!entering) return
-    let live = true
-    const element = figure.current
-    const span = cascade && element ? cascadeSpan(element, cascade, cascadeFallback) : 0
-    void moves.request(span, true).then(() => {
-      if (live) setPhase('settled')
-    })
-    return () => {
-      live = false
-    }
-  }, [entering, moves, figure, cascade, cascadeFallback])
+  const keys = current.map((category) => category.key)
+  const pick = useChartPick(props, keys)
 
   const textOf = (value: unknown, write: (value: number) => string) => {
     const range = rangeOf(value)
@@ -1222,34 +830,19 @@ function useCategoryValue(
     },
     categoryText: categoryFormat,
     activeProps: { activeIndex, defaultActiveIndex, onActiveIndexChange },
-    selected,
-    selectable,
+    selected: indexOfKey(keys, pick.picked),
+    selectable: pick.selectable,
     toggleSelected: (at) => {
-      const key = current[at]?.key
-      if (key !== undefined) setPicked(picked === key ? null : key)
+      const key = keys[at]
+      if (key !== undefined) pick.toggle(key)
     },
-    entered: phase !== 'waiting',
+    entered,
     status,
     ordered,
     parts,
-    forecasts: parts.declarations.flatMap((part) =>
-      part.forecast ? [part.forecast] : [],
-    ),
+    forecasts: parts.forecasts,
   }
-  return { chart, rows, placeholder, fromPlaceholder, phase }
-}
-
-/**
- * The scale a value axis had before its last change, by its signature, for
- * each axis of `scales`, so ticks and marks slide from where they were.
- */
-function usePreviousScales<Scale extends ChartScale>(
-  scales: Readonly<Record<string, Scale>>,
-): Readonly<Record<string, Scale>> {
-  const signature = Object.entries(scales)
-    .map(([axis, scale]) => `${axis}=${scaleSignature(scale)}`)
-    .join(';')
-  return useBefore(scales, signature)
+  return { chart, rows, placeholder: load.placeholder, fromPlaceholder, phase }
 }
 
 /**
@@ -1274,7 +867,11 @@ function useCategoryChart<Shapes>(
     options.orientation === 'vertical' ? plotSize.height : plotSize.width
   const room = Math.max(0, ...rooms.values)
   const scale = linearScale(
-    extentWithRoom(extentWith(shapes.extent, valueReferences(parts)), room, valueLength),
+    extentWithRoom(
+      extentWith(shapes.extent, valueReferences(parts.references)),
+      room,
+      valueLength,
+    ),
     {
       domain,
       tickCount,
@@ -1361,25 +958,6 @@ const cartesianChartKeys = [
   'paused',
 ] as const satisfies readonly (keyof (CartesianChartProps & LiveChartProps))[]
 
-/**
- * A row's key along an x of times: a calendar value's own text, so a day
- * keeps the key it has along categories, as charts synced with one share
- * it, and an instant's ISO form, whatever form it is given in.
- */
-function timeKey(value: unknown) {
-  const read = readTime(value)
-  return read?.instant ? isoInstant(read.time) : String(value)
-}
-
-/** A locale as one tag, for the lib's functions that take one. */
-/** A locale for the dates lib: the chart's own when it is one tag. */
-function localeTag(locale: Intl.LocalesArgument): string | undefined {
-  if (typeof locale === 'string') return locale
-  if (locale instanceof Intl.Locale) return locale.toString()
-  if (Array.isArray(locale)) return localeTag(locale[0])
-  return undefined
-}
-
 /** A value axis other than the chart's own: how it fits what its series reach, and how it writes and titles its values. */
 interface NamedValueAxis extends Pick<
   ValueAxisOptions,
@@ -1458,13 +1036,11 @@ function useCartesianChart(
   })
   const drawn = base.placeholder || base.failed ? base.drawn : clock.rows
   const rows = drawn === base.drawn ? base : { ...base, rows: drawn, drawn }
-  checkSeries(config, parts, options.kinds[0].mark)
+  checkSeries(config, parts.marks, options.kinds[0].mark)
   const numbersAlong = options.x !== undefined
   // A value given for an x of categories or times marks the value axis.
-  const references = parts.declarations.flatMap((part) =>
-    (part.references ?? []).map((ref) =>
-      ref.axis === 'x' && !numbersAlong ? { ...ref, axis: VALUE_AXIS } : ref,
-    ),
+  const references = parts.references.map((ref) =>
+    ref.axis === 'x' && !numbersAlong ? { ...ref, axis: VALUE_AXIS } : ref,
   )
   const roomState: ChartRoomState = {
     ...state,
@@ -1473,10 +1049,7 @@ function useCartesianChart(
     orientation: options.orientation,
     format: props.format,
   }
-  const room = Math.max(
-    0,
-    ...parts.declarations.map((part) => (part.room ? part.room(roomState) : 0)),
-  )
+  const room = Math.max(0, ...parts.rooms.map((room) => room(roomState)))
   const valueLength =
     options.orientation === 'vertical' ? plotSize.height : plotSize.width
   const model = cartesianModel({
@@ -1575,12 +1148,6 @@ function useCartesianChart(
 /** Where a row with no shown value sits among points, so the keys still reach it. */
 const NO_POINT: XYValue = { x: 0, y: 0 }
 
-/** The share of its role's duration a cascade's marks start over, from its variable on the chart. */
-function cascadeSpan(element: Element, variable: string, fallback: number) {
-  const value = Number.parseFloat(getComputedStyle(element).getPropertyValue(variable))
-  return Number.isFinite(value) ? Math.max(0, value) : fallback
-}
-
 /** The rows whose series isn't hidden, for a chart whose rows each belong to one. */
 function rowsShown(
   rows: readonly ChartDatum[],
@@ -1588,6 +1155,13 @@ function rowsShown(
   hidden: readonly string[],
 ) {
   return rows.filter((row) => !hidden.includes(seriesOf(row)))
+}
+
+/** A fraction of a plot's whole length as a fraction of its inner length, inside `inset` px at each end. */
+function placeFromFraction(fraction: number, length: number, inset: number) {
+  const inner = length - inset * 2
+  if (inner <= 0) return 0.5
+  return (fraction * length - inset) / inner
 }
 
 /**
@@ -1630,76 +1204,6 @@ function pickIndex(
 }
 
 /**
- * Where a point placed by both values sits on the plot, as fractions of it
- * from its physical left and its top, from its place along x from the
- * reading start and up the value axis.
- */
-function plotPlace(point: XYValue, direction: ReadingDirection): XYValue {
-  return { x: direction === 'rtl' ? 1 - point.x : point.x, y: 1 - point.y }
-}
-
-/** Values that parts of the chart add while they show, such as the values reference lines need the axis to reach. */
-function useRegistry<T>() {
-  const [values, setValues] = useState<readonly T[]>([])
-  const add = useCallback((value: T) => {
-    setValues((all) => [...all, value])
-    return () =>
-      setValues((all) => {
-        const at = all.indexOf(value)
-        return at === -1 ? all : [...all.slice(0, at), ...all.slice(at + 1)]
-      })
-  }, [])
-  return { values, add }
-}
-
-/**
- * The focus as the parts of a chart with categories read it: the category
- * it is on, by its place in the data. Told when new data moves the category
- * it is on, for a chart that keeps its own.
- */
-function CategoryActive({
-  toldRef,
-  children,
-}: {
-  toldRef: RefObject<number | null>
-  children: ReactNode
-}) {
-  const { current, activeProps } = useChart()
-  const { focus, setFocus, spotlit } = useChartFocus()
-  const grouped = useChartGroup() !== null
-  const keys = current.map((category) => category.key)
-  const active = focus === null ? null : indexOfKey(keys, targetKey(focus))
-  const lit = spotlit === null ? null : indexOfKey(keys, targetKey(spotlit))
-  const { activeIndex, onActiveIndexChange } = activeProps
-  useLayoutEffect(() => {
-    if (active === toldRef.current) return
-    // Moves the focus made are told as they happen, so this is new data moving its key.
-    toldRef.current = active
-    if (activeIndex === undefined && !grouped && active !== null)
-      onActiveIndexChange?.(active)
-  })
-  // One function for the chart's life, so parts that take it, such as the
-  // Bar list's rows, redraw only when what they show changes, without the
-  // React Compiler.
-  const latest = useRef(keys)
-  useLayoutEffect(() => {
-    latest.current = keys
-  })
-  const setActive = useCallback(
-    (index: number | null) => {
-      const key = index === null ? undefined : latest.current[index]
-      setFocus(key === undefined ? null : { kind: 'x', key })
-    },
-    [setFocus],
-  )
-  const value = useMemo(
-    () => ({ active, setActive, spotlit: lit }),
-    [active, setActive, lit],
-  )
-  return <ChartActiveContext value={value}>{children}</ChartActiveContext>
-}
-
-/**
  * The `<figure>` of a chart with categories, on the root's frame: the
  * chart's reader and focus from its categories, the parts written inside
  * it, and the chart's placeholder while it loads.
@@ -1735,38 +1239,22 @@ function CategoryChartFrame({
   const [opens] = useState(() => new WeakMap<ChartTarget, () => void>())
   const own = categoryReader(chart, along, setAlong, opens)
   const live = chart.frame.live
-  const reader = live ? liveReader(own, live, chart.direction) : own
-  const { current, selected, toggleSelected, activeProps } = chart
+  const read = live ? liveReader(own, live, chart.direction) : own
+  const reader = browse ? read : { ...read, browse: null }
+  const { current, selected, toggleSelected } = chart
   const keys = current.map((category) => category.key)
-  const targetOf = (index: number | null | undefined): ChartTarget | null => {
-    const key = index === null || index === undefined ? undefined : keys[index]
-    return key === undefined ? null : { kind: 'x', key }
-  }
+  const pickedKey = selected === null ? undefined : keys[selected]
   const root: ChartRootValue = {
     ...chart,
     reader,
     markerOf: (key) => chart.markerOf?.(key) ?? null,
-    picked: targetOf(selected),
+    picked: pickedKey === undefined ? null : { kind: 'x', key: pickedKey },
     togglePicked: (target) => {
       const index = target.kind === 'node' ? null : indexOfKey(keys, target.key)
       if (index !== null) toggleSelected(index)
     },
   }
-  // The index last told to `onActiveIndexChange`, or seen, so each change is told once.
-  const toldRef = useRef<number | null>(null)
-  const focus: ChartFocusProps = {
-    focus:
-      activeProps.activeIndex === undefined
-        ? undefined
-        : targetOf(activeProps.activeIndex),
-    defaultFocus: targetOf(activeProps.defaultActiveIndex),
-    onFocusChange: (target) => {
-      const index = target === null ? null : indexOfKey(keys, targetKey(target))
-      if (index === toldRef.current) return
-      toldRef.current = index
-      activeProps.onActiveIndexChange?.(index)
-    },
-  }
+  const { focusProps, toldRef } = useIndexFocus(reader.items, chart.activeProps)
   // A chart of many columns scrolls sideways once its plot would be narrower than it allows,
   // only while it shows its marks, so a note in their place stays in view. It takes the
   // opposite direction to the page, so it opens at its end, the latest column, from the first
@@ -1794,20 +1282,18 @@ function CategoryChartFrame({
   }, [scroller, last, figure])
   const scrolls = scroller && !fits
   return (
-    <ChartFrame
+    <RootFrame
       root={root}
-      focus={focus}
+      focus={focusProps}
       slot={slot}
       description={description}
       empty={empty}
-      browse={browse}
+      measuring={chart.frame.measuring}
+      inset={chart.inset}
       data-orientation={chart.orientation}
       data-scroller={scroller ? '' : undefined}
       data-scrolls={scrolls ? '' : undefined}
-      data-measuring={chart.frame.measuring ? '' : undefined}
       className={cn(
-        // Waiting for the plot's size, everything but the legend holds its place unseen.
-        'data-measuring:*:not-data-[slot=chart-legend]:invisible',
         scroller &&
           'scrollbar-thin grid-cols-[auto_minmax(var(--plot-least),1fr)_auto] overflow-x-auto overflow-y-hidden [grid-template-areas:"top_top_top"_"._top-axis_."_"end-axis_plot_start-axis"_"._bottom-axis_."_"bottom_bottom_bottom"]',
         scroller &&
@@ -1817,24 +1303,105 @@ function CategoryChartFrame({
         className,
       )}
       style={
-        {
-          ...(chart.inset ? { '--chart-inset': `${chart.inset}px` } : {}),
-          ...(scroller ? { '--plot-least': `${least}px` } : {}),
-          ...style,
-        } as CSSProperties
+        scroller ? ({ '--plot-least': `${least}px`, ...style } as CSSProperties) : style
       }
       {...props}
     >
       <ChartContext value={chart}>
-        <CategoryActive toldRef={toldRef}>
-          {live && <LiveHold hold={live.hold} />}
-          {children}
-          {placeholder}
-        </CategoryActive>
+        <ChartPartsContext value={chart.parts}>
+          <ChartAxesContext value={axesOf(chart)}>
+            <SeriesWordsContext value={categoryWords(chart)}>
+              <IndexActive
+                items={reader.items}
+                active={chart.activeProps}
+                toldRef={toldRef}
+              >
+                {live && <LiveHold hold={live.hold} />}
+                {children}
+                {placeholder}
+              </IndexActive>
+            </SeriesWordsContext>
+          </ChartAxesContext>
+        </ChartPartsContext>
       </ChartContext>
       {scroller && <ScrollCorners direction={chart.direction} />}
-    </ChartFrame>
+    </RootFrame>
   )
+}
+
+/**
+ * What the shared axes, grid and reference parts read of a chart with
+ * categories: its frame, but none on a grid of cells, whose axes only name
+ * its columns and rows; the names along each axis, categories along the
+ * category axis; and every value a reference at a summary reads.
+ */
+function axesOf(chart: ChartContextValue): ChartAxesValue {
+  const { grid, frame, orientation, current, categories, series, hidden, stack } = chart
+  const keys = current.map((category) => category.key)
+  const indexOf = (target: ChartTarget) => indexOfKey(keys, targetKey(target))
+  const percent = stack === 'expand'
+  if (grid) {
+    // A grid's names come from its layout, so they wait for the cells as a category's do.
+    const laidOut = chart.status === 'ready' || chart.status === 'hidden'
+    const gridNames = (axis: 'x' | 'y'): AxisNames => {
+      const own = grid[axis]
+      const names = laidOut ? own.names : []
+      return {
+        all: names,
+        current: names,
+        nameOf: (target) => {
+          const index = indexOf(target)
+          return index === null ? null : own.nameOf(index)
+        },
+        format: own.format,
+        keepInside: false,
+      }
+    }
+    return {
+      frame: null,
+      orientation,
+      inset: chart.inset,
+      names: { x: gridNames('x'), y: gridNames('y') },
+      summaryValues: () => [],
+      percent,
+    }
+  }
+  const named: AxisNames = {
+    all: categories,
+    current,
+    nameOf: indexOf,
+    format: chart.categoryText,
+    keepInside: true,
+  }
+  const numbersAlong = frame.x.scale.kind === 'linear'
+  return {
+    frame,
+    orientation,
+    inset: chart.inset,
+    names: {
+      x: !numbersAlong && orientation === 'vertical' ? named : null,
+      y: !numbersAlong && orientation === 'horizontal' ? named : null,
+    },
+    summaryValues: (axis) => {
+      // Points placed by both values each have a value on either axis.
+      if (numbersAlong) {
+        return current.map((category) => {
+          const point = chart.xyOf(category.index)?.value
+          return point ? (axis === 'x' ? point.x : point.y) : null
+        })
+      }
+      // Only the series read against the axis.
+      const shown = series.filter(
+        (key) => !hidden.includes(key) && frame.axisOf(key) === axis,
+      )
+      return stack === 'none'
+        ? current.flatMap((category) => shown.map((key) => category.datum[key]))
+        : current.map((category) =>
+            shown.reduce((sum, key) => sum + (numberOf(category.datum[key]) ?? 0), 0),
+          )
+    },
+    percent,
+  }
 }
 
 /**
@@ -1847,10 +1414,12 @@ function liveReader(
   live: ChartLive,
   direction: ReadingDirection,
 ): ChartReader {
+  const { browse } = reader
+  if (!browse) return reader
   // The layer moves toward the reading start: left, or right in right to left.
   const sign = direction === 'rtl' ? -1 : 1
   const anchor = (target: ChartTarget) => {
-    const at = reader.anchor(target)
+    const at = browse.anchor(target)
     return at && { ...at, x: at.x - sign * live.offset() }
   }
   // The keys reach only what the plot shows: rows kept past its start, or arrived past its end
@@ -1864,8 +1433,8 @@ function liveReader(
   /** From `target`, stepping `key` while it is out of view, the first in view, or null. */
   const toView = (target: ChartTarget | null, key: string) => {
     let at = target
-    for (let steps = 0; at && !shown(at) && steps < reader.stops; steps += 1) {
-      const next = reader.step(at, key)
+    for (let steps = 0; at && !shown(at) && steps < browse.stops; steps += 1) {
+      const next = browse.step(at, key)
       if (!next || next === at) return null
       at = next
     }
@@ -1873,16 +1442,19 @@ function liveReader(
   }
   return {
     ...reader,
-    targetAt: (point) =>
-      reader.targetAt({ ...point, x: point.x + sign * live.offset() * point.width }),
-    anchor,
-    start: toView(reader.start, back),
-    step: (from, key) => {
-      const next = reader.step(from, key)
-      if (!next) return null
-      if (key === 'Home') return toView(next, on) ?? from
-      if (key === 'End') return toView(next, back) ?? from
-      return shown(next) ? next : from
+    browse: {
+      ...browse,
+      targetAt: (point) =>
+        browse.targetAt({ ...point, x: point.x + sign * live.offset() * point.width }),
+      anchor,
+      start: toView(browse.start, back),
+      step: (from, key) => {
+        const next = browse.step(from, key)
+        if (!next) return null
+        if (key === 'Home') return toView(next, on) ?? from
+        if (key === 'End') return toView(next, back) ?? from
+        return shown(next) ? next : from
+      },
     },
   }
 }
@@ -1914,325 +1486,30 @@ function ScrollCorners({ direction }: { direction: ReadingDirection }) {
   )
 }
 
-/** The physical side a part of a chart that scrolls sideways holds still on: the frame takes the opposite direction to the page, so a logical inset would land on the wrong side. */
-function stickTo(side: 'start' | 'end', direction: ReadingDirection) {
-  return (side === 'start') === (direction === 'ltr')
-    ? 'group-data-scrolls/chart:left-0'
-    : 'group-data-scrolls/chart:right-0'
-}
-
-/** Whether a category's tooltip adds the total of its shown values: the tooltip's `total`. */
-const ChartTooltipTotal = createContext(false)
-
-/**
- * The values of the category at `index`: its name, then a row for each
- * shown series, with its change since the category before when the
- * categories run in order, and their total with `total`, which follows the
- * tooltip's own by default.
- */
-function ChartTooltipContent({
-  index,
-  total: own,
-  hideLabel = false,
-  className,
-  children,
-  ...props
-}: ComponentProps<'div'> & {
-  index: number
-  total?: boolean
-  hideLabel?: boolean
-}) {
-  const chart = useChart()
-  const { markerOf } = useChartRootValue()
-  const total = own ?? use(ChartTooltipTotal)
-  const {
-    id,
-    current,
-    series,
-    hidden,
-    config,
-    valueText,
-    seriesText,
-    categoryText,
-    ordered,
-    locale,
-    patternOf,
-    messages,
-    emphasis,
-  } = chart
-  const category = current[index]
-  if (!category) return null
-  const before = ordered ? current[index - 1] : undefined
-  const shown = series.filter((key) => !hidden.includes(key))
-  // Only what stacks adds up, never a line or a point beside it or a series on another axis.
-  const summed = shown.filter((key) => chart.frame.totals(key))
-  const sum = summed.reduce((all, key) => all + (numberOf(category.datum[key]) ?? 0), 0)
-  return (
-    // The tooltip sits outside the chart, so it carries the chart's id for its colours.
-    <div data-chart={id} className={cn('grid min-w-36 gap-1', className)} {...props}>
-      {!hideLabel && <div className='font-medium'>{categoryText(category.value)}</div>}
-      {shown.map((key) => {
-        return (
-          // The series brought forward reads in full colour; the rest stay as they are, legible.
-          <div
-            key={key}
-            data-lit={emphasis === key ? '' : undefined}
-            className='group/row flex items-center gap-2'
-          >
-            {/* A series drawn in a shape of its own, such as a line or points, keys it by that shape, as the legend does. */}
-            {markerOf(key) ? (
-              <SeriesKey
-                series={key}
-                slot={series.indexOf(key)}
-                pattern={patternOf(key)}
-                marker={markerOf(key) ?? undefined}
-              />
-            ) : (
-              <span
-                aria-hidden
-                className={cn(swatchClassName, forcedSeriesColor(series.indexOf(key)))}
-                style={swatchStyle(key, patternOf(key))}
-              />
-            )}
-            <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
-              {config[key]?.label ?? key}
-              {isForecast(chart, key, index) && ` · ${messages.forecast}`}
-            </span>
-            {before && (
-              <ChangeText
-                change={chart.seriesChange(category, before, key)}
-                locale={locale}
-                className={tooltipQuietClassName}
-              />
-            )}
-            {/* A value with a unit reads in its own order whatever the page's direction. */}
-            <span dir='auto' className='font-medium tabular-nums'>
-              {seriesText(category, key)}
-            </span>
-          </div>
-        )
-      })}
-      {total && summed.length > 1 && (
-        <div className='border-background/20 mt-0.5 flex items-center gap-2 border-t pt-1 forced-colors:border-[CanvasText]'>
-          <span className='text-background/75 flex-1 forced-colors:text-[CanvasText]'>
-            {messages.total}
-          </span>
-          <span className='font-medium tabular-nums'>{valueText(sum)}</span>
-        </div>
-      )}
-      {children}
-    </div>
-  )
-}
-
-/** The props a chart's root takes that `useCategoryChart` reads, so the root passes the rest to its frame. */
-const categoryChartKeys = [
-  'data',
-  'index',
-  'config',
-  'label',
-  'description',
-  'format',
-  'ordered',
-  'categoryFormat',
-  'locale',
-  'domain',
-  'tickCount',
-  'tickValues',
-  'allowDecimals',
-  'patterns',
-  'hiddenSeries',
-  'defaultHiddenSeries',
-  'onHiddenSeriesChange',
-  'activeIndex',
-  'defaultActiveIndex',
-  'onActiveIndexChange',
-  'selected',
-  'defaultSelected',
-  'onSelectedChange',
-  'loading',
-  'error',
-  'onRetry',
-  'empty',
-  'messages',
-  'ref',
-  'children',
-  'className',
-] as const satisfies readonly (keyof CategoryChartProps)[]
-
-/** The props a root passes on to its `<figure>`: those that aren't the chart's own. */
-function figureProps<P extends CategoryChartProps>(
-  props: P,
-  own: readonly string[] = [],
-): ComponentProps<'figure'> {
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(props)) {
-    if (
-      !(categoryChartKeys as readonly string[]).includes(key) &&
-      !(cartesianChartKeys as readonly string[]).includes(key) &&
-      !own.includes(key)
-    )
-      out[key] = value
-  }
-  return out as ComponentProps<'figure'>
-}
-
-/*
- * What the charts of shares of a whole, such as the Donut and the Waffle,
- * share: a share's value and colour, and its tooltip.
- */
-
-/** A share's value: a number above zero, or zero for one that is missing or below it. */
-function shareValue(datum: ChartDatum, dataKey: string) {
-  return Math.max(0, numberOf(datum[dataKey]) ?? 0)
-}
-
-/** A share's colour: its own, or the next of the chart's colours for one the config leaves out. */
-function shareColor(chart: Pick<ChartContextValue, 'series'>, category: ChartCategory) {
-  const slot = chart.series.indexOf(category.key)
-  return `var(--color-${category.key}, var(--chart-${((slot === -1 ? category.index : slot) % 5) + 1}))`
-}
-
-/** A row of a share's tooltip: one of its values, and its share. */
-interface ShareTooltipRow {
-  /** The value's name, when there are several, such as a ring's. */
-  label: string | null
-  value: string
-  share: string
-}
-
-/**
- * The tooltip for a share: its swatch and its name, its share and its
- * value, or under its name, each of its values'. `swatch` stands in for the
- * share's own, for a share drawn otherwise, such as a waffle's remaining
- * cells.
- */
-function ShareTooltipContent({
-  chart,
-  category,
-  name,
-  rows,
-  swatch: own,
-}: {
-  chart: ChartContextValue
-  category: ChartCategory
-  name: string
-  rows: readonly ShareTooltipRow[]
-  swatch?: ReactNode
-}) {
-  const slot = chart.series.indexOf(category.key)
-  const swatch = own ?? (
-    <span
-      aria-hidden
-      className={cn(
-        swatchClassName,
-        forcedSeriesColor(slot === -1 ? category.index : slot),
-      )}
-      style={swatchStyle(
-        category.key,
-        slot === -1 ? 'solid' : chart.patternOf(category.key),
-      )}
-    />
-  )
-  const figures = (row: ShareTooltipRow) => (
-    <>
-      {/* A value with a unit reads in its own order whatever the page's direction. */}
-      <span
-        dir='auto'
-        className='text-background/75 tabular-nums forced-colors:text-[CanvasText]'
-      >
-        {row.share}
-      </span>
-      <span dir='auto' className='font-medium tabular-nums'>
-        {row.value}
-      </span>
-    </>
-  )
-  const single = rows.length === 1 ? rows[0] : undefined
-  return (
-    // The tooltip sits outside the chart, so it carries the chart's id for its colours.
-    <div data-chart={chart.id} className='flex min-w-36 flex-col gap-1'>
-      <div className='flex items-center gap-2'>
-        {swatch}
-        <span
-          className={cn(
-            'min-w-0 flex-1 break-words',
-            single ? 'text-background/75 forced-colors:text-[CanvasText]' : 'font-medium',
-          )}
-        >
-          {name}
-        </span>
-        {single && figures(single)}
-      </div>
-      {!single &&
-        rows.map((row) => (
-          <div key={row.label} className='flex items-center gap-2 ps-4'>
-            <span className='text-background/75 min-w-0 flex-1 break-words forced-colors:text-[CanvasText]'>
-              {row.label}
-            </span>
-            {figures(row)}
-          </div>
-        ))}
-    </div>
-  )
-}
-
 export {
-  type LiveChartProps,
-  type NamedValueAxis,
-  axisLayerClassName,
-  axisSlide,
-  categoryReader,
+  type CartesianChartProps,
+  cartesianChartKeys,
+  type CartesianParts,
+  cartesianSignature,
   CategoryChartFrame,
   type CategoryChartInput,
-  type CategoryChartProps,
-  type CartesianChartProps,
   type CategoryReaderParts,
   type CategoryTable,
+  categoryReader,
   categoryTable,
-  type ChartActiveValue,
-  type ChartAxis,
-  type ChartAxisName,
   type ChartCategory,
   type ChartCellGrid,
   type ChartContextValue,
-  type ChartForecast,
-  type ChartFrame,
   type ChartGridAxis,
   type ChartPartDeclaration,
-  chartParts,
-  type ChartXYPoint,
   type ChartRoomState,
-  ChartTooltipContent,
-  ChartTooltipTotal,
+  type ChartXYPoint,
   columnLabel,
-  type DeclaringPart,
-  type EntrancePhase,
-  figureProps,
-  type FrameAxis,
-  localeTag,
-  isForecast,
-  numberAxis,
-  timeAxis,
+  type LiveChartProps,
+  type NamedValueAxis,
   pickIndex,
-  plotFraction,
-  plotOffset,
-  plotPlace,
   rowsShown,
-  shareColor,
-  ShareTooltipContent,
-  type ShareTooltipRow,
-  shareValue,
-  slideLine,
-  slideTo,
-  TICK_SPACING,
-  tickMove,
   useCartesianChart,
   useCategoryChart,
-  stickTo,
   useChart,
-  useChartActive,
-  useDeclared,
-  useRegistry,
-  useTicks,
 }
