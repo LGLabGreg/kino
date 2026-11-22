@@ -22,7 +22,7 @@ import {
   ChartLiveLayer,
   LIVE_SPAN,
 } from '@/registry/lib/chart-live-clock'
-import type { ReadingDirection } from '@/registry/lib/chart-math'
+import type { ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
 import {
   forcedSeriesColor,
   forcedSeriesTextColor,
@@ -124,12 +124,13 @@ function useLineFamily() {
 }
 
 /**
- * A series' points through the categories shown, read against its own value
- * axis, as fractions of the plot: an area's baseline too `withBase`, and all
- * along its axis's baseline when it lies `flat`.
+ * A series' points through the stops shown where it has a row, read
+ * against its own value axis, as fractions of the plot: an area's baseline
+ * too `withBase`, and all along its axis's baseline when it lies `flat`.
+ * A stop where only another dataset has a row is skipped, never a gap.
  */
 function framePoints(
-  chart: Pick<CartesianChartValue, 'current'>,
+  chart: Pick<CartesianChartValue, 'current' | 'rowOf'>,
   model: CartesianModel,
   key: string,
   flat: boolean,
@@ -137,7 +138,7 @@ function framePoints(
 ): LinePoint[] {
   const { scale, baseline } = model.valueAxisOf(key)
   return seriesPoints(
-    chart.current,
+    chart.current.filter((stop) => chart.rowOf(key, stop) !== null),
     model.spans[key] ?? [],
     scale,
     baseline,
@@ -401,6 +402,13 @@ interface LineSeriesProps extends Omit<ComponentProps<'div'>, 'children' | 'colo
   forecastFrom?: string
   /** Bridges each gap a missing value leaves with a dashed line, in place of a break. */
   connectNulls?: boolean
+  /**
+   * The series' own rows, on an x of times, in place of the chart's: each
+   * with the chart's `index` and the series' `dataKey`, in time order, such
+   * as a trend of two points or a second stream. Its line runs through its
+   * own times only.
+   */
+  data?: readonly ChartDatum[]
 }
 
 /**
@@ -411,6 +419,7 @@ interface LineSeriesProps extends Omit<ComponentProps<'div'>, 'children' | 'colo
  */
 function LineSeries({
   dataKey,
+  data,
   curve = 'monotone',
   dots = false,
   dashed = false,
@@ -563,6 +572,7 @@ function LineSeries({
     <div
       data-slot={`${family.name}-series`}
       data-series={dataKey}
+      data-own={data ? '' : undefined}
       data-hidden={hidden || loading ? '' : undefined}
       aria-hidden
       className={cn(
@@ -716,6 +726,7 @@ function LineSeries({
           fill={fill ? { elements: holdFill, peak: drawing.peak } : null}
           points={to}
           live={live}
+          fresh={live.fresh(dataKey)}
           slot={slot}
           dimmed={stepsBack}
         />
@@ -729,7 +740,7 @@ function LineSeries({
  * plot's end, where a pulse says it is live, so the line always reaches now
  * and its end only moves up or down as each row lands. It shows while the
  * plot runs with the clock and rows keep arriving, and fades once it is
- * held, stopped or the stream goes quiet, since it then says nothing true.
+ * held, stopped or its own stream goes quiet, since it then says nothing true.
  * Under an area, the fill holds with it. It is not data: the tooltip and the
  * table read only the rows.
  */
@@ -740,6 +751,7 @@ function LineHold({
   fill,
   points,
   live,
+  fresh,
   slot,
   dimmed,
 }: {
@@ -749,13 +761,15 @@ function LineHold({
   fill: { elements: AreaFillElements; peak: number } | null
   points: readonly LinePoint[]
   live: ChartLive
+  /** Whether the rows the series is drawn from are still arriving: its own, or the chart's. */
+  fresh: boolean
   slot: number
   dimmed: boolean
 }) {
   const { direction } = useCartesian()
   const newest = points.findLast((point) => point.defined)
   if (!newest) return null
-  const shown = live.running && live.fresh
+  const shown = live.running && fresh
   const flip = direction === 'rtl' && '-scale-x-100'
   return (
     <div
@@ -989,9 +1003,13 @@ function LineLitMarks() {
           style={{ '--line-lit-x': x } as CSSProperties}
         >
           {shown.flatMap((key) => {
-            const top = family.topOf(key, category)
-            const bottom = family.bottomOf?.(key, category) ?? null
-            if (top === null) return []
+            // A series with no row here marks its nearest own row, as the tooltip reads it.
+            const near = chart.nearOf(key, category)
+            const top = near && family.topOf(key, near)
+            const bottom = (near && family.bottomOf?.(key, near)) ?? null
+            if (!near || top === null) return []
+            const shift = bandCentre(near.band) - centre
+            const dx = chart.direction === 'rtl' ? -shift : shift
             const dot = (name: string, y: number) => (
               <span
                 key={name}
@@ -1006,13 +1024,13 @@ function LineLitMarks() {
                         family.litDots.current.delete(name)
                     }
                   }}
-                  data-key={category.key}
+                  data-key={near.key}
                   data-snap={snap}
                   // While the series moves, it carries the dot on `--line-lit-y`, frame by frame.
                   className={cn(move, 'size-0 data-moving:transition-none')}
                   style={
                     {
-                      translate: `0 var(--line-lit-y, ${y * 100}cqh)`,
+                      translate: `${dx * 100}cqw var(--line-lit-y, ${y * 100}cqh)`,
                       '--line-color': seriesColor(key),
                     } as CSSProperties
                   }

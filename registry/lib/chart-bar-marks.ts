@@ -43,7 +43,10 @@ function farEnd(spans: SeriesSpans, keys: readonly string[], index: number) {
  * The part of a category's `band` the bar of `key` stands in: its slot
  * among the bars side by side, or its stack's among the stacks. `bars` are
  * the chart's bar series in order, and only the shown ones and `key` take a
- * slot, so the rest close up when one hides.
+ * slot, so the rest close up when one hides. Every slot is as wide at every
+ * stop, and at a stop where only some of them have a row (`here`), such as
+ * a series' own dated rows beside the chart's, those sit together in the
+ * band's middle.
  */
 function barBand(
   band: Band,
@@ -53,19 +56,35 @@ function barBand(
   stack: ChartStack,
   stackOf: (key: string) => string,
   gap: number,
+  here: (key: string) => boolean,
 ): Band {
   const order = bars.filter((k) => k === key || !hidden.includes(k))
-  if (stack === 'none') return slotBand(band, order.indexOf(key), order.length, gap)
-  const stacks = stacksOf(order, stackOf)
-  return slotBand(band, stacks.indexOf(stackOf(key)), stacks.length, gap)
+  const slotOf = stack === 'none' ? (k: string) => k : stackOf
+  const slots = stacksOf(order, slotOf)
+  const filled = slots.filter(
+    (slot) => slot === slotOf(key) || order.some((k) => slotOf(k) === slot && here(k)),
+  )
+  return slotBand(band, filled.indexOf(slotOf(key)), filled.length, gap, slots.length)
 }
 
-/** The part of `band` the series in `slot` takes when `slots` series sit side by side, `gap` apart as a share of one slot. */
-function slotBand(band: Band, slot: number, slots: number, gap = 0.12): Band {
-  if (slots <= 1 || slot < 0) return band
-  const inner = bandAt(slot, slots, { gap, outer: 0 })
+/**
+ * The part of `band` the series in `slot` takes when `slots` series sit
+ * side by side, `gap` apart as a share of one slot, each as wide as one of
+ * `room` slots: with fewer than `room`, the `slots` sit in the band's middle.
+ */
+function slotBand(
+  band: Band,
+  slot: number,
+  slots: number,
+  gap = 0.12,
+  room = slots,
+): Band {
+  if (room <= 1 || slot < 0) return band
+  const inner = bandAt(slot, room, { gap, outer: 0 })
+  const last = bandAt(slots - 1, room, { gap, outer: 0 })
+  const shift = (1 - (last.start + last.size)) / 2
   return {
-    start: band.start + inner.start * band.size,
+    start: band.start + (inner.start + shift) * band.size,
     size: inner.size * band.size,
   }
 }

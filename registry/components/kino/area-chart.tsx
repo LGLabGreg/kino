@@ -148,8 +148,9 @@ function Area(props: AreaProps) {
   return <LineSeries {...props} fill />
 }
 
-Area.declare = ({ dataKey }: AreaProps): ChartPartDeclaration => ({
+Area.declare = ({ dataKey, data }: AreaProps): ChartPartDeclaration => ({
   series: { key: dataKey, mark: 'area' },
+  ...(data === undefined ? {} : { rows: data }),
 })
 
 export {

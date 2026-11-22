@@ -37,6 +37,7 @@ import { lineMarks } from '@/registry/lib/chart-line-marks'
 import { ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import {
   cascadeAt,
+  type ChartDatum,
   type ChartSeries,
   type ChartStack,
   plotPoint,
@@ -256,6 +257,12 @@ function checkAxes(
 type PointsProps = Omit<ComponentProps<'div'>, 'children'> & {
   /** The key of this series' values in the data, and of its entry in the config. */
   dataKey: string
+  /**
+   * The series' own rows, on an x of times, in place of the chart's: each
+   * with the chart's `index` and the series' `dataKey`, in time order. Its
+   * points stand at their own times.
+   */
+  data?: readonly ChartDatum[]
   /** Each point's radius, in px. */
   radius?: number
 }
@@ -268,7 +275,7 @@ type PointsProps = Omit<ComponentProps<'div'>, 'children'> & {
  * while the rest step back.
  */
 function Points(props: PointsProps) {
-  const { dataKey, radius = 5, ...rest } = props
+  const { dataKey, radius = 5, data, ...rest } = props
   useDeclared('Points', Points.declare(props), cartesianSignature)
   const chart = useCartesian()
   const family = useLineFamily()
@@ -277,9 +284,8 @@ function Points(props: PointsProps) {
   const hidden = chart.hidden.includes(dataKey)
   const rising = !chart.entered && family.entrance === 'rise'
   const rtl = chart.direction === 'rtl'
-  const placed = family.pointsOf(dataKey, rising).flatMap((point, at): PlacedPoint[] => {
-    const category = chart.current[at]
-    if (!point.defined || point.key === null || !category) return []
+  const placed = family.pointsOf(dataKey, rising).flatMap((point): PlacedPoint[] => {
+    if (!point.defined || point.key === null) return []
     return [
       {
         key: point.key,
@@ -291,12 +297,15 @@ function Points(props: PointsProps) {
       },
     ]
   })
-  const litKey = spotlit === null || hidden ? null : (chart.current[spotlit]?.key ?? null)
+  // A series with no row at the lit stop lights its nearest own one, as the tooltip reads it.
+  const litStop = spotlit === null || hidden ? undefined : chart.current[spotlit]
+  const litKey = (litStop && chart.nearOf(dataKey, litStop)?.key) ?? null
   const pointKeys = chart.series.filter((key) => chart.config[key]?.mark === 'point')
   return (
     <PointSeries
       name='composed-chart'
       dataKey={dataKey}
+      data-own={data ? '' : undefined}
       points={placed}
       lit={placed.find((point) => point.key === litKey)}
       seriesIndex={chart.series.indexOf(dataKey)}
@@ -312,8 +321,9 @@ function Points(props: PointsProps) {
   )
 }
 
-Points.declare = ({ dataKey }: PointsProps): ChartPartDeclaration => ({
+Points.declare = ({ dataKey, data }: PointsProps): ChartPartDeclaration => ({
   series: { key: dataKey, mark: 'point' },
+  ...(data === undefined ? {} : { rows: data }),
 })
 
 export {

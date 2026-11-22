@@ -5,7 +5,6 @@ import {
   type ChartMark,
   type ChartStack,
   numberOf,
-  rowValues,
   type SeriesValueOf,
   type Span,
   type XYValue,
@@ -27,7 +26,7 @@ import {
   timeScale,
   type TimeScaleOptions,
 } from '@/registry/lib/chart-scale'
-import { readTime, type Weekday } from '@/registry/lib/dates'
+import { isoInstant, readTime, type Weekday } from '@/registry/lib/dates'
 
 /*
  * The cartesian frame: an x axis, one or more value axes and the marks
@@ -37,7 +36,9 @@ import { readTime, type Weekday } from '@/registry/lib/dates'
  * what its series and reference lines reach. One pure function of the props,
  * so the server draws the same range the browser does. The kinds of mark
  * are in files of their own, and a chart hands the frame only the kinds it
- * draws.
+ * draws. On an x of times, a series may bring rows of its own, such as a
+ * trend or a second stream: the stops are every dataset's times joined
+ * (`joinStops`), and each series is read from its own rows.
  */
 
 /** Each series' span in every row, null for a missing value. */
@@ -135,6 +136,8 @@ interface ChartReference {
 interface CartesianInput {
   /** The rows drawn, in order. */
   rows: readonly ChartDatum[]
+  /** The rows of each series that brings its own, by its key, on an x of times: drawn from them in place of `rows`. */
+  own: Readonly<Record<string, readonly ChartDatum[]>>
   config: ChartConfig
   hidden: readonly string[]
   /** The kinds of mark the chart draws, its own first: a series that names no mark is drawn as that. */
@@ -152,6 +155,14 @@ interface CartesianInput {
 
 interface CartesianModel {
   x: ChartScale
+  /** How many stops there are along x: the rows, or on an x of times, every dataset's times joined. */
+  count: number
+  /** On an x of times, each stop: its time, and the rows there; null on other axes, whose stops are the rows. */
+  timeStops: readonly JoinedStop[] | null
+  /** On an x of times, a dataset's times (`JoinedStops.timesOf`); null on other axes. */
+  timesOf: JoinedStops['timesOf'] | null
+  /** The row `key` is drawn from at stop `index`: its own, or the chart's for a series with none; null where it has none. */
+  rowOf: (key: string, index: number) => ChartDatum | null
   /** Each value axis's scale, by its id; the chart's own, `value`, always. */
   y: Readonly<Record<string, LinearScale>> & { value: LinearScale }
   /** Where marks grow from on each value axis, as a fraction of it. */
@@ -162,11 +173,11 @@ interface CartesianModel {
   markOf: (key: string) => ChartMark
   /** The id of the value axis a series is read against. */
   axisOf: (key: string) => string
-  /** Whether a series adds to its category's total: a mark that stacks, read against the chart's own value axis. */
+  /** Whether a series adds to its category's total: a mark that stacks, read against the chart's own value axis, with no rows of its own. */
   totals: (key: string) => boolean
   /** The scale of the value axis a series is read against, and where its marks grow from on it, as a fraction of it. */
   valueAxisOf: (key: string) => { scale: LinearScale; baseline: number }
-  /** The stack a series stacks in, which only its own kind of mark on its axis shares. */
+  /** The stack a series stacks in, which only its own kind of mark on its axis shares; one with rows of its own stacks alone. */
   stackOf: (key: string) => string
   /** Each series' span in every row, a hidden one where it would sit. */
   spans: SeriesSpans
@@ -217,43 +228,66 @@ function cartesianModel(input: CartesianInput): CartesianModel {
     }
   }
   const axisOf = (key: string) => config[key]?.axis ?? VALUE_AXIS
+  const { rows } = input
+  // A series with rows of its own has values at its own times only, so it stacks with nothing.
+  const hasOwn = (key: string) => Object.hasOwn(input.own, key)
+  const stacks = (key: string) =>
+    (kindOf.get(markOf(key))?.stacks ?? false) && !hasOwn(key)
   if (stack === 'expand') {
     // Shares of a whole and raw values can't share one axis.
-    const stacked = new Set(
-      series.filter((key) => kindOf.get(markOf(key))?.stacks).map(axisOf),
-    )
-    const raw = series.find(
-      (key) => !kindOf.get(markOf(key))?.stacks && stacked.has(axisOf(key)),
-    )
+    const stacked = new Set(series.filter(stacks).map(axisOf))
+    const raw = series.find((key) => !stacks(key) && stacked.has(axisOf(key)))
     if (raw !== undefined) {
       throw new Error(
-        `The series \`${raw}\` is drawn as \`${markOf(raw)}\`, which doesn't stack, on the axis \`${axisOf(raw)}\` that the chart stacks as shares of 100%. Give it an \`axis\` of its own in the config.`,
+        hasOwn(raw)
+          ? `The series \`${raw}\` brings rows of its own, which stack with nothing, on the axis \`${axisOf(raw)}\` that the chart stacks as shares of 100%. Give it an \`axis\` of its own in the config.`
+          : `The series \`${raw}\` is drawn as \`${markOf(raw)}\`, which doesn't stack, on the axis \`${axisOf(raw)}\` that the chart stacks as shares of 100%. Give it an \`axis\` of its own in the config.`,
       )
     }
   }
-  const stackOf = (key: string) => `${axisOf(key)}\u0000${config[key]?.stack ?? ''}`
-  const { rows } = input
-  const valueOf = rowValues(rows)
+  const stackOf = (key: string) =>
+    hasOwn(key)
+      ? `${axisOf(key)}\u0000\u0001${key}`
+      : `${axisOf(key)}\u0000${config[key]?.stack ?? ''}`
+  if (Object.keys(input.own).length > 0 && x.kind !== 'time') {
+    throw new Error(
+      "A series' own rows need an x of times: give the chart `indexType='time'`.",
+    )
+  }
+  const joined = x.kind === 'time' ? joinStops(rows, input.own, x.key) : null
+  const count = joined ? joined.stops.length : rows.length
+  const rowOf = joined
+    ? joined.rowOf
+    : (_key: string, index: number) => rows[index] ?? null
+  const valueOf: SeriesValueOf = (key, index) => rowOf(key, index)?.[key]
   const shown = series.filter((key) => !hidden.includes(key))
   const axes = [...new Set([VALUE_AXIS, ...series.map(axisOf)])]
 
   const spans: Record<string, readonly (Span | null)[]> = {}
   const extents = new Map<string, Span[]>()
+  // Each kind of mark on each axis, and apart from them, its series with rows of their own,
+  // which stack with nothing.
   const groups = axes.flatMap((axis) =>
-    kinds.map((kind) => ({
-      axis,
-      kind,
-      series: series.filter((key) => axisOf(key) === axis && markOf(key) === kind.mark),
-    })),
+    kinds.flatMap((kind) =>
+      [false, true].map((alone) => ({
+        axis,
+        kind,
+        stack: alone ? ('none' as const) : stack,
+        series: series.filter(
+          (key) =>
+            axisOf(key) === axis && markOf(key) === kind.mark && hasOwn(key) === alone,
+        ),
+      })),
+    ),
   )
   for (const group of groups) {
     if (group.series.length === 0) continue
     const out = group.kind.spans({
-      count: rows.length,
+      count,
       valueOf,
       series: group.series,
       shown: group.series.filter((key) => shown.includes(key)),
-      stack,
+      stack: group.stack,
       stackOf,
     })
     Object.assign(spans, out.spans)
@@ -288,10 +322,9 @@ function cartesianModel(input: CartesianInput): CartesianModel {
   const allowDecimalsOn = (axis: string) =>
     optionsOf(axis).allowDecimals ??
     (stack === 'expand' ||
-      !allWhole(
-        rows,
-        shown.filter((key) => axisOf(key) === axis),
-      ))
+      !shown
+        .filter((key) => axisOf(key) === axis)
+        .every((key) => allWhole(input.own[key] ?? rows, [key])))
   const ownAxis = fit(VALUE_AXIS)
   const others = axes.filter((axis) => axis !== VALUE_AXIS)
   const fitted = new Map(others.map((axis) => [axis, fit(axis)]))
@@ -343,30 +376,43 @@ function cartesianModel(input: CartesianInput): CartesianModel {
   }
 
   const xValues = x.kind === 'number' ? input.rows.map((row) => numberOf(row[x.key])) : []
-  const times = x.kind === 'time' ? rowTimes(rows, x.key) : null
-  const hasBars = Object.keys(config).some((key) => markOf(key) === 'bar')
+  const bars = series.filter((key) => markOf(key) === 'bar')
+  const times = joined?.stops.map((stop) => stop.time) ?? []
   const xScale =
-    x.kind === 'time' && times
-      ? timeScale(times.times, {
-          timeZone: times.instants ? x.timeZone : 'UTC',
+    x.kind === 'time' && joined
+      ? timeScale(times, {
+          timeZone: joined.instants ? x.timeZone : 'UTC',
           firstDay: x.firstDay,
-          bands: hasBars ? (x.gaps ?? {}) : null,
+          // The bars stand on the times their series have rows at, so a line's own rows
+          // between them never make them thinner.
+          bands:
+            bars.length > 0
+              ? {
+                  gaps: x.gaps ?? {},
+                  times: times.filter((_, at) =>
+                    bars.some((key) => joined.rowOf(key, at) !== null),
+                  ),
+                }
+              : null,
           window: x.window,
         })
-      : xScaleOf(input, xValues, hasBars)
+      : xScaleOf(input, xValues, bars.length > 0)
 
   return {
     x: xScale,
+    count,
+    timeStops: joined?.stops ?? null,
+    timesOf: joined?.timesOf ?? null,
+    rowOf,
     bandOf: (index) => {
-      if (xScale.kind === 'time') return xScale.bandOf(times?.times[index] ?? 0)
+      if (xScale.kind === 'time') return xScale.bandOf(times[index] ?? 0)
       return xScale.kind === 'linear' ? NO_BAND : xScale.bandAt(index)
     },
     y: scales,
     baselines,
     markOf,
     axisOf,
-    totals: (key) =>
-      axisOf(key) === VALUE_AXIS && (kindOf.get(markOf(key))?.stacks ?? false),
+    totals: (key) => axisOf(key) === VALUE_AXIS && stacks(key),
     valueAxisOf: (key) => {
       const axis = axisOf(key)
       const scale = scales[axis]
@@ -443,39 +489,184 @@ function xScaleOf(
 const NO_BAND: Band = { start: 0, size: 0 }
 
 /**
- * The time of each of `rows` under `key`, read once, and whether they are
- * instants rather than calendar values. Throws, naming the row, on one with
- * no time, on calendar values and instants together, and on times out of
- * order or repeated, which a line couldn't run through in order.
+ * A row's key along an x of times: a calendar value's own text, so a day
+ * keeps the key it has along categories, as charts synced with one share
+ * it, and an instant's ISO form, whatever form it is given in.
  */
-function rowTimes(
+function timeKey(value: unknown) {
+  const read = readTime(value)
+  return read?.instant ? isoInstant(read.time) : String(value)
+}
+
+/** A place along an x of times where one dataset or more has a row. */
+interface JoinedStop {
+  /** The time's key (`timeKey`), as the first dataset with a row there writes it, the chart's own first. */
+  key: string
+  /** That dataset's value under the chart's `index`. */
+  value: unknown
+  /** In ms. */
+  time: number
+  /** The chart's own row here, or null. */
+  datum: ChartDatum | null
+  /** The row here of each series with rows of its own that has one. */
+  own: Readonly<Record<string, ChartDatum>>
+}
+
+interface JoinedStops {
+  /** In time order, each time once. */
+  stops: readonly JoinedStop[]
+  /** The row `series` is drawn from at stop `index`: its own, or the chart's for a series with none; null where it has none. */
+  rowOf: (series: string, index: number) => ChartDatum | null
+  /** Whether the times are instants rather than calendar values. */
+  instants: boolean
+  /** A dataset's times in ms, in its rows' order: the chart's own rows for null, else a series' own. */
+  timesOf: (series: string | null) => readonly number[]
+}
+
+/**
+ * Every dataset's times joined into the stops, in time order: the chart's
+ * own `rows`, then each series' `own`, joined by their time in ms, so
+ * `2026-01` and `2026-01-01` are one stop. Throws, naming the row, on one
+ * with no time under `index`, or out of order, or repeated, and on calendar
+ * values and instants together, which are read on two clocks.
+ */
+function joinStops(
+  rows: readonly ChartDatum[],
+  own: Readonly<Record<string, readonly ChartDatum[]>>,
+  index: string,
+): JoinedStops {
+  const datasets = [
+    { series: null, rows },
+    ...Object.entries(own).map(([series, rows]) => ({ series, rows })),
+  ]
+  const byTime = new Map<
+    number,
+    Omit<JoinedStop, 'datum' | 'own'> & {
+      datum: ChartDatum | null
+      own: Record<string, ChartDatum>
+    }
+  >()
+  let instants: { instant: boolean; series: string | null } | null = null
+  const timesBy = new Map<string | null, readonly number[]>()
+  for (const { series, rows } of datasets) {
+    const read = datasetTimes(rows, index, series)
+    timesBy.set(series, read.times)
+    if (read.instants !== null) {
+      if (instants && instants.instant !== read.instants) {
+        const way = (instant: boolean) => (instant ? 'instants' : 'calendar values')
+        throw new Error(
+          `${datasetName(instants.series)} holds ${way(instants.instant)} under \`${index}\`, and ${datasetName(series)} holds ${way(read.instants)}: give them all one way.`,
+        )
+      }
+      instants ??= { instant: read.instants, series }
+    }
+    for (const [at, time] of read.times.entries()) {
+      const row = rows[at]!
+      let stop = byTime.get(time)
+      if (!stop) {
+        stop = { key: timeKey(row[index]), value: row[index], time, datum: null, own: {} }
+        byTime.set(time, stop)
+      }
+      if (series === null) stop.datum = row
+      else stop.own[series] = row
+    }
+  }
+  const stops: readonly JoinedStop[] = [...byTime.values()].toSorted(
+    (a, b) => a.time - b.time,
+  )
+  return {
+    stops,
+    rowOf: (series, at) => {
+      const stop = stops[at]
+      if (!stop) return null
+      return Object.hasOwn(own, series) ? (stop.own[series] ?? null) : stop.datum
+    },
+    instants: instants?.instant ?? false,
+    timesOf: (series) => timesBy.get(series) ?? [],
+  }
+}
+
+/**
+ * The row of a series' that the tooltip and what is read out give at a
+ * stop at `time`, as its place among `times`, the series' rows' times in
+ * order: the one exactly there, or else its nearest within half the smaller
+ * of `gaps`, its own rows' usual gap and the chart's rows' (`usualGap`), so
+ * two streams stamped apart read as one moment while a trend of two points
+ * over a hundred days shows at its two points alone. A gap that isn't known
+ * (null) isn't used; with neither, only a row exactly there. The earlier
+ * row on a tie; null past that.
+ */
+function nearestRow(
+  times: readonly number[],
+  time: number,
+  gaps: { own: number | null; chart: number | null },
+): number | null {
+  // The first row at `time` or after it.
+  let low = 0
+  let high = times.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (times[middle]! < time) low = middle + 1
+    else high = middle
+  }
+  if (times[low] === time) return low
+  const known = [gaps.own, gaps.chart].filter((gap) => gap !== null)
+  if (known.length === 0) return null
+  const reach = Math.min(...known) / 2
+  const before = low - 1
+  const near = [before, low].filter(
+    (at) => at >= 0 && at < times.length && Math.abs(times[at]! - time) <= reach,
+  )
+  if (near.length === 0) return null
+  // The earlier on a tie, as `before` comes first.
+  return near.reduce((best, at) =>
+    Math.abs(times[at]! - time) < Math.abs(times[best]! - time) ? at : best,
+  )
+}
+
+/** How an error names a dataset: the chart's own rows, or a series' own. */
+function datasetName(series: string | null) {
+  return series === null ? "The chart's `data`" : `The series \`${series}\`'s \`data\``
+}
+
+/**
+ * The time of each of `rows` under `key`, read once, and whether they are
+ * instants rather than calendar values, or null with no rows. Throws,
+ * naming the row of `series`' data or the chart's, on one with no time, on
+ * calendar values and instants together, and on times out of order or
+ * repeated, which a line couldn't run through in order.
+ */
+function datasetTimes(
   rows: readonly ChartDatum[],
   key: string,
-): { times: readonly number[]; instants: boolean } {
+  series: string | null,
+): { times: readonly number[]; instants: boolean | null } {
   const times: number[] = []
   let instants: boolean | null = null
+  const name = (at: number) =>
+    series === null ? `Row ${at}` : `Row ${at} of the series \`${series}\`'s \`data\``
   for (const [at, row] of rows.entries()) {
     const read = readTime(row[key])
     if (!read) {
       throw new Error(
-        `Row ${at} has no time under \`${key}\`: give a \`yyyy-mm-dd\` date, a \`yyyy-mm\` month, a \`yyyy-mm-ddTHH:mm\` time, an ISO instant, a \`Date\` or milliseconds.`,
+        `${name(at)} has no time under \`${key}\`: give a \`yyyy-mm-dd\` date, a \`yyyy-mm\` month, a \`yyyy-mm-ddTHH:mm\` time, an ISO instant, a \`Date\` or milliseconds.`,
       )
     }
     if (instants !== null && instants !== read.instant) {
       throw new Error(
-        `Row ${at}'s time under \`${key}\` is ${read.instant ? 'an instant' : 'a calendar value'}, and the rows before it are ${instants ? 'instants' : 'calendar values'}: give them all one way.`,
+        `${name(at)}'s time under \`${key}\` is ${read.instant ? 'an instant' : 'a calendar value'}, and the rows before it are ${instants ? 'instants' : 'calendar values'}: give them all one way.`,
       )
     }
     instants = read.instant
     const before = times.at(-1)
     if (before !== undefined && read.time <= before) {
       throw new Error(
-        `Row ${at}'s time under \`${key}\` ${read.time === before ? 'repeats the one before it' : 'comes before the one before it'}: give the rows in time order, each time once.`,
+        `${name(at)}'s time under \`${key}\` ${read.time === before ? 'repeats the one before it' : 'comes before the one before it'}: give the rows in time order, each time once.`,
       )
     }
     times.push(read.time)
   }
-  return { times, instants: instants ?? false }
+  return { times, instants }
 }
 
 export {
@@ -484,9 +675,14 @@ export {
   cartesianModel,
   type CartesianX,
   type ChartReference,
+  type JoinedStop,
+  type JoinedStops,
+  joinStops,
   markLayer,
   type MarkKind,
+  nearestRow,
   type SeriesSpans,
+  timeKey,
   VALUE_AXIS,
   type ValueAxisOptions,
 }

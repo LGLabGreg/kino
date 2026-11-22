@@ -41,14 +41,15 @@ import {
 } from '@/registry/lib/chart-radial'
 import {
   type ChartFormat,
+  type ChartItem,
   ChartSvgPattern,
   drawingFrame,
   drawingSize,
   forcedSeriesColor,
   forcedSeriesTextColor,
   formatterOf,
-  plotLayerClassName,
   type MoveRole,
+  plotLayerClassName,
   seriesColor,
   useChartRootValue,
   useFromRest,
@@ -368,16 +369,19 @@ function RadarChart(props: RadarChartProps) {
       turn: turns.get(stop.key) ?? 0,
       r: flat ? 0 : (fractionAt(stop, key) ?? 0),
     }))
+  // On scales of their own, each value is written against its axis's top, as the shape draws it.
+  const seriesText = (stop: ChartItem, key: string) => {
+    const value = numberOf(stop.datum?.[key])
+    const top = ownScales ? numberOf(stop.datum?.[maxKey]) : null
+    return value === null || top === null
+      ? chart.datumText(stop.datum?.[key])
+      : state.messages.outOf(state.valueText(value), state.valueText(top))
+  }
   const words: SeriesWordsInput = {
     stops: current,
-    // On scales of their own, each value is written against its axis's top, as the shape draws it.
-    seriesText: (stop, key) => {
-      const value = numberOf(stop.datum?.[key])
-      const top = ownScales ? numberOf(stop.datum?.[maxKey]) : null
-      return value === null || top === null
-        ? chart.datumText(stop.datum?.[key])
-        : state.messages.outOf(state.valueText(value), state.valueText(top))
-    },
+    seriesText,
+    // Every axis holds a row of each series.
+    seriesNear: (stop, key) => ({ text: seriesText(stop, key), at: null }),
     // Its axes don't run in order, so a value has no change since the one before.
     seriesChange: () => null,
     stopText: (stop) => stopText(stop.value),

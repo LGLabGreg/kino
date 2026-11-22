@@ -2,7 +2,6 @@
 
 import {
   edgeAt,
-  usualGap,
   glideTo,
   heldAt,
   layerOffset,
@@ -12,6 +11,7 @@ import {
   type LiveTrajectory,
   nextAnchor,
   paceAt,
+  quietDelay,
   restingEdge,
   restOf,
   running,
@@ -27,6 +27,7 @@ import {
   type RefObject,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react'
@@ -51,8 +52,11 @@ interface ChartLive {
   anchor: number
   /** Whether the plot's end runs with the clock now: live, and not paused. */
   running: boolean
-  /** Whether rows are still arriving: false once none has for a couple of the usual gaps. */
-  fresh: boolean
+  /**
+   * Whether the rows a series is drawn from are still arriving: false once
+   * none has for a couple of that dataset's usual gaps.
+   */
+  fresh: (series: string) => boolean
   /** Gives a layer placed by x the clock's moves; a ref. */
   layer: (element: HTMLElement | null) => (() => void) | undefined
   /** How far the layer has moved toward the reading start right now, in plot widths, read from the clock. */
@@ -66,7 +70,12 @@ interface LiveClockInput {
   window: number | null
   live: boolean
   paused: boolean
-  rows: readonly ChartDatum[]
+  /**
+   * Each dataset's rows, by its key: the chart's own, then each series'
+   * that brings its own, keyed by the series. Every row has its time under
+   * the chart's `index`.
+   */
+  datasets: readonly { key: string; rows: readonly ChartDatum[] }[]
   /** A row's time, in ms. */
   timeOf: (row: ChartDatum) => number
   root: RefObject<HTMLElement | null>
@@ -79,6 +88,9 @@ interface Rows {
   /** The rows drawn: the data, and those it let go that can still show. */
   drawn: readonly ChartDatum[]
 }
+
+/** Each dataset's rows, by its key. */
+type KeptRows = ReadonlyMap<string, Rows>
 
 /** Where the clock is, as the chart draws it. */
 interface ClockSnapshot {
@@ -215,32 +227,79 @@ function createClock(start: ClockSnapshot) {
   }
 }
 
+type Timer = ReturnType<typeof setTimeout>
+
 /** Whether two lists hold the same rows, as a chart that makes its rows again each render gives. */
 function sameRows(a: readonly ChartDatum[], b: readonly ChartDatum[]) {
   return a.length === b.length && a.every((row, at) => row === b[at])
 }
 
 /**
- * The window of a chart whose x is times: the rows it draws, the window its
- * x scale shows, and, with a `window`, what its layers read. Null with no
+ * The rows each dataset draws, kept as the window asks: the data, and the
+ * rows each let go that still show past `from`, the plot's start. The same
+ * map while no dataset changed.
+ */
+function keptRows(
+  kept: KeptRows,
+  datasets: LiveClockInput['datasets'],
+  timeOf: (row: ChartDatum) => number,
+  from: number | null,
+): KeptRows {
+  const changed = datasets.some(({ key, rows }) => {
+    const was = kept.get(key)
+    return !was || (was.data !== rows && !sameRows(was.data, rows))
+  })
+  if (!changed && kept.size === datasets.length) return kept
+  return new Map(
+    datasets.map(({ key, rows }) => {
+      const was = kept.get(key)
+      if (was && (was.data === rows || sameRows(was.data, rows))) return [key, was]
+      return [
+        key,
+        {
+          data: rows,
+          drawn: from === null || !was ? rows : liveRows(was.drawn, rows, timeOf, from),
+        },
+      ]
+    }),
+  )
+}
+
+/** The newest time among `datasets`' rows, or null with none. */
+function newestOf(
+  datasets: LiveClockInput['datasets'],
+  timeOf: (row: ChartDatum) => number,
+): number | null {
+  let newest: number | null = null
+  for (const { rows } of datasets) {
+    const last = rows.at(-1)
+    if (last !== undefined) newest = Math.max(newest ?? -Infinity, timeOf(last))
+  }
+  return newest
+}
+
+/**
+ * The window of a chart whose x is times: the rows each dataset draws, the
+ * window its x scale shows, and, with a `window`, what its layers read. The
+ * plot's newest edge is the newest time of any dataset. Null with no
  * window.
  */
 function useLiveClock({
   window,
   live,
   paused,
-  rows,
+  datasets,
   timeOf,
   root,
   plot,
   direction,
 }: LiveClockInput): {
-  rows: readonly ChartDatum[]
+  datasets: ReadonlyMap<string, readonly ChartDatum[]>
   scaleWindow: { from: number; length: number; through: number } | null
   live: ChartLive | null
 } {
   const length = window ?? 0
-  const newest = rows.length > 0 ? timeOf(rows.at(-1)!) : null
+  const newest = newestOf(datasets, timeOf)
   const [clock] = useState(() =>
     createClock({ anchor: (newest ?? 0) - length, still: newest ?? 0, held: false }),
   )
@@ -249,17 +308,23 @@ function useLiveClock({
     clock.get,
     clock.get,
   )
-  const [kept, setKept] = useState<Rows>({ data: rows, drawn: rows })
-  if (window !== null && kept.data !== rows && !sameRows(kept.data, rows)) {
-    // Where the plot starts now, or later: while it runs, never before its newest row's window.
-    const from = (still ?? newest ?? 0) - length
-    setKept({ data: rows, drawn: liveRows(kept.drawn, rows, timeOf, from) })
-  }
+  const [kept, setKept] = useState<KeptRows>(() =>
+    keptRows(new Map(), datasets, timeOf, null),
+  )
+  // Where the plot starts now, or later: while it runs, never before its newest row's window.
+  const next =
+    window === null
+      ? kept
+      : keptRows(kept, datasets, timeOf, (still ?? newest ?? 0) - length)
+  if (next !== kept) setKept(next)
   // How far the ticks reach past the newest row, so the plot never scrolls past them.
   const [ahead, setAhead] = useState(0)
   const through = Math.max(ahead, (newest ?? 0) + length)
-  // The data no row has followed for a while, which makes the stream quiet until a row comes.
-  const [quietAfter, setQuietAfter] = useState<readonly ChartDatum[] | null>(null)
+  // Each dataset's data no row has followed for a while, which makes its stream quiet until a
+  // row comes.
+  const [quietAfter, setQuietAfter] = useState<
+    ReadonlyMap<string, readonly ChartDatum[]>
+  >(() => new Map())
 
   const runs = live && !paused && !held
   const isRunning = still === null
@@ -344,7 +409,6 @@ function useLiveClock({
 
   // While it runs: steps to now on each row where motion is reduced, moves the anchor on each
   // window, checked at each row and each time the ticks reach on, and catches up a clock that has fallen behind the page's, as after a sleep.
-  const drawn = kept.drawn
   useLayoutEffect(() => {
     if (window === null || !isRunning) return
     const figure = root.current
@@ -362,21 +426,38 @@ function useLiveClock({
     }
     const next = nextAnchor(anchor, edge, length)
     if (next !== anchor) clock.defer(running(edge, length * LIVE_HORIZON), next)
-  }, [clock, window, isRunning, drawn, through, anchor, length, direction, root])
+  }, [clock, window, isRunning, kept, through, anchor, length, direction, root])
 
-  // A stream that goes quiet for a couple of its usual gaps is no longer fresh.
-  const data = kept.data
+  // A stream that goes quiet for a couple of its own usual gaps is no longer fresh: each
+  // dataset's timer runs from its own last row, whatever the others do.
+  const timers = useRef(new Map<string, { data: readonly ChartDatum[]; timer: Timer }>())
   useEffect(() => {
+    const running = timers.current
+    for (const [key, { timer }] of running) {
+      if (window === null || !live || kept.get(key)?.data !== running.get(key)?.data) {
+        clearTimeout(timer)
+        running.delete(key)
+      }
+    }
     if (window === null || !live) return
-    const gap = usualGap(data.map(timeOf))
-    const timer = setTimeout(
-      () => setQuietAfter(data),
-      (2 * (gap ?? length / 4)) / liveRate(),
-    )
-    return () => clearTimeout(timer)
+    for (const [key, { data }] of kept) {
+      if (running.has(key)) continue
+      const timer = setTimeout(
+        () => setQuietAfter((was) => new Map(was).set(key, data)),
+        quietDelay(data.map(timeOf), length) / liveRate(),
+      )
+      running.set(key, { data, timer })
+    }
     // `timeOf` reads the row's time key, which a new function for the same key leaves alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [window, live, data, length])
+  }, [window, live, kept, length])
+  useEffect(() => {
+    const running = timers.current
+    return () => {
+      for (const { timer } of running.values()) clearTimeout(timer)
+      running.clear()
+    }
+  }, [])
 
   // While it runs with no rows coming, its ticks reach on ahead of the plot's end.
   useEffect(() => {
@@ -390,15 +471,28 @@ function useLiveClock({
 
   useEffect(() => () => clock.cancel(), [clock])
 
-  if (window === null) return { rows, scaleWindow: null, live: null }
+  const drawn = new Map(
+    datasets.map(({ key, rows }) => [
+      key,
+      window === null ? rows : (next.get(key)?.drawn ?? rows),
+    ]),
+  )
+  if (window === null) return { datasets: drawn, scaleWindow: null, live: null }
+  // A series with no rows of its own is drawn from the chart's, the first dataset.
+  const datasetOf = (series: string) =>
+    next.has(series) ? series : (datasets[0]?.key ?? series)
   return {
-    rows: drawn,
+    datasets: drawn,
     scaleWindow: { from: anchor, length, through },
     live: {
       window: length,
       anchor,
       running: isRunning,
-      fresh: quietAfter !== data,
+      fresh: (series) => {
+        const key = datasetOf(series)
+        const data = next.get(key)?.data
+        return data !== undefined && quietAfter.get(key) !== data
+      },
       layer: clock.layer,
       offset: () => layerOffset(clock.edge(), clock.motion().anchor, length),
       hold: clock.hold,
@@ -475,4 +569,4 @@ function ChartLiveLayer({
   )
 }
 
-export { type ChartLive, ChartLiveLayer, LIVE_SPAN, useLiveClock }
+export { type ChartLive, ChartLiveLayer, keptRows, LIVE_SPAN, useLiveClock }

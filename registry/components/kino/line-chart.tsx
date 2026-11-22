@@ -133,8 +133,9 @@ function Line(props: LineProps) {
 
 // A line is its series, drawn as one; the tooltip, the slider and the table say which values
 // are projected.
-Line.declare = ({ dataKey, forecastFrom }: LineProps): ChartPartDeclaration => ({
+Line.declare = ({ dataKey, data, forecastFrom }: LineProps): ChartPartDeclaration => ({
   series: { key: dataKey, mark: 'line' },
+  ...(data === undefined ? {} : { rows: data }),
   ...(forecastFrom === undefined
     ? {}
     : { forecast: { series: dataKey, from: forecastFrom } }),

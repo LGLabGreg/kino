@@ -354,6 +354,15 @@ function usualGap(times: readonly number[]): number | null {
     : (sorted[middle - 1]! + sorted[middle]!) / 2
 }
 
+/**
+ * How long a stream whose rows arrived at `times` waits for its next row
+ * before it counts as quiet, in ms: two of its own usual gaps, or with
+ * fewer than two rows, half of `window`.
+ */
+function quietDelay(times: readonly number[], window: number): number {
+  return 2 * (usualGap(times) ?? window / 4)
+}
+
 export {
   edgeAt,
   glideTo,
@@ -367,6 +376,7 @@ export {
   type LiveTrajectory,
   nextAnchor,
   paceAt,
+  quietDelay,
   restingEdge,
   restOf,
   running,

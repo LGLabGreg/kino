@@ -50,7 +50,6 @@ import {
   targetKey,
 } from '@/registry/lib/chart-state'
 import { useControllable } from '@/registry/lib/controllable'
-import { isoInstant, readTime } from '@/registry/lib/dates'
 import {
   Children,
   type ComponentProps,
@@ -288,16 +287,6 @@ function useTicks(scale: { ticks: readonly number[] } | null, drawn?: readonly n
 const NO_TICKS: readonly number[] = []
 
 /* Times and locales. */
-
-/**
- * A row's key along an x of times: a calendar value's own text, so a day
- * keeps the key it has along categories, as charts synced with one share
- * it, and an instant's ISO form, whatever form it is given in.
- */
-function timeKey(value: unknown) {
-  const read = readTime(value)
-  return read?.instant ? isoInstant(read.time) : String(value)
-}
 
 /** A locale for the dates lib: the chart's own when it is one tag. */
 function localeTag(locale: Intl.LocalesArgument): string | undefined {
@@ -841,6 +830,16 @@ interface SeriesWordsInput {
   /** The stops still in the data, in order. */
   stops: readonly ChartItem[]
   seriesText: (item: ChartItem, series: string) => string
+  /**
+   * A series' value at `item` for the tooltip and what is read out: its row
+   * there, with `at` null, or a row of its own near it, with `at` that row's
+   * own time as the axis writes a stop; null leaves the series out there.
+   * The data table writes only a row exactly at the stop.
+   */
+  seriesNear: (
+    item: ChartItem,
+    series: string,
+  ) => { text: string; at: string | null } | null
   /** How much a series' value changed since `before`, as a share of it, or null. */
   seriesChange: (item: ChartItem, before: ChartItem, series: string) => number | null
   /** How a stop is named. */
@@ -857,7 +856,12 @@ interface SeriesWordsInput {
   picked: string | null
   /** The series the keys brought forward, read out alone so Up and Down are heard, or null. */
   alone: string | null
-  /** A chart's own words in place of the series' values, with their table column, or null. */
+  /**
+   * A chart's own words in place of the series' values, with their table
+   * column, or null. A stop with no row of the chart's own, where only a
+   * series' own rows are, reads its series' values and leaves the column
+   * empty.
+   */
   own: { name: string; text: (item: ChartItem) => string } | null
 }
 
@@ -889,9 +893,10 @@ function seriesName(config: ChartConfig, key: string) {
 
 /**
  * The words of a chart whose every stop holds a value per series: each
- * stop's name, then each shown series' value, with its change since the
- * stop before when they run in order and whether it is projected; or the
- * series brought forward alone; or the chart's own words.
+ * stop's name, then each shown series' value near it, with the time of a
+ * row of its own beside the stop, its change since the stop before when
+ * they run in order and whether it is projected; or the series brought
+ * forward alone; or the chart's own words.
  */
 function seriesWords(
   root: Pick<ChartRootState, 'series' | 'hidden' | 'config' | 'messages' | 'locale'>,
@@ -905,20 +910,25 @@ function seriesWords(
   return {
     describe: (item) => {
       const name = pickedName(input.stopText(item), input.picked === item.key, messages)
-      if (own) return `${name}: ${own.text(item)}`
+      if (own && item.datum !== null) return `${name}: ${own.text(item)}`
       const at = stops.findIndex((stop) => stop.key === item.key)
       const before = input.ordered && at > 0 ? stops[at - 1] : undefined
       const keys =
         input.alone !== null && shown.includes(input.alone) ? [input.alone] : shown
-      const values = keys.map((key) => {
+      const values = keys.flatMap((key) => {
+        const near = input.seriesNear(item, key)
+        if (!near) return []
         const change = before ? input.seriesChange(item, before, key) : null
         const said =
           change === null
             ? ''
             : `, ${messages.change(change, percent(locale).format(Math.abs(change)))}`
-        return `${seriesName(config, key)} ${input.seriesText(item, key)}${projected(key, item)}${said}`
+        const when = near.at === null ? '' : ` (${near.at})`
+        return [
+          `${seriesName(config, key)}${when} ${near.text}${projected(key, item)}${said}`,
+        ]
       })
-      return `${name}: ${values.join(', ')}`
+      return values.length === 0 ? name : `${name}: ${values.join(', ')}`
     },
     tooltip: (item) => <ChartTooltipContent index={item.index} />,
     table: {
@@ -927,9 +937,14 @@ function seriesWords(
       rows: stops.map((stop) => ({
         key: stop.key,
         name: input.stopText(stop),
+        // Only a row exactly at the stop: the table never shows a value from beside it.
         cells: own
-          ? [own.text(stop)]
-          : shown.map((key) => `${input.seriesText(stop, key)}${projected(key, stop)}`),
+          ? [stop.datum === null ? '' : own.text(stop)]
+          : shown.map((key) =>
+              input.seriesNear(stop, key)?.at === null
+                ? `${input.seriesText(stop, key)}${projected(key, stop)}`
+                : '',
+            ),
       })),
       footer: [],
     },
@@ -1004,6 +1019,8 @@ function ChartTooltipContent({
     <div data-chart={id} className={cn('grid min-w-36 gap-1', className)} {...props}>
       {!hideLabel && <div className='font-medium'>{words.stopText(item)}</div>}
       {shown.map((key) => {
+        const near = words.seriesNear(item, key)
+        if (!near) return null
         const marker = markerOf(key)
         return (
           // The series brought forward reads in full colour; the rest stay as they are, legible.
@@ -1029,6 +1046,7 @@ function ChartTooltipContent({
             )}
             <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
               {config[key]?.label ?? key}
+              {near.at !== null && ` (${near.at})`}
               {words.forecast(key, item) && ` · ${messages.forecast}`}
             </span>
             {before && (
@@ -1040,7 +1058,7 @@ function ChartTooltipContent({
             )}
             {/* A value with a unit reads in its own order whatever the page's direction. */}
             <span dir='auto' className='font-medium tabular-nums'>
-              {words.seriesText(item, key)}
+              {near.text}
             </span>
           </div>
         )
@@ -1253,7 +1271,6 @@ export {
   TICK_SPACING,
   tickMove,
   timeAxis,
-  timeKey,
   tellIndex,
   toldIndex,
   tooltipTotal,

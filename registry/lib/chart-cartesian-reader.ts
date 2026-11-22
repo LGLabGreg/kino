@@ -35,8 +35,10 @@ interface CartesianStop {
   index: number
   band: Band
   leaving: boolean
-  /** The chart's own row here, or null where only a series' own rows have one (LGL-627). */
+  /** The chart's own row here, or null where only a series' own rows have one. */
   datum: ChartDatum | null
+  /** The row here of each series that brings rows of its own and has one. */
+  own: Readonly<Record<string, ChartDatum>>
 }
 
 /** A stop placed by both values: by value, and by place as fractions along x from the reading start and up the value axis. */

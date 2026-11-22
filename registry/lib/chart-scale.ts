@@ -332,6 +332,29 @@ function spreadAlong(
   return { domain, size: (step * (1 - gap)) / (domain[1] - domain[0]) }
 }
 
+/**
+ * How `times` spread along an axis whose bars stand on `bands.times`: as
+ * wide as the bars' own times allow, with the domain reaching every time.
+ * With no bars, or none with a row, the times lie edge to edge.
+ */
+function spreadOf(
+  times: readonly number[],
+  bands: TimeScaleOptions['bands'],
+  alone: number,
+  steady: boolean,
+): { domain: Span; size: number } {
+  if (!bands || bands.times.length === 0) return spreadAlong(times, null, alone, steady)
+  const bars = spreadAlong(bands.times, bands.gaps, alone, steady)
+  const first = times[0] ?? bars.domain[0]
+  const last = times.at(-1) ?? bars.domain[1]
+  const domain: Span = [Math.min(first, bars.domain[0]), Math.max(last, bars.domain[1])]
+  const length = domain[1] - domain[0]
+  return {
+    domain,
+    size: length === 0 ? 0 : (bars.size * (bars.domain[1] - bars.domain[0])) / length,
+  }
+}
+
 /** The middle of `values`, or the mean of the two in the middle. */
 function middleOf(values: readonly number[]): number {
   const sorted = values.toSorted((a, b) => a - b)
@@ -553,8 +576,12 @@ interface TimeScaleOptions {
   timeZone: string
   /** The day weeks start on, which a tick a week marks. */
   firstDay?: Weekday
-  /** Bars stand on the times, these gaps apart; points, edge to edge, when null. */
-  bands: BandGaps | null
+  /**
+   * Bars stand on `times`, the times their series have rows at, `gaps`
+   * apart, so a line's rows between them never make them thinner; points,
+   * edge to edge, when null. The domain still reaches every time.
+   */
+  bands: { gaps: BandGaps; times: readonly number[] } | null
   /**
    * Shows `length` ms from `from`, of a stretch its ticks cover from the
    * times, or the window, to `through`, whichever reaches further: an axis
@@ -574,7 +601,7 @@ function timeScale(
   { timeZone, firstDay = 1, bands, window = null }: TimeScaleOptions,
 ): TimeScale {
   const unit = timeUnitOf(times, timeZone)
-  const spread = spreadAlong(times, bands, unitLength(unit), window !== null)
+  const spread = spreadOf(times, bands, unitLength(unit), window !== null)
   const domain: Span = window ? [window.from, window.from + window.length] : spread.domain
   const [low, high] = domain
   const span = high - low

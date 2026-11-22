@@ -156,7 +156,7 @@ function BarChart(props: BarChartProps) {
   const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
   const stops = chart.current
   // The cascade's order reads the bars against the chart's own value axis.
-  const shown = totalled(chart)
+  const shown = totalled(chart).filter(model.totals)
   const reaches = stops.map((_, at) => farEnd(model.spans, shown, at))
   const order = reaches
     .map((reach, at) => ({ at, size: Math.abs(reach) }))
@@ -241,6 +241,7 @@ function barPlace(
     chart.stack,
     model.stackOf,
     bar.barGap,
+    (k) => chart.rowOf(k, stop) !== null,
   )
   const { scale, baseline: zero } = model.valueAxisOf(key)
   const span = stop.leaving ? null : model.spans[key]?.[stop.index]
@@ -286,7 +287,17 @@ function labelText(raw: unknown, write: (value: number) => string) {
 type BarProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
   /** The key of this series' values in the data, and of its entry in the config. */
   dataKey: string
-  /** A colour for one bar, such as one that stands out, from its row; the series' colour when it returns nothing. */
+  /**
+   * The series' own rows, on an x of times, in place of the chart's: each
+   * with the chart's `index` and the series' `dataKey`, in time order. Its
+   * bars stand at their own times and stack with nothing.
+   */
+  data?: readonly ChartDatum[]
+  /**
+   * A colour for one bar, such as one that stands out, from the row it is
+   * drawn from and its stop's place; the series' colour when it returns
+   * nothing.
+   */
   color?: (datum: ChartDatum, index: number) => string | undefined
   /** The colour of a bar below zero. */
   negativeColor?: string
@@ -310,6 +321,7 @@ type BarProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
 function Bar(props: BarProps) {
   const {
     dataKey,
+    data,
     color,
     negativeColor,
     label = false,
@@ -345,6 +357,7 @@ function Bar(props: BarProps) {
       <div
         data-slot='bar-chart-series'
         data-series={dataKey}
+        data-own={data ? '' : undefined}
         aria-hidden
         className={cn(plotLayerClassName, markLayer.bar, className)}
         style={style}
@@ -358,15 +371,17 @@ function Bar(props: BarProps) {
                 : 'contents'
             }
           >
-            {/* A live plot's rows that leave have scrolled out already, so only the rows still in it draw. */}
-            {(live ? chart.current : chart.stops).map((stop) => {
+            {/* A live plot's rows that leave have scrolled out already, so only the rows still in it draw.
+              A bar stands only where its series has a row. */}
+            {rowStops(chart, live ? chart.current : chart.stops, dataKey).map((stop) => {
               const place = liveBand(barPlace(chart, bar, stop, dataKey), live)
-              const raw = chart.valueOf(dataKey, stop)
+              const row = chart.rowOf(dataKey, stop)
+              const raw = row?.[dataKey]
               const value = numberOf(raw)
               const range = rangeOf(raw)
               const below = range ? range[1] < range[0] : value !== null && value < 0
               const own =
-                (stop.datum && color?.(stop.datum, stop.index)) ??
+                (row && color?.(row, stop.index)) ??
                 (below && negativeColor ? negativeColor : undefined)
               const clip = barClip(chart, place, isOutermost(chart, bar, stop, dataKey))
               const at = Math.min(stop.index, PLACEHOLDER_COUNT - 1)
@@ -430,6 +445,15 @@ function liveBand(place: BarPlace, live: ChartLive | null): BarPlace {
   }
 }
 
+/** The stops among `stops` where `key` has a row, which its bars stand at. */
+function rowStops(
+  chart: Pick<CartesianChartValue, 'rowOf'>,
+  stops: readonly CartesianStop[],
+  key: string,
+) {
+  return stops.filter((stop) => chart.rowOf(key, stop) !== null)
+}
+
 /** Where a bar's label sits, or null for none: `true` puts it past the bar's end. */
 function labelPosition(label: BarProps['label']): BarLabelPosition | null {
   return label === true ? 'outside' : label || null
@@ -439,10 +463,12 @@ function labelPosition(label: BarProps['label']): BarLabelPosition | null {
 // axis's far end, worked out from what they will read.
 Bar.declare = ({
   dataKey,
+  data,
   label = false,
   labelFormat,
 }: BarProps): ChartPartDeclaration => ({
   series: { key: dataKey, mark: 'bar' },
+  ...(data === undefined ? {} : { rows: data }),
   ...(labelPosition(label) === 'outside'
     ? {
         room: (chart: ChartRoomState) => {
@@ -484,7 +510,7 @@ function BarLabels({
   if (chart.hidden.includes(dataKey)) return null
   return (
     <>
-      {chart.stops.map((stop) => {
+      {rowStops(chart, chart.stops, dataKey).map((stop) => {
         const place = barPlace(chart, bar, stop, dataKey)
         const span = bar.model.spans[dataKey]?.[stop.index]
         const text = labelText(chart.valueOf(dataKey, stop), write)
@@ -547,7 +573,8 @@ function BarTotals(props: BarTotalsProps) {
   const { spotlit } = useChartActive()
   const bar = useBarFrame()
   const write = formatterOf(chart.locale, format ?? chart.format)
-  const shown = totalled(chart)
+  // A series with rows of its own stacks with nothing, so it adds to no total.
+  const shown = totalled(chart).filter(bar.model.totals)
   const scale = bar.model.y.value
   const zero = bar.model.baselines.value
   if (chart.status !== 'ready') return null
@@ -558,7 +585,9 @@ function BarTotals(props: BarTotalsProps) {
       className={cn(plotLayerClassName, 'z-20', className)}
       {...rest}
     >
-      {chart.stops.map((stop) => {
+      {/* A stop where only a series' own rows are has no stack. */}
+      {chart.stops.flatMap((stop) => {
+        if (stop.datum === null) return []
         const total = totalOf((key) => chart.valueOf(key, stop), shown)
         const place = {
           band: stop.band,
@@ -568,7 +597,7 @@ function BarTotals(props: BarTotalsProps) {
               ? zero
               : scale.place(farEnd(bar.model.spans, shown, stop.index)),
         }
-        return (
+        return [
           <BarLabel
             key={stop.key}
             {...labelPlace(chart, place, 'outside')}
@@ -576,8 +605,8 @@ function BarTotals(props: BarTotalsProps) {
             dim={spotlit !== null && spotlit !== stop.index}
           >
             {chart.stack === 'expand' ? '' : write(total)}
-          </BarLabel>
-        )
+          </BarLabel>,
+        ]
       })}
     </div>
   )
