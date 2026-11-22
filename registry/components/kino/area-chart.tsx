@@ -6,6 +6,7 @@ import {
   type CartesianChartProps,
   type ChartPartDeclaration,
   figureProps,
+  type LiveChartProps,
   useCartesianChart,
   useDeclared,
 } from '@/registry/lib/chart-core'
@@ -32,7 +33,7 @@ import type { LineCurve } from '@/registry/lib/line-path'
  * such as last year's to compare with, is a `Line` among the areas.
  */
 
-interface AreaChartProps extends CartesianChartProps {
+interface AreaChartProps extends CartesianChartProps, LiveChartProps {
   /**
    * How the areas of one category combine: each from zero, overlapping, the
    * default; stacked on each other in the order of the config; or stacked

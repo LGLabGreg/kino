@@ -20,6 +20,7 @@ import { Sparkline, type SparklineProps } from '@/registry/components/kino/spark
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import type { ChartDatum } from '@/registry/lib/chart-math'
 import { swatchClassName } from '@/registry/lib/chart-root'
+import { LivePulse } from '@/registry/lib/live'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { placeholderFillClassName } from '@/registry/lib/placeholder'
 import { Swap, SwapText } from '@/registry/lib/swap'
@@ -538,10 +539,7 @@ function KpiLive({ className, children, ...props }: ComponentProps<'span'>) {
       )}
       {...props}
     >
-      <span aria-hidden className='relative flex size-2'>
-        <span className='bg-success absolute inset-0 animate-[ping_calc(var(--motion-layout-duration)*6)_ease-in-out_infinite] rounded-full opacity-60 motion-reduce:animate-none' />
-        <span className='bg-success relative size-2 rounded-full forced-colors:bg-[CanvasText]' />
-      </span>
+      <LivePulse className='text-success size-2' />
       {children ?? messages.live}
     </span>
   )

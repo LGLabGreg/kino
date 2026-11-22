@@ -270,6 +270,27 @@ function alignLines(
   return out
 }
 
+/**
+ * A live line's move, its new points rising out of the hold: a point that
+ * arrives past the newest one `from` drew starts at its own place along,
+ * at that point's value, where the hold carried it, so the line's end
+ * only moves up or down as each row lands.
+ */
+function holdArrivals(
+  aligned: readonly AlignedPoint[],
+  from: readonly LinePoint[],
+): AlignedPoint[] {
+  const held = from.findLast((point) => point.defined)
+  if (!held) return [...aligned]
+  const drawn = new Set(from.map((point) => point.key))
+  return aligned.map((point) => {
+    if (point.to.x <= held.x || (point.key !== null && drawn.has(point.key))) return point
+    const start: LinePoint = { ...point.to, y: held.y }
+    if (point.to.base !== undefined) start.base = held.base ?? point.to.base
+    return { ...point, from: start }
+  })
+}
+
 /** The line `progress` of the way through `aligned`, its baselines with it. */
 function pointsAt(aligned: readonly AlignedPoint[], progress: number): LinePoint[] {
   return aligned.map(({ key, from, to }) => {
@@ -393,6 +414,7 @@ export {
   bridgesThrough,
   curves,
   heightAt,
+  holdArrivals,
   type LineCurve,
   type LinePoint,
   type LineSampler,

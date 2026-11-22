@@ -92,12 +92,22 @@ interface TimeScale {
    * room for (`timeLadder`).
    */
   tickSets: readonly (readonly number[])[]
-  /** Where `time` sits, from 0 at the axis's start to 1 at its end, held inside them. */
+  /**
+   * Where `time` sits, from 0 at the axis's start to 1 at its end, and past
+   * them for a time outside its domain, as the rows of a window before and
+   * after it are.
+   */
   place: (time: number) => number
   /** The instant at `fraction` of the axis, past its ends too. */
   valueAt: (fraction: number) => number
   /** The band a mark at `time` stands in, centred on it: as wide as bars on the closest two times allow, or none for points. */
   bandOf: (time: number) => Band
+  /**
+   * The time the axis shows of a longer stretch it scrolls along, such as a
+   * live chart's, in ms, its domain at one moment and its ticks running on
+   * past both ends; null for an axis that shows all of its times.
+   */
+  window: number | null
 }
 
 type ChartScale = LinearScale | CategoryScale | TimeScale
@@ -328,6 +338,12 @@ interface TimeScaleOptions {
   firstDay?: Weekday
   /** Bars stand on the times, these gaps apart; points, edge to edge, when null. */
   bands: BandGaps | null
+  /**
+   * Shows `length` ms from `from`, of a stretch its ticks cover from the
+   * times, or the window, to `through`, whichever reaches further: an axis
+   * that scrolls, such as a live chart's. Its steps suit the window.
+   */
+  window?: { from: number; length: number; through: number } | null
 }
 
 /**
@@ -338,24 +354,40 @@ interface TimeScaleOptions {
  */
 function timeScale(
   times: readonly number[],
-  { timeZone, firstDay = 1, bands }: TimeScaleOptions,
+  { timeZone, firstDay = 1, bands, window = null }: TimeScaleOptions,
 ): TimeScale {
   const unit = timeUnitOf(times, timeZone)
-  const { domain, size } = spreadAlong(times, bands, unitLength(unit))
+  const spread = spreadAlong(times, bands, unitLength(unit))
+  const domain: Span = window ? [window.from, window.from + window.length] : spread.domain
   const [low, high] = domain
   const span = high - low
+  // A window's ticks run on along the stretch it scrolls over, at the steps the window suits.
+  const reach: Span = window
+    ? [
+        Math.min(domain[0], times[0] ?? domain[0]),
+        Math.max(domain[1], times.at(-1) ?? domain[1], window.through),
+      ]
+    : domain
   const tickSets =
-    times.length === 0
+    times.length === 0 && !window
       ? []
       : timeIntervals(span)
           // No tick finer than the times themselves: days get no 12:00.
           .filter(
             (interval) => unitLength(interval.unit) * interval.step >= unitLength(unit),
           )
-          .map((interval) => timeTicks(domain, interval, timeZone, firstDay))
+          .map((interval) => timeTicks(reach, interval, timeZone, firstDay))
           .filter((set) => set.length > 0)
   const place = (time: number) =>
-    span === 0 ? 0.5 : Math.min(1, Math.max(0, (time - low) / span))
+    span === 0
+      ? 0.5
+      : window
+        ? (time - low) / span
+        : Math.min(1, Math.max(0, (time - low) / span))
+  // Bars on a window are as wide as their times' gaps along it allow.
+  const size = window
+    ? (spread.size * (spread.domain[1] - spread.domain[0])) / span
+    : spread.size
   return {
     kind: 'time',
     domain,
@@ -366,6 +398,7 @@ function timeScale(
     place,
     valueAt: (fraction) => low + fraction * span,
     bandOf: (time) => ({ start: place(time) - size / 2, size }),
+    window: window?.length ?? null,
   }
 }
 
@@ -397,6 +430,29 @@ function labelsLength(
     else low = middle
   }
   return high
+}
+
+/**
+ * The least length, in px, an axis needs for labels `widths` px wide,
+ * centred on `places`, fractions of it in order that may run past its ends,
+ * to stand `gap` px apart or more: those of a window scrolling past.
+ */
+function passingLength(
+  places: readonly number[],
+  widths: readonly number[],
+  gap: number,
+): number {
+  let least = 0
+  for (let at = 1; at < places.length; at += 1) {
+    const apart = places[at]! - places[at - 1]!
+    const room = ((widths[at - 1] ?? 0) + (widths[at] ?? 0)) / 2 + gap
+    least = Math.max(
+      least,
+      // A float a hair past a whole px rounds onto it rather than past the next.
+      apart > 0 ? Math.ceil(room / apart - 1e-9) : Number.POSITIVE_INFINITY,
+    )
+  }
+  return least
 }
 
 /**
@@ -432,14 +488,21 @@ function timeLadder(
   // the ticks between; each step is tried without those first, then whole.
   const inner = (set: readonly number[]) =>
     set.filter((tick) => scale.place(tick) > 0 && scale.place(tick) < 1)
-  const candidates = [
-    ...thinned(scale.tickSets[0] ?? []),
-    ...scale.tickSets.flatMap((set) =>
-      set.length > 2 && inner(set).length < set.length ? [inner(set), set] : [set],
-    ),
-  ]
+  // Along a window that scrolls, each step's ticks pass through its ends, so none is kept
+  // inside or thinned by its place, which would change as it scrolls.
+  const scrolls = scale.window !== null
+  const candidates = scrolls
+    ? scale.tickSets
+    : [
+        ...thinned(scale.tickSets[0] ?? []),
+        ...scale.tickSets.flatMap((set) =>
+          set.length > 2 && inner(set).length < set.length ? [inner(set), set] : [set],
+        ),
+      ]
   for (const set of candidates) {
-    const need = labelsLength(set.map(scale.place), set.map(width), gap)
+    const need = scrolls
+      ? passingLength(set.map(scale.place), set.map(width), gap)
+      : labelsLength(set.map(scale.place), set.map(width), gap)
     const last = steps.at(-1)
     if (!last) {
       steps.push({ from: 0, to: null, shown: set })

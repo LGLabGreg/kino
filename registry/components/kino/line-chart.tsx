@@ -5,6 +5,7 @@ import {
   type CartesianChartProps,
   type ChartPartDeclaration,
   figureProps,
+  type LiveChartProps,
   useCartesianChart,
   useDeclared,
 } from '@/registry/lib/chart-core'
@@ -30,7 +31,7 @@ import type { LineCurve, LinePoint } from '@/registry/lib/line-path'
  * new one.
  */
 
-interface LineChartProps extends CartesianChartProps {
+interface LineChartProps extends CartesianChartProps, LiveChartProps {
   /**
    * How the lines arrive the first time the chart comes into view: rising
    * from zero, drawn along from the reading start, or simply there, the

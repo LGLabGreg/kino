@@ -24,6 +24,7 @@ import {
   stickTo,
 } from '@/registry/lib/chart-core'
 import { VALUE_AXIS } from '@/registry/lib/chart-frame'
+import { ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import {
   axisNames,
   labelBox,
@@ -160,7 +161,10 @@ function GridLines({
 }
 
 /** How far apart ticks stand at least, by the way they stack: values one over another, or side by side. */
-const tickSpacing = { y: TICK_SPACING.upright, x: TICK_SPACING.across } as const
+const tickSpacing = {
+  y: TICK_SPACING.upright,
+  x: TICK_SPACING.across,
+} as const
 
 /**
  * The ticks that show at each length of a short axis, `line` the way its
@@ -518,9 +522,18 @@ function TimeAxis({
   }, [litKey, length])
   const axisId = useId()
   if (!frame || !ladder) throw new Error('`TimeAxis` goes on a chart whose x is times.')
-  const { scale, previous } = frame
+  const { scale } = frame
+  // A window of time scrolls by its layer: a tick stays where its time is, with nothing to
+  // slide, and goes past the axis's ends rather than being kept inside them.
+  const live = chart.frame.live
+  const previous = live ? scale : frame.previous
+  // How far the layer has moved, which a held plot shows still, as the lit name is shown.
+  const along = live ? live.offset() : 0
   const writeName = categoryFormat ?? categoryText
   const physical = (place: number) => (direction === 'rtl' ? 1 - place : place)
+  // A place on the axis as it shows now, where the layer has moved to.
+  const onAxis = (place: number) =>
+    physical(place) - (direction === 'rtl' ? -along : along)
   const ticks = status === 'ready' ? all : []
   const nameOf = (key: string) => current.find((category) => category.key === key)
   const lit = litKey === null ? undefined : nameOf(litKey)
@@ -528,39 +541,49 @@ function TimeAxis({
   const litBox =
     lit && length > 0
       ? labelBox(
-          physical(bandCentre(lit.band)),
+          onAxis(bandCentre(lit.band)),
           textWidth(writeName(lit.value)) + 12,
           length,
         )
       : null
+  const tickBox = (tick: number): readonly [number, number] => {
+    if (!live) return labelBox(physical(scale.place(tick)), tickWidth(tick), length)
+    const centre = onAxis(scale.place(tick)) * length
+    return [centre - tickWidth(tick) / 2, centre + tickWidth(tick) / 2]
+  }
   const covered = (tick: number) =>
-    litBox !== null &&
-    labelsMeet(
-      labelBox(physical(scale.place(tick)), tickWidth(tick), length),
-      litBox,
-      LABEL_GAP,
-    )
+    litBox !== null && labelsMeet(tickBox(tick), litBox, LABEL_GAP)
   const shown = named === null ? undefined : nameOf(named)
-  const pillName = (copy: boolean) =>
-    shown && (
-      <span className={axisLayerClassName}>
-        <span
-          key={shown.key}
-          ref={copy ? undefined : target}
-          dir='auto'
-          className={cn(
-            'absolute top-0 left-0 mt-1 rounded-(--control-radius-xs) px-1.5 py-0.5 whitespace-nowrap',
-            // On the axis, the name is the pill's place; only the pill's copy shows it.
-            !copy && 'opacity-0',
-          )}
-          style={{
-            translate: `clamp(0px, ${physical(bandCentre(shown.band)) * 100}cqw - 50%, 100cqw - 100%) 0`,
-          }}
-        >
-          {writeName(shown.value)}
+  // Where the axis as it shows now starts in its layer, physically from the left.
+  const physicalShift = direction === 'rtl' ? -along : along
+  const pillName = (copy: boolean) => {
+    // Where the name's box starts: the layer's start, or the pill's, which sits where the axis
+    // shows now.
+    const origin = copy ? physicalShift : 0
+    const from = physicalShift - origin
+    return (
+      shown && (
+        <span className={axisLayerClassName}>
+          <span
+            key={shown.key}
+            ref={copy ? undefined : target}
+            dir='auto'
+            className={cn(
+              'absolute top-0 left-0 mt-1 rounded-(--control-radius-xs) px-1.5 py-0.5 whitespace-nowrap',
+              // On the axis, the name is the pill's place; only the pill's copy shows it.
+              !copy && 'opacity-0',
+            )}
+            // Kept inside the axis as it shows now: on a live plot, the stretch the layer has moved to.
+            style={{
+              translate: `clamp(${from * 100}cqw, ${(physical(bandCentre(shown.band)) - origin) * 100}cqw - 50%, ${(1 + from) * 100}cqw - 100%) 0`,
+            }}
+          >
+            {writeName(shown.value)}
+          </span>
         </span>
-      </span>
+      )
     )
+  }
   return (
     <AxisFrame
       side={side}
@@ -581,53 +604,74 @@ function TimeAxis({
       >
         {/* One name's height under the plot, before any tick is placed. */}
         <span className='invisible mt-1 block py-0.5'>&nbsp;</span>
-        <span data-ticks={axisId} className={axisLayerClassName}>
-          {status === 'ready' && (
-            <TickSteps
-              id={axisId}
-              ladder={ladder}
-              before={timeLadder(previous, tickWidth, TIME_TICK_GAP)}
-              line='x'
-            />
-          )}
-          {ticks.map(({ value: tick, leaving }) => {
-            // A tick that leaves stays kept inside the axis as it was, rather than jumping to
-            // where its place past the end would keep it.
-            const place = physical((leaving ? previous : scale).place(tick))
-            return (
-              <span
-                key={tick}
-                data-leaving={leaving ? '' : undefined}
-                data-tick={tick}
-                data-covered={!leaving && covered(tick) ? '' : undefined}
-                className={cn(tickMove, slideLine.x, 'data-covered:opacity-0')}
-                style={axisSlide('x', scale.place(tick), previous.place(tick), direction)}
-              >
+        <ChartLiveLayer live={live} direction={direction} fade='ends'>
+          <span data-ticks={axisId} className={axisLayerClassName}>
+            {status === 'ready' && (
+              <TickSteps
+                id={axisId}
+                ladder={ladder}
+                before={timeLadder(previous, tickWidth, TIME_TICK_GAP)}
+                line='x'
+              />
+            )}
+            {ticks.map(({ value: tick, leaving }) => {
+              // A tick that leaves stays kept inside the axis as it was, rather than jumping to
+              // where its place past the end would keep it.
+              const place = physical((leaving ? previous : scale).place(tick))
+              return (
                 <span
-                  className='absolute top-0 left-0 mt-1 py-0.5 whitespace-nowrap transition-none group-data-mounted/chart:transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:group-data-mounted/chart:transition-none'
-                  // Centred on its time, but kept inside the axis, so a tick near either end stays in
-                  // view. Reaching an end or leaving it, it eases there as it slides.
-                  style={{
-                    translate: `clamp(${-place * 100}cqw, -50%, ${(1 - place) * 100}cqw - 100%) 0`,
-                  }}
+                  key={tick}
+                  data-leaving={leaving ? '' : undefined}
+                  data-tick={tick}
+                  data-covered={!leaving && covered(tick) ? '' : undefined}
+                  className={cn(
+                    tickMove,
+                    slideLine.x,
+                    'data-covered:opacity-0',
+                    live &&
+                      'group-data-mounted/chart:transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing)',
+                  )}
+                  style={axisSlide(
+                    'x',
+                    scale.place(tick),
+                    previous.place(tick),
+                    direction,
+                  )}
                 >
-                  {write(tick)}
+                  <span
+                    className='absolute top-0 left-0 mt-1 py-0.5 whitespace-nowrap transition-none group-data-mounted/chart:transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:group-data-mounted/chart:transition-none'
+                    // Centred on its time, but kept inside the axis, so a tick near either end stays in
+                    // view. Reaching an end or leaving it, it eases there as it slides. Scrolling past,
+                    // it stays centred.
+                    style={{
+                      translate: live
+                        ? '-50% 0'
+                        : `clamp(${-place * 100}cqw, -50%, ${(1 - place) * 100}cqw - 100%) 0`,
+                    }}
+                  >
+                    {write(tick)}
+                  </span>
                 </span>
-              </span>
-            )
-          })}
-        </span>
-        {pillName(false)}
-        <span
-          ref={pill}
-          data-slot='chart-category-pill'
-          className={cn(
-            highlightClassName,
-            'bg-foreground text-background z-10 forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none',
-          )}
-        >
-          {pillName(true)}
-        </span>
+              )
+            })}
+          </span>
+        </ChartLiveLayer>
+        <ChartLiveLayer live={live} direction={direction}>
+          {pillName(false)}
+          <span
+            ref={pill}
+            data-slot='chart-category-pill'
+            className={cn(
+              highlightClassName,
+              'bg-foreground text-background z-10 forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none',
+            )}
+            // On a live plot, over the stretch of its layer the axis shows now, as its name is, so
+            // the name is never cut at the layer's own end.
+            style={live ? { translate: `${physicalShift * 100}cqw 0` } : undefined}
+          >
+            {pillName(true)}
+          </span>
+        </ChartLiveLayer>
       </div>
     </AxisFrame>
   )
@@ -1113,6 +1157,18 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
     label !== undefined && labelPosition === 'end' && along === 'x' ? <LabelRoom /> : null
   if (status !== 'ready') return room
   const named = typeof label === 'function' ? marked !== null && label(marked) : label
+  // A line down a live plot scrolls with its rows, so its label centres on it rather than being
+  // kept inside an axis that moves under it.
+  const live = along === 'x' ? chart.frame.live : null
+  const scrollWith = (node: ReactNode) => (
+    <ChartLiveLayer live={live} direction={direction} reach='label' fade='ends'>
+      {node}
+    </ChartLiveLayer>
+  )
+  const moves = live
+    ? 'group-data-mounted/chart:transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing)'
+    : undefined
+  const labelAcross = live ? 'left-0 [translate:-50%_0]' : lineLabelAcross
 
   if (category !== undefined) {
     const at = current.find((c) => c.key === category)
@@ -1131,39 +1187,38 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
           className={cn(plotLayerClassName, 'z-15', className)}
           {...rest}
         >
-          <div
-            className={cn(tickMove, slideLine[line])}
-            style={
-              {
-                ...axisSlide(line, place, place, direction),
-                '--line-x': plotOffset(place, 'cqw'),
-              } as CSSProperties
-            }
-          >
+          {scrollWith(
             <div
-              className={cn(
-                'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
-                line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+              className={cn(tickMove, slideLine[line], moves)}
+              style={
+                {
+                  ...axisSlide(line, place, place, direction),
+                  '--line-x': plotOffset(place, 'cqw'),
+                } as CSSProperties
+              }
+            >
+              <div
+                className={cn(
+                  'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
+                  line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+                )}
+              />
+              {named && (
+                <ReferenceLabel
+                  className={
+                    line === 'x'
+                      ? cn(labelAcross, labelPosition === 'end' ? labelAbove : 'bottom-0')
+                      : cn(
+                          'top-0 -translate-y-1/2',
+                          labelPosition === 'end' ? 'end-0' : 'start-0',
+                        )
+                  }
+                >
+                  {named}
+                </ReferenceLabel>
               )}
-            />
-            {named && (
-              <ReferenceLabel
-                className={
-                  line === 'x'
-                    ? cn(
-                        lineLabelAcross,
-                        labelPosition === 'end' ? labelAbove : 'bottom-0',
-                      )
-                    : cn(
-                        'top-0 -translate-y-1/2',
-                        labelPosition === 'end' ? 'end-0' : 'start-0',
-                      )
-                }
-              >
-                {named}
-              </ReferenceLabel>
-            )}
-          </div>
+            </div>,
+          )}
         </div>
       </>
     )
@@ -1179,39 +1234,46 @@ function ChartReferenceLine(props: ChartReferenceLineProps) {
         className={cn(plotLayerClassName, 'z-15', className)}
         {...rest}
       >
-        <div
-          className={cn(tickMove, slideLine[line])}
-          style={
-            {
-              ...axisSlide(line, scale.place(marked), previous.place(marked), direction),
-              '--line-x': plotOffset(
-                direction === 'rtl' ? 1 - scale.place(marked) : scale.place(marked),
-                'cqw',
-              ),
-            } as CSSProperties
-          }
-        >
+        {scrollWith(
           <div
-            className={cn(
-              'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
-              line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+            className={cn(tickMove, slideLine[line], moves)}
+            style={
+              {
+                ...axisSlide(
+                  line,
+                  scale.place(marked),
+                  previous.place(marked),
+                  direction,
+                ),
+                '--line-x': plotOffset(
+                  direction === 'rtl' ? 1 - scale.place(marked) : scale.place(marked),
+                  'cqw',
+                ),
+              } as CSSProperties
+            }
+          >
+            <div
+              className={cn(
+                'border-foreground/60 absolute border-dashed forced-colors:border-[CanvasText]',
+                line === 'y' ? 'inset-x-0 top-0 border-t' : 'inset-y-0 left-0 border-l',
+              )}
+            />
+            {named && (
+              <ReferenceLabel
+                className={
+                  line === 'y'
+                    ? cn(
+                        'top-0 -translate-y-1/2',
+                        labelPosition === 'end' ? 'end-0' : 'start-0',
+                      )
+                    : cn(labelAcross, labelPosition === 'end' ? labelAbove : 'bottom-0')
+                }
+              >
+                {named}
+              </ReferenceLabel>
             )}
-          />
-          {named && (
-            <ReferenceLabel
-              className={
-                line === 'y'
-                  ? cn(
-                      'top-0 -translate-y-1/2',
-                      labelPosition === 'end' ? 'end-0' : 'start-0',
-                    )
-                  : cn(lineLabelAcross, labelPosition === 'end' ? labelAbove : 'bottom-0')
-              }
-            >
-              {named}
-            </ReferenceLabel>
-          )}
-        </div>
+          </div>,
+        )}
       </div>
     </>
   )

@@ -22,6 +22,7 @@ import {
   numberExtent,
   pointScale,
   timeScale,
+  type TimeScaleOptions,
 } from '@/registry/lib/chart-scale'
 import { readTime, type Weekday } from '@/registry/lib/dates'
 
@@ -100,6 +101,8 @@ type CartesianX =
       /** The day weeks start on. */
       firstDay?: Weekday
       gaps?: BandGaps
+      /** The stretch of time the plot shows, when it shows less than its rows, as a live chart does: see `timeScale`. */
+      window?: TimeScaleOptions['window']
     }
   | {
       kind: 'number'
@@ -276,6 +279,7 @@ function cartesianModel(input: CartesianInput): CartesianModel {
           timeZone: times.instants ? x.timeZone : 'UTC',
           firstDay: x.firstDay,
           bands: hasBars ? (x.gaps ?? {}) : null,
+          window: x.window,
         })
       : xScaleOf(input, xValues, hasBars)
 

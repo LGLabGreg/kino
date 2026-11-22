@@ -9,6 +9,7 @@ import {
   VALUE_AXIS,
   type ValueAxisOptions,
 } from '@/registry/lib/chart-frame'
+import { type ChartLive, useLiveClock } from '@/registry/lib/chart-live-clock'
 import {
   allWhole,
   alongCategories,
@@ -177,6 +178,12 @@ interface ChartFrame {
    * their place unseen rather than show a range that then shifts.
    */
   measuring: boolean
+  /**
+   * An x of times that shows a window of them, still or live: the clock the
+   * layers placed by x move with (`ChartLiveLayer`). Null for an x that
+   * shows all of it.
+   */
+  live: ChartLive | null
 }
 
 /**
@@ -694,12 +701,15 @@ function categoryReader(
     if (key === undefined) return null
     return series === null ? { kind: 'x', key } : { kind: 'datum', series, key }
   }
-  // A chart that scrolls opens at its end, so the keys start there too.
+  // A chart that scrolls, sideways or live, opens at its end, so the keys start there too.
   const start =
     count === 0
       ? null
       : Math.min(
-          chart.keys?.start ?? (chart.leastPlotWidth === undefined ? 0 : count - 1),
+          chart.keys?.start ??
+            (chart.leastPlotWidth === undefined && chart.frame.live === null
+              ? 0
+              : count - 1),
           count - 1,
         )
   return {
@@ -1029,6 +1039,9 @@ interface CategoryChartOptions<Shapes> extends CategoryRowOptions, CategoryLayou
  * What every chart with categories keeps before its scales: the root's
  * state, the rows it draws, what its parts declare, and whether it loads.
  */
+/** The rows of a chart that loads or failed: one array, so what compares rows sees no change. */
+const NO_ROWS: readonly ChartDatum[] = []
+
 function useCategoryRows(props: CategoryChartProps, options: CategoryRowOptions) {
   const { data, loading = false, error } = props
   const state = useChartRoot(props, {
@@ -1043,7 +1056,7 @@ function useCategoryRows(props: CategoryChartProps, options: CategoryRowOptions)
   if (firstLoad && !loading) setFirstLoad(false)
   const placeholder = useSpinner(loading) || firstLoad
   const failed = Boolean(error) && !loading
-  const rows = placeholder || failed ? [] : data
+  const rows = placeholder || failed ? NO_ROWS : data
   const drawn = options.rowsShown
     ? options.rowsShown(rows, hidden)
     : options.seriesOfRow
@@ -1250,6 +1263,7 @@ function useCategoryChart<Shapes>(
     axisOf: () => VALUE_AXIS,
     // A part's room is registered once it has mounted, by which time the plot is measured.
     measuring: false,
+    live: null,
   }
   const value = useCategoryValue(
     props,
@@ -1285,11 +1299,28 @@ interface CartesianChartProps extends CategoryChartProps {
   timeZone?: string
 }
 
+/** The props of a chart on the cartesian frame whose x of times can show a window of them, still or live. */
+interface LiveChartProps {
+  /**
+   * How much time the plot shows, in ms, of an x of times: the latest, from
+   * the newest row back, or with `live`, from now back. It sets how fast a
+   * live chart scrolls.
+   */
+  window?: number
+  /** The plot's end is now, and it scrolls with the clock: a stream, such as requests per second. Needs a `window`. */
+  live?: boolean
+  /** Holds a live chart still, as hovering or focusing its plot does; rows keep arriving past its end. */
+  paused?: boolean
+}
+
 /** The props of a chart on the cartesian frame that aren't its `<figure>`'s. */
 const cartesianChartKeys = [
   'indexType',
   'timeZone',
-] as const satisfies readonly (keyof CartesianChartProps)[]
+  'window',
+  'live',
+  'paused',
+] as const satisfies readonly (keyof (CartesianChartProps & LiveChartProps))[]
 
 /**
  * A row's key along an x of times: a calendar value's own text, so a day
@@ -1330,9 +1361,20 @@ interface CartesianChartOptions extends CategoryRowOptions, CategoryLayout {
  * chart's root adds where its tooltip sits and draws its marks inside
  * `CategoryChartFrame`.
  */
-function useCartesianChart(props: CartesianChartProps, options: CartesianChartOptions) {
+function useCartesianChart(
+  props: CartesianChartProps & LiveChartProps,
+  options: CartesianChartOptions,
+) {
   const { index, config, domain, tickCount, tickValues, allowDecimals } = props
   const times = props.indexType === 'time'
+  if (props.window !== undefined && !times) {
+    throw new Error('A `window` is a stretch of time: give `indexType="time"` too.')
+  }
+  if (props.live && props.window === undefined) {
+    throw new Error(
+      'A live chart scrolls through a `window` of time: give one, in ms, such as `window={60_000}`.',
+    )
+  }
   if (times && options.x) {
     throw new Error('A chart whose x is a number of its own takes no `indexType`.')
   }
@@ -1348,8 +1390,22 @@ function useCartesianChart(props: CartesianChartProps, options: CartesianChartOp
     props,
     times ? { ...options, keyOf: (row) => timeKey(row[index]) } : options,
   )
-  const { state, drawn, parts, keyOf } = base
+  const { state, parts, keyOf } = base
   const { moves, plotSize, hidden } = state
+  // A window keeps the rows the app lets go while they still show, so the line runs on to the
+  // plot's start; nothing while it loads or failed.
+  const clock = useLiveClock({
+    window: props.window ?? null,
+    live: props.live ?? false,
+    paused: props.paused ?? false,
+    rows: base.drawn,
+    timeOf: (row) => readTime(row[index])?.time ?? Number.NaN,
+    root: state.root,
+    plot: state.plot,
+    direction: state.direction,
+  })
+  const drawn = base.placeholder || base.failed ? base.drawn : clock.rows
+  const rows = drawn === base.drawn ? base : { ...base, rows: drawn, drawn }
   checkSeries(config, parts, options.kinds[0].mark)
   const numbersAlong = options.x !== undefined
   // A value given for an x of categories or times marks the value axis.
@@ -1386,6 +1442,7 @@ function useCartesianChart(props: CartesianChartProps, options: CartesianChartOp
             timeZone,
             firstDay,
             gaps: options.gaps,
+            window: clock.scaleWindow,
           }
         : { kind: 'category', keys: drawn.map(keyOf), gaps: options.gaps },
     y: {
@@ -1425,6 +1482,7 @@ function useCartesianChart(props: CartesianChartProps, options: CartesianChartOp
     baselines: model.baselines,
     axisOf: model.axisOf,
     measuring: room > 0 && valueLength <= 0 && drawn.length > 0,
+    live: clock.live,
   }
   // A row's time is written as fine as the chart's times are, and on one day, as its time of day alone.
   const oneDay =
@@ -1447,7 +1505,7 @@ function useCartesianChart(props: CartesianChartProps, options: CartesianChartOp
       ? { ...props, categoryFormat: timeText }
       : props,
     options,
-    base,
+    rows,
     { categories, current },
     frame,
     model.point,
@@ -1616,7 +1674,9 @@ function CategoryChartFrame({
 }) {
   const [along, setAlong] = useState<'x' | 'y'>('x')
   const [opens] = useState(() => new WeakMap<ChartTarget, () => void>())
-  const reader = categoryReader(chart, along, setAlong, opens)
+  const own = categoryReader(chart, along, setAlong, opens)
+  const live = chart.frame.live
+  const reader = live ? liveReader(own, live, chart.direction) : own
   const { current, selected, toggleSelected, activeProps } = chart
   const keys = current.map((category) => category.key)
   const targetOf = (index: number | null | undefined): ChartTarget | null => {
@@ -1708,6 +1768,7 @@ function CategoryChartFrame({
     >
       <ChartContext value={chart}>
         <CategoryActive toldRef={toldRef}>
+          {live && <LiveHold hold={live.hold} />}
           {children}
           {placeholder}
         </CategoryActive>
@@ -1715,6 +1776,65 @@ function CategoryChartFrame({
       {scroller && <ScrollCorners direction={chart.direction} />}
     </ChartFrame>
   )
+}
+
+/**
+ * The reader of a chart whose plot shows a window of time: its marks sit in
+ * a layer the clock moves, so what is under the pointer is read where the
+ * layer is now, and a tooltip sits where its mark is on the plot.
+ */
+function liveReader(
+  reader: ChartReader,
+  live: ChartLive,
+  direction: ReadingDirection,
+): ChartReader {
+  // The layer moves toward the reading start: left, or right in right to left.
+  const sign = direction === 'rtl' ? -1 : 1
+  const anchor = (target: ChartTarget) => {
+    const at = reader.anchor(target)
+    return at && { ...at, x: at.x - sign * live.offset() }
+  }
+  // The keys reach only what the plot shows: rows kept past its start, or arrived past its end
+  // while it is held, are out of view.
+  const shown = (target: ChartTarget | null) => {
+    const at = target && anchor(target)
+    return at !== null && at.x >= -1e-6 && at.x <= 1 + 1e-6
+  }
+  const back = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft'
+  const on = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight'
+  /** From `target`, stepping `key` while it is out of view, the first in view, or null. */
+  const toView = (target: ChartTarget | null, key: string) => {
+    let at = target
+    for (let steps = 0; at && !shown(at) && steps < reader.stops; steps += 1) {
+      const next = reader.step(at, key)
+      if (!next || next === at) return null
+      at = next
+    }
+    return at && shown(at) ? at : null
+  }
+  return {
+    ...reader,
+    targetAt: (point) =>
+      reader.targetAt({ ...point, x: point.x + sign * live.offset() * point.width }),
+    anchor,
+    start: toView(reader.start, back),
+    step: (from, key) => {
+      const next = reader.step(from, key)
+      if (!next) return null
+      if (key === 'Home') return toView(next, on) ?? from
+      if (key === 'End') return toView(next, back) ?? from
+      return shown(next) ? next : from
+    },
+  }
+}
+
+/** Holds a live plot still while anything on it is lit, by the pointer or the keys, so it can be read. */
+function LiveHold({ hold }: { hold: (held: boolean) => void }) {
+  const lit = useChartActive().spotlit !== null
+  useLayoutEffect(() => {
+    hold(lit)
+  }, [hold, lit])
+  return null
 }
 
 /** The corners beside the axes along the top and bottom of a chart that scrolls sideways, which hold still with the axes down its sides, so the names passing under them hide there too. */
@@ -1987,6 +2107,7 @@ function ShareTooltipContent({
 }
 
 export {
+  type LiveChartProps,
   axisLayerClassName,
   axisSlide,
   categoryReader,
