@@ -1131,8 +1131,10 @@ function shareColor(chart: Pick<ChartRootState, 'series'>, item: ChartItem) {
 interface ShareTooltipRow {
   /** The value's name, when there are several, such as a ring's. */
   label: string | null
-  value: string
-  share: string
+  /** The value the share is of, or null for a row that is a share alone, such as a share of the whole. */
+  value: string | null
+  /** Its part of the whole, or null for a value that isn't one, such as a second value beside it. */
+  share: string | null
 }
 
 /**
@@ -1171,15 +1173,19 @@ function ShareTooltipContent({
   const figures = (row: ShareTooltipRow) => (
     <>
       {/* A value with a unit reads in its own order whatever the page's direction. */}
-      <span
-        dir='auto'
-        className='text-background/75 tabular-nums forced-colors:text-[CanvasText]'
-      >
-        {row.share}
-      </span>
-      <span dir='auto' className='font-medium tabular-nums'>
-        {row.value}
-      </span>
+      {row.share !== null && (
+        <span
+          dir='auto'
+          className='text-background/75 tabular-nums forced-colors:text-[CanvasText]'
+        >
+          {row.share}
+        </span>
+      )}
+      {row.value !== null && (
+        <span dir='auto' className='font-medium tabular-nums'>
+          {row.value}
+        </span>
+      )}
     </>
   )
   const single = rows.length === 1 ? rows[0] : undefined

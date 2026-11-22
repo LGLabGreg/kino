@@ -38,6 +38,7 @@ import {
   ChartFrame,
   type ChartRootValue,
   drawingSize,
+  isMeasured,
   swatchClassName,
   useChartRoot,
   useChartRootValue,
@@ -574,10 +575,6 @@ function Swatch({ color }: { color: string }) {
       style={{ '--swatch': color } as CSSProperties}
     />
   )
-}
-
-function isMeasured(size: { width: number; height: number }) {
-  return size.width > 0 && size.height > 0
 }
 
 /** Which side of its node a label stands, physically: outside the outer columns where they have room, else after the node. */

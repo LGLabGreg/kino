@@ -1,15 +1,6 @@
 'use client'
 
 import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/registry/components/kino/breadcrumb'
-import { useAnnouncer } from '@/registry/lib/announce'
-import {
   type CategoryChartProps,
   type EntrancePhase,
   figureProps,
@@ -29,12 +20,12 @@ import {
   type ChartRootValue,
   drawingSize,
   forcedSeriesColor,
+  isMeasured,
   labelOnClassName,
   patternImage,
   type PlotPoint,
   plotLayerClassName,
   swatchClassName,
-  useChartRoot,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
 import {
@@ -43,34 +34,29 @@ import {
   type LaidTile,
   labelFit,
   type TileBox,
-  tileAncestors,
   type TileLayout,
   tileLayout,
   tileMoves,
   type TileNode,
-  tileNodeAt,
   tileTree,
   tileAt,
+  topColor,
   headerFit,
   viewShape,
   viewTiles,
 } from '@/registry/lib/chart-tiles'
+import {
+  TreeZoomContext,
+  TreeZoomPath,
+  useTreeZoomRoot,
+} from '@/registry/lib/chart-tree-path'
 import { treeItem, type TreeStop, treeReader } from '@/registry/lib/chart-tree-reader'
-import { useControllable } from '@/registry/lib/controllable'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
-import {
-  type ComponentProps,
-  createContext,
-  type CSSProperties,
-  Fragment,
-  memo,
-  use,
-  useState,
-} from 'react'
+import { type ComponentProps, type CSSProperties, memo, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -135,21 +121,6 @@ const GROUP_GAP = 4
 /** How far from a tile, in px, the pointer still lights it: across the room between groups. */
 const NEAR_TILE = 8
 
-interface TreemapContextValue {
-  tree: TileNode
-  view: TileNode
-  zoomTo: (path: readonly string[]) => void
-  nameOf: (node: TileNode) => string
-}
-
-const TreemapContext = createContext<TreemapContextValue | null>(null)
-
-function useTreemapChart() {
-  const treemap = use(TreemapContext)
-  if (!treemap) throw new Error('Treemap chart parts go inside a `TreemapChart`.')
-  return treemap
-}
-
 /** A tile the chart draws: a stop in view, or one leaving, which keeps its last place. */
 type TreemapStop = TreeStop & { leaving: boolean }
 
@@ -168,73 +139,15 @@ function TreemapChart(props: TreemapChartProps) {
     labels = 'value',
     color,
     entrance = 'none',
-    messages,
     description,
     empty,
     className,
     ref,
   } = props
   const tree = tileTree(data, index, dataKey)
-  // Every top is a group the legend and the keys know, the ones the config leaves out after
-  // its own, named by their names.
-  const groups: ChartConfig = { ...config }
-  for (const top of tree.children) {
-    const key = top.path[0] ?? ''
-    groups[key] ??= {
-      label: props.categoryFormat ? props.categoryFormat(top.name) : String(top.name),
-    }
-  }
-  const [hidden, setHidden] = useControllable(
-    props.hiddenSeries,
-    props.defaultHiddenSeries ?? [],
-    props.onHiddenSeriesChange,
-  )
-  const [zoom, setZoom] = useControllable(
-    props.zoom,
-    props.defaultZoom ?? [],
-    props.onZoomChange,
-  )
-  const asked = tileNodeAt(tree, zoom)
-  // A part whose top is hidden can't be in view, so the whole is.
-  const view = hidden.includes(asked.path[0] ?? '') ? tree : asked
-  const { announce, region } = useAnnouncer()
-  const state = useChartRoot(
-    {
-      ...props,
-      config: groups,
-      hiddenSeries: hidden,
-      defaultHiddenSeries: undefined,
-      onHiddenSeriesChange: (next) => {
-        // Hiding the top in view zooms back out to the whole, where the rest still are.
-        if (next.includes(view.path[0] ?? '\u0000')) {
-          setZoom([])
-          announce(state.messages.zoomedTo(nameOf(tree)))
-        }
-        setHidden(next)
-      },
-      messages: {
-        series: 'Groups',
-        empty: 'No data yet',
-        allHidden: 'Every group is hidden',
-        showAll: (count) => `Show all ${count} groups`,
-        ...messages,
-      },
-    },
-    { entrance: entrance !== 'none', heightFromData: false },
-  )
+  const { state, groups, hidden, view, nameOf, valueOf, zoomTo, region } =
+    useTreeZoomRoot(props, tree, { entrance: entrance !== 'none' })
   const { messages: words, valueText, locale, direction, moves } = state
-  const nameOf = (node: TileNode): string => {
-    if (node.path.length === 0) return words.whole
-    if (props.categoryFormat) return props.categoryFormat(node.name)
-    const named = node.path.length === 1 ? groups[node.path[0] ?? '']?.label : undefined
-    return typeof named === 'string' ? named : String(node.name)
-  }
-  const zoomTo = (path: readonly string[]) => {
-    const next = tileNodeAt(tree, path)
-    if (next.key === view.key) return
-    setZoom([...next.path])
-    announce(words.zoomedTo(nameOf(next)))
-  }
   /** A tile's name as the table and a screen reader give it: its group's label for a top. */
   const stopName = (name: unknown) => {
     if (props.categoryFormat) return props.categoryFormat(name)
@@ -361,7 +274,7 @@ function TreemapChart(props: TreemapChartProps) {
         const tile = shownTiles[stop.index] ?? null
         const name = pickedName(stop.name, pick.picked === stop.id, words)
         if (!tile) return `${name}: `
-        const value = `${label} ${valueText(tile.node.value)}, ${percent.format(shareOf(tile))}`
+        const value = `${label} ${valueOf(tile.node)}, ${percent.format(shareOf(tile))}`
         return `${name}: ${tile.group ? `${groupText(tile)}, ${value}` : value}`
       },
       table: {
@@ -374,7 +287,7 @@ function TreemapChart(props: TreemapChartProps) {
             name: stop.name,
             cells: [
               ...(anyGroup ? [groupText(tile)] : []),
-              valueText(tile?.node.value ?? 0),
+              tile ? valueOf(tile.node) : words.noValue,
               percent.format(shareOf(tile)),
             ],
           }
@@ -397,7 +310,7 @@ function TreemapChart(props: TreemapChartProps) {
             rows={[
               {
                 label: null,
-                value: valueText(tile.node.value),
+                value: valueOf(tile.node),
                 share: percent.format(shareOf(tile)),
               },
             ]}
@@ -428,7 +341,7 @@ function TreemapChart(props: TreemapChartProps) {
 
   const moved = tileMoves(was, layout)
   return (
-    <TreemapContext value={{ tree, view, zoomTo, nameOf }}>
+    <TreeZoomContext value={{ tree, view, zoomTo, nameOf }}>
       <ChartFrame
         root={root}
         focus={focusProps}
@@ -461,7 +374,7 @@ function TreemapChart(props: TreemapChartProps) {
           {load.placeholder && <TreemapPlaceholder />}
         </IndexActive>
       </ChartFrame>
-    </TreemapContext>
+    </TreeZoomContext>
   )
 }
 
@@ -481,11 +394,7 @@ function layoutSignature(layout: TileLayout) {
   return `${layout.view.key}#${boxes}`
 }
 
-/**
- * A tile's colour: its own from `color`, or its top's from the config, or
- * the next of the chart's colours for a top the config leaves out, whose
- * name may not be a CSS variable's.
- */
+/** A tile's colour: its own from `color`, or its top's. */
 function tileColor(
   series: readonly string[],
   config: ChartConfig,
@@ -493,10 +402,7 @@ function tileColor(
   stop: TreeStop,
   color: TreemapChartProps['color'],
 ) {
-  const own = color?.(stop.datum, stop.index)
-  if (own) return own
-  const ramp = `var(--chart-${(Math.max(0, series.indexOf(top)) % 5) + 1})`
-  return config[top] ? `var(--color-${top}, ${ramp})` : ramp
+  return color?.(stop.datum, stop.index) || topColor(series, config, top)
 }
 
 /**
@@ -519,10 +425,6 @@ function tileClip(box: TileBox): string {
 function labelAt(box: TileBox, direction: 'ltr' | 'rtl') {
   const x = direction === 'rtl' ? box.x1 - 1 : box.x0
   return `${round(x * 100)}cqw ${round(box.y0 * 100)}cqh`
-}
-
-function isMeasured(size: { width: number; height: number }) {
-  return size.width > 0 && size.height > 0
 }
 
 /** A fraction written to four decimals, enough for a plot thousands of px long. */
@@ -940,23 +842,6 @@ function TreemapPlaceholder() {
   )
 }
 
-/** How long focus is kept off the page after a crumb is pressed, in ms: past a menu that closes and hands focus back to "…". */
-const FOCUS_WATCH = 600
-
-/**
- * Puts focus on `target` whenever it falls to the page in the next moments,
- * as it does when the crumb or the menu that had it goes.
- */
-function keepFocusOn(target: { current: HTMLElement | null }) {
-  const until = performance.now() + FOCUS_WATCH
-  const check = () => {
-    const now = document.activeElement
-    if (!now || now === document.body) target.current?.focus({ preventScroll: true })
-    if (performance.now() < until) requestAnimationFrame(check)
-  }
-  requestAnimationFrame(check)
-}
-
 /** The shape the placeholder's tiles take: a few of falling size, as most treemaps have. */
 const PLACEHOLDER_TREE = tileTree(
   [34, 22, 16, 11, 8, 5, 4].map((value, at) => ({ name: String(at), value })),
@@ -965,50 +850,11 @@ const PLACEHOLDER_TREE = tileTree(
 )
 
 /**
- * The way back out: Kino's Breadcrumb of the parts above the one in view,
- * the whole first, each a button that zooms out to it, and the part in view
- * last. It sits above the plot, under a legend at the top. It shows the
- * whole's name before the first zoom too, so zooming never moves the plot,
- * but with nothing to press it is hidden from screen readers until then.
+ * The way back out: the path of the parts above the one in view, the whole
+ * first, each a button that zooms out to it, above the plot.
  */
-function TreemapPath({ className, ...props }: ComponentProps<'nav'>) {
-  const chart = useChartRootValue()
-  const { tree, view, zoomTo, nameOf } = useTreemapChart()
-  const above = tileAncestors(tree, view)
-  return (
-    <Breadcrumb
-      data-slot='treemap-chart-path'
-      aria-label={chart.messages.zoomPath(chart.label)}
-      aria-hidden={above.length === 0 ? true : undefined}
-      className={cn('pb-2 [grid-area:top-axis]', className)}
-      {...props}
-    >
-      <BreadcrumbList>
-        {above.map((node) => (
-          <Fragment key={node.key || 'whole'}>
-            <BreadcrumbItem>
-              <BreadcrumbLink
-                // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the crumb's name, its children, labels the button
-                render={<button type='button' />}
-                onClick={() => {
-                  zoomTo(node.path)
-                  // The crumb pressed becomes the part in view, and "…" may fold away with it:
-                  // focus goes to the tiles rather than to the page.
-                  keepFocusOn(chart.plot)
-                }}
-              >
-                {nameOf(node)}
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator />
-          </Fragment>
-        ))}
-        <BreadcrumbItem>
-          <BreadcrumbPage>{nameOf(view)}</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
-  )
+function TreemapPath(props: ComponentProps<'nav'>) {
+  return <TreeZoomPath slot='treemap-chart-path' {...props} />
 }
 
 export { labelAt, TreemapChart, type TreemapChartProps, TreemapPath, tileClip }

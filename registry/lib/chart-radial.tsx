@@ -1,6 +1,7 @@
 'use client'
 
 import type { ChartPoint } from '@/registry/lib/chart-root'
+import { arc as d3Arc } from 'd3-shape'
 import { type ComponentProps, type CSSProperties, memo, type Ref } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -573,7 +574,185 @@ const RadialLabel = memo(function RadialLabel({
   )
 })
 
+/*
+ * Arcs: the rings of a chart of a tree round a centre, such as a sunburst's,
+ * each arc a place as fractions (`ArcPlace` in `chart-tiles`) drawn in px
+ * between the hole and the edge.
+ */
+
+/** Where an arc sits, as fractions: of a turn clockwise from the top, and of the room from the hole to the edge. */
+interface ArcFractions {
+  start: number
+  end: number
+  inner: number
+  outer: number
+}
+
+/** The rings' room in px: the hole's radius and the edge's. */
+interface RingRoom {
+  hole: number
+  edge: number
+}
+
+/** An arc's edges in px from the centre, and its turns. */
+interface ArcBox {
+  start: number
+  end: number
+  inner: number
+  outer: number
+}
+
+/** The room between two arcs, and between two rings, in px, as between a donut's slices. */
+const ARC_GAP = 2
+
+/**
+ * An arc's edges in px: its fractions of the room from the hole to the edge,
+ * each side that meets another ring half a gap in, so rings sit `ARC_GAP`
+ * apart while the edge and a centre with no hole stay flush.
+ */
+function arcBox(place: ArcFractions, room: RingRoom): ArcBox {
+  const across = Math.max(0, room.edge - room.hole)
+  const half = ARC_GAP / 2
+  const inner =
+    room.hole + place.inner * across + (place.inner > 0 || room.hole > 0 ? half : 0)
+  const outer = room.hole + place.outer * across - (place.outer < 1 ? half : 0)
+  return { start: place.start, end: place.end, inner, outer: Math.max(inner, outer) }
+}
+
+/**
+ * An arc's path round a centre at 0, 0, by d3's arc: `ARC_GAP` px between
+ * it and the arcs beside it, as wide at the hole as at the edge, and a
+ * whole turn drawn as a ring with no seam. Empty for an arc with no room.
+ */
+function arcPath(place: ArcFractions, room: RingRoom): string {
+  const box = arcBox(place, room)
+  if (box.end - box.start <= 1e-6 || box.outer - box.inner <= 1e-3) return ''
+  const turn = Math.PI * 2
+  const pad = room.edge > 0 ? ARC_GAP / room.edge : 0
+  return (
+    d3Arc<ArcBox>()
+      .innerRadius(box.inner)
+      .outerRadius(box.outer)
+      .startAngle(box.start * turn)
+      .endAngle(box.end * turn)
+      // A gap as wide everywhere: the pad's angle at the edge, held to its px at every radius.
+      .padRadius(room.edge)
+      .padAngle(pad)
+      .digits(2)(box) ?? ''
+  )
+}
+
+/** What a point is on: an arc, by its place among `arcs`, the hole, or nothing. */
+type ArcHit = { kind: 'arc'; index: number } | { kind: 'hole' } | null
+
+/**
+ * What sits under a point `x` across and `y` down from the centre, in px:
+ * the hole, or the arc its angle falls in on the ring it is on, or nearest
+ * to within `PICK_SLACK` px, so the gaps between rings and just past the
+ * edge still find one.
+ */
+function arcAt(
+  x: number,
+  y: number,
+  arcs: readonly ArcFractions[],
+  room: RingRoom,
+): ArcHit {
+  const distance = Math.hypot(x, y)
+  if (room.edge <= 0 || distance > room.edge + PICK_SLACK) return null
+  if (room.hole > 0 && distance < room.hole) return { kind: 'hole' }
+  const turn = turnOf(x, y)
+  let best: number | null = null
+  let nearest = PICK_SLACK
+  for (const [at, place] of arcs.entries()) {
+    if (place.end - place.start <= 0 || turn < place.start || turn >= place.end) continue
+    const box = arcBox(place, room)
+    if (box.outer <= box.inner) continue
+    const away = Math.max(0, box.inner - distance, distance - box.outer)
+    if (away <= nearest) {
+      best = at
+      nearest = away
+    }
+  }
+  return best === null ? null : { kind: 'arc', index: best }
+}
+
+/** How a label lies on its arc: along it, across the ring, or not at all. */
+type ArcLabelFit = 'along' | 'across' | 'none'
+
+/** The room a label keeps from its arc's edges, in px. */
+const ARC_LABEL_PADDING = 4
+
+/** A label's height on an arc, in px: a line of the chart's small text. */
+const ARC_LABEL_HEIGHT = 12
+
+/**
+ * How a label `width` px wide lies on an arc, centred on its middle: along
+ * the arc when the arc is at least as long there as the ring is thick, else
+ * across the ring, and the other way when that one doesn't fit; or not at
+ * all, never cut short. Along the arc, it stays inside the ring at its ends
+ * and its middle; across, inside the ring's thickness and the arc's width
+ * where it starts.
+ */
+function arcLabelFit(box: ArcBox, width: number): ArcLabelFit {
+  const thickness = box.outer - box.inner
+  const middle = (box.inner + box.outer) / 2
+  const half = (box.end - box.start) * Math.PI
+  // The angle each side of the middle the arc has, less the gap beside it.
+  const room = Math.min(Math.PI, half) - (middle > 0 ? ARC_GAP / 2 / middle : 0)
+  if (width <= 0 || thickness <= 0 || room <= 0) return 'none'
+  const pad = ARC_LABEL_PADDING
+  const line = ARC_LABEL_HEIGHT
+  const along = () => {
+    const low = middle - line / 2
+    if (low < box.inner + pad) return false
+    if (Math.hypot(width / 2, middle + line / 2) > box.outer - pad) return false
+    return Math.atan2(width / 2 + pad, low) <= room
+  }
+  const across = () => {
+    if (width + pad * 2 > thickness) return false
+    const foot = box.inner + pad
+    return foot * Math.sin(Math.min(room, Math.PI / 2)) >= line / 2 + 1
+  }
+  const order: ArcLabelFit[] =
+    room * 2 * middle >= thickness ? ['along', 'across'] : ['across', 'along']
+  for (const way of order) if (way === 'along' ? along() : across()) return way
+  return 'none'
+}
+
+/**
+ * How far a label on an arc whose middle is `turn` round turns past the
+ * arc's own direction, in degrees, so it reads upright: along the arc it
+ * flips on the bottom half, and across the ring a quarter back, flipping on
+ * the left half.
+ */
+function arcLabelSpin(fit: Exclude<ArcLabelFit, 'none'>, turn: number): number {
+  const at = ((turn % 1) + 1) % 1
+  if (fit === 'along') return at > 0.25 && at < 0.75 ? 180 : 0
+  return at > 0.5 ? 90 : -90
+}
+
+/**
+ * The SVG transform that puts a label on an arc's middle, `turn` round and
+ * `radius` px out from the centre at 0, 0, turned `spin` degrees past the
+ * arc's own direction.
+ */
+function arcLabelTransform(turn: number, radius: number, spin: number): string {
+  return `rotate(${round(turn * 360)}) translate(0 ${-round(radius)}) rotate(${round(spin)})`
+}
+
 export {
+  ARC_GAP,
+  type ArcBox,
+  arcAt,
+  arcBox,
+  type ArcFractions,
+  type ArcHit,
+  type ArcLabelFit,
+  arcLabelFit,
+  arcLabelSpin,
+  arcLabelTransform,
+  arcPath,
+  type RingRoom,
   edgeRoom,
   fitRound,
   ringAt,

@@ -316,17 +316,34 @@ function dropLeft(items: readonly SwapItem[], left: readonly string[]): SwapItem
 /**
  * Content as it last showed: what leaves keeps what it said at the end, as
  * content under one `id` (a line with a bar that grows) changes while it shows.
+ * Text truncates on its line, or in a block, whose height follows its
+ * content, wraps onto as many as it needs.
  */
-function SwapHeld({ showing, children }: { showing: boolean; children: ReactNode }) {
+function SwapHeld({
+  showing,
+  wrap,
+  children,
+}: {
+  showing: boolean
+  wrap: boolean
+  children: ReactNode
+}) {
   const [held, setHeld] = useState(children)
   if (showing && held !== children) setHeld(children)
   return flattenChildren(showing ? children : held).map((child, index) =>
     typeof child === 'string' || typeof child === 'number' ? (
-      // oxlint-disable-next-line react/no-array-index-key -- the parts of one piece of content keep their order
-      // A label a `CutTooltip` around it can measure.
-      <span key={index} data-cut className='min-w-0 truncate'>
-        {child}
-      </span>
+      wrap ? (
+        // oxlint-disable-next-line react/no-array-index-key -- the parts of one piece of content keep their order
+        <span key={index} className='min-w-0'>
+          {child}
+        </span>
+      ) : (
+        // oxlint-disable-next-line react/no-array-index-key -- the parts of one piece of content keep their order
+        // A label a `CutTooltip` around it can measure.
+        <span key={index} data-cut className='min-w-0 truncate'>
+          {child}
+        </span>
+      )
     ) : (
       child
     ),
@@ -546,7 +563,9 @@ function Swap({
                 fill ? 'w-full min-w-0' : current ? 'min-w-0' : 'w-max shrink-0',
               )}
             >
-              <SwapHeld showing={current}>{current ? children : item.node}</SwapHeld>
+              <SwapHeld showing={current} wrap={block}>
+                {current ? children : item.node}
+              </SwapHeld>
             </span>
           </span>
         )

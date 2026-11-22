@@ -167,6 +167,12 @@ interface ChartMessages {
   to: string
   /** A flow from one node to another, with their names. */
   flow: (from: string, to: string) => string
+  /** A share of a part, read out, such as "38% of src". */
+  shareOf: (share: string, part: string) => string
+  /** A row of a tooltip, or a column of the data table, for a share of a part, such as "Of src". */
+  ofPart: (part: string) => string
+  /** How deep a node of a tree is, read out, such as "level 2" for the parts of a top. */
+  level: (depth: number) => string
   /** The way back out of a chart that zooms, with the chart's `label`, so each chart's is its own. */
   zoomPath: (label: string) => string
   /** Said once a chart that zooms shows another part of it, with the part's name. */
@@ -206,6 +212,9 @@ const defaultMessages: ChartMessages = {
   from: 'From',
   to: 'To',
   flow: (from, to) => `${from} to ${to}`,
+  shareOf: (share, part) => `${share} of ${part}`,
+  ofPart: (part) => `Of ${part}`,
+  level: (depth) => `level ${depth}`,
   zoomPath: (label) => `Zoom path for ${label}`,
   zoomedTo: (name) => `Showing ${name}`,
   ofFirst: 'Of the first step',
@@ -601,12 +610,18 @@ const tooltipQuietClassName =
   'text-background/75 transition-colors duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-lit/row:text-background forced-colors:text-[CanvasText]'
 
 /**
- * Text written on a mark, such as a slice's or a tile's label: near white or
- * near black, whichever reads on the mark's colour, `--label-on`; in forced
- * colours, the page's text on a box of its own.
+ * Text written on a mark, such as a slice's or a tile's label: white or near
+ * black, whichever reads on the mark's colour, `--label-on`, at 4.5:1 or
+ * more; in forced colours, the page's text on a box of its own, or on an
+ * SVG label, which takes no box, a 3px halo of the page's colour. The choice
+ * reads the colour's luminance, `--label-y`, as contrast is measured: a
+ * switch on lightness alone fell to 4.2:1 on a blue and 4.4:1 on a red, the
+ * two sides of it (2026-11-22, LGL-606: the Sunburst's outer rings in dark
+ * mode). The switch sits where white and black read alike, and the black
+ * deepens to pure black on the marks just past it.
  */
 const labelOnClassName =
-  'text-[oklch(from_var(--label-on)_clamp(0.15,(0.6-l)*1000,0.99)_0_0)] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText]'
+  '[--label-y:(0.2126_*_pow((max(0,_r)_+_0.055)_/_1.055,_2.4)_+_0.7152_*_pow((max(0,_g)_+_0.055)_/_1.055,_2.4)_+_0.0722_*_pow((max(0,_b)_+_0.055)_/_1.055,_2.4))] [--label-white:clamp(0,_(0.179_-_var(--label-y))_*_1000,_1)] [--label-v:calc(var(--label-white)_+_(1_-_var(--label-white))_*_clamp(0,_(var(--label-y)_-_0.179)_*_0.4,_0.044))] text-[color(from_var(--label-on)_srgb_var(--label-v)_var(--label-v)_var(--label-v))] forced-colors:rounded-(--control-radius-xs) forced-colors:bg-[Canvas] forced-colors:px-1 forced-colors:text-[CanvasText] forced-colors:[paint-order:stroke] forced-colors:stroke-[Canvas] forced-colors:[stroke-width:3px] forced-colors:[stroke-linejoin:round]'
 
 /** A series' colour beside its name in a tooltip, on its `--swatch` (`swatchStyle`). */
 const swatchClassName =
@@ -618,7 +633,12 @@ const swatchClassName =
  * the plot with `drawingFrame`, so the marks show from the first frame.
  */
 function drawingSize(size: { width: number; height: number }) {
-  return size.width > 0 && size.height > 0 ? size : UNMEASURED
+  return isMeasured(size) ? size : UNMEASURED
+}
+
+/** Whether the plot has been measured: a size of 0 is one the page hasn't laid out yet. */
+function isMeasured(size: { width: number; height: number }) {
+  return size.width > 0 && size.height > 0
 }
 
 /**
@@ -630,7 +650,7 @@ function drawingFrame(
   size: { width: number; height: number },
   fit: 'none' | 'xMidYMid meet',
 ) {
-  return size.width > 0 && size.height > 0
+  return isMeasured(size)
     ? {}
     : {
         viewBox: `0 0 ${UNMEASURED.width} ${UNMEASURED.height}`,
@@ -1424,6 +1444,8 @@ function ChartFocus({
   const group = use(ChartGroupContext)
   const grouped = group !== null && yours === undefined
   const [own, setOwn] = useState(defaultFocus)
+  // The focus last set, ahead of the render that shows it.
+  const ownSet = useRef(own)
   const resolved = resolveFocus(own, yours, grouped ? group.active : undefined)
   const focus = resolved !== null && reader.holds(resolved) ? resolved : null
   const set = (next: ChartTarget | null) => {
@@ -1431,13 +1453,16 @@ function ChartFocus({
     const kept = next !== null && reader.holds(next) ? next : null
     if (sameTarget(kept, focus)) return
     if (grouped) group.setActive(kept === null || kept.kind === 'node' ? null : kept.key)
+    ownSet.current = kept
     setOwn(kept)
     onFocusChange(kept)
   }
   // Yours to keep, when you pass it; the group's is held by key already.
   const gone = own !== null && !reader.holds(own)
   useLayoutEffect(() => {
-    if (!gone || yours !== undefined || grouped) return
+    // A part's effect may have set a new focus since, as the keys do once a zoom renders: that one stays.
+    if (!gone || yours !== undefined || grouped || ownSet.current !== own) return
+    ownSet.current = null
     // eslint-disable-next-line react-hooks/set-state-in-effect -- new data took the key away, and the change is told as it lands, so it is let go here, not in render
     setOwn(null)
     onFocusChange(null)
@@ -1897,6 +1922,7 @@ export {
   forcedSeriesColor,
   forcedSeriesColors,
   forcedSeriesTextColor,
+  isMeasured,
   formatterOf,
   labelOnClassName,
   type MoveRole,

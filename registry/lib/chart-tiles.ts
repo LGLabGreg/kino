@@ -1,5 +1,5 @@
-import type { ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
-import { hierarchy, type HierarchyNode, treemap } from 'd3-hierarchy'
+import type { ChartConfig, ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
+import { hierarchy, type HierarchyNode, partition, treemap } from 'd3-hierarchy'
 
 /*
  * The tiles of a chart drawn as nested boxes sized by value, such as a
@@ -20,6 +20,8 @@ interface TileNode {
   datum: ChartDatum
   /** Its own value, or its children's added up; never below zero. */
   value: number
+  /** Whether it has no value to say: a row's that isn't a number, or every child's. */
+  missing: boolean
   children: readonly TileNode[]
 }
 
@@ -113,6 +115,10 @@ function tileTree(rows: readonly ChartDatum[], index: string, dataKey: string): 
         children.length > 0
           ? children.reduce((sum, child) => sum + child.value, 0)
           : positive(datum[dataKey]),
+      missing:
+        children.length > 0
+          ? children.every((child) => child.missing)
+          : !(typeof datum[dataKey] === 'number' && Number.isFinite(datum[dataKey])),
       children,
     }
   }
@@ -526,7 +532,217 @@ function tileAt(
   return best === null ? null : { tile: best }
 }
 
+/**
+ * The colour of the nodes under `top`: its own from the config, or the next
+ * of the chart's colours for a top the config leaves out, whose name may
+ * not be a CSS variable's.
+ */
+function topColor(series: readonly string[], config: ChartConfig, top: string): string {
+  const ramp = `var(--chart-${(Math.max(0, series.indexOf(top)) % 5) + 1})`
+  return config[top] ? `var(--color-${top}, ${ramp})` : ramp
+}
+
+/*
+ * Rings: a tree laid out as arcs round a centre, such as a sunburst's. Each
+ * node takes its share of its parent's turn, by d3-hierarchy's partition,
+ * and a ring for its depth below the part in view. Places are fractions, of
+ * a turn clockwise from the top and of the room from the hole to the edge,
+ * so a zoom or new data moves each arc by straight lines between two places.
+ */
+
+/** A node's place round the whole: its share of the turn from the top, and its depth below the whole. */
+interface RingNode {
+  key: string
+  node: TileNode
+  /** The top of the tree it is under: its path's first name, its key in the config. */
+  top: string
+  /** 1 for a top. */
+  depth: number
+  start: number
+  end: number
+}
+
+/**
+ * Where an arc sits: `start` to `end` round the turn, clockwise from the
+ * top, and `inner` to `outer` across the rings, as fractions of the room
+ * from the hole to the edge.
+ */
+interface ArcPlace {
+  start: number
+  end: number
+  inner: number
+  outer: number
+}
+
+/** An arc in view: a node, its place, and its depth below the whole. */
+interface RingArc extends ArcPlace {
+  key: string
+  node: TileNode
+  top: string
+  depth: number
+}
+
+interface RingLayout {
+  /** The part in view, which the arcs ring. */
+  view: TileNode
+  /** How many rings the view shows. */
+  rings: number
+  /** The arcs in view, depth first: a parent, then its children clockwise. */
+  arcs: readonly RingArc[]
+  /** Every node's place round the whole, by key, the hidden tops' left out. */
+  places: ReadonlyMap<string, RingNode>
+}
+
+/** The most rings a chart of rings shows from the part in view. */
+const RINGS = 3
+
+/**
+ * Every node below `root`, but those under a top in `hidden`, laid round a
+ * whole turn by d3's partition, depth first: a parent, then its children
+ * clockwise, biggest first, or with `sort` false in the data's order.
+ */
+function ringTree(
+  root: TileNode,
+  { hidden = [], sort = true }: { hidden?: readonly string[]; sort?: boolean } = {},
+): RingNode[] {
+  const tree = hierarchy<TileNode>(root, (node) =>
+    node.path.length === 0
+      ? node.children.filter((child) => !hidden.includes(child.path[0] ?? ''))
+      : node.children,
+  ).sum((node) => (node.children.length > 0 ? 0 : node.value))
+  // A stable sort, so a tie keeps the data's order.
+  if (sort) tree.sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+  const laid = partition<TileNode>().size([1, 1]).round(false)(tree)
+  const out: RingNode[] = []
+  laid.eachBefore((placed) => {
+    if (placed.depth === 0) return
+    out.push({
+      key: placed.data.key,
+      node: placed.data,
+      top: placed.data.path[0] ?? '',
+      depth: placed.depth,
+      // A whole worth nothing gives every node an empty share at the top.
+      start: Number.isFinite(placed.x0) ? placed.x0 : 0,
+      end: Number.isFinite(placed.x1) ? placed.x1 : 0,
+    })
+  })
+  return out
+}
+
+function clampUnit(value: number) {
+  return Math.min(1, Math.max(0, value))
+}
+
+/**
+ * Where the node at `place` sits once `window`, a part's share of the turn
+ * at `depth`, fills the turn with `rings` rings round it: a node outside the
+ * window folds to the top, at its start or its end, and one above the
+ * window's depth into the hole, one past the last ring onto the edge.
+ */
+function placeIn(
+  place: Pick<RingNode, 'start' | 'end' | 'depth'>,
+  window: { start: number; end: number; depth: number },
+  rings: number,
+): ArcPlace {
+  const span = window.end - window.start
+  const turn = (at: number) => (span > 0 ? clampUnit((at - window.start) / span) : 0)
+  const ring = (depth: number) => clampUnit((depth - window.depth) / rings)
+  return {
+    start: turn(place.start),
+    end: turn(place.end),
+    inner: ring(place.depth - 1),
+    outer: ring(place.depth),
+  }
+}
+
+/** The window a part in view fills: its own share of the turn, or the whole turn for the whole. */
+function windowOf(layout: Pick<RingLayout, 'view' | 'places'>) {
+  const own = layout.places.get(layout.view.key)
+  return own ?? { start: 0, end: 1, depth: 0 }
+}
+
+/**
+ * The arcs `view` shows, out of the places `ringTree` laid round the whole:
+ * every node under it on up to `rings` rings, fewer where the tree under it
+ * is shallower, so its rings fill the room.
+ */
+function ringLayout(
+  view: TileNode,
+  places: readonly RingNode[],
+  rings: number = RINGS,
+): RingLayout {
+  const byKey = new Map(places.map((place) => [place.key, place]))
+  const depth = view.path.length
+  const under = places.filter(
+    (place) => place.depth > depth && startsWith(place.node.path, view.path),
+  )
+  const deepest = under.reduce((most, place) => Math.max(most, place.depth - depth), 0)
+  const count = Math.max(1, Math.min(rings, deepest))
+  const window = windowOf({ view, places: byKey })
+  const arcs = under
+    .filter((place) => place.depth - depth <= count)
+    .map((place) => ({
+      key: place.key,
+      node: place.node,
+      top: place.top,
+      depth: place.depth,
+      ...placeIn(place, window, count),
+    }))
+  return { view, rings: count, arcs, places: byKey }
+}
+
+/** An empty place at the middle of `place`'s turn: where an arc grows from and shrinks into. */
+function middleOf(place: ArcPlace): ArcPlace {
+  const middle = (place.start + place.end) / 2
+  return { ...place, start: middle, end: middle }
+}
+
+/**
+ * Where an arc that arrives with a layout comes from, after `was`: where
+ * its node sat under `was`'s view, so a zoom moves every arc as one
+ * (zooming in, the deeper ring arrives from the edge, and zooming out the
+ * parent's siblings unfold from the top); or for a node new to the data,
+ * its own middle, which it grows from.
+ */
+function arcFrom(arc: RingArc, was: RingLayout | null): ArcPlace {
+  const place = was?.places.get(arc.key)
+  return was && place ? placeIn(place, windowOf(was), was.rings) : middleOf(arc)
+}
+
+/**
+ * Where an arc that leaves goes, in `now`: where its node sits under
+ * `now`'s view (zooming in, the parent folds into the hole and its siblings
+ * into the top); or for a node gone from the data, its own middle, which it
+ * shrinks into.
+ */
+function arcTo(arc: RingArc, now: RingLayout): ArcPlace {
+  const place = now.places.get(arc.key)
+  return place ? placeIn(place, windowOf(now), now.rings) : middleOf(arc)
+}
+
+/** The place `progress` of the way from `from` to `to`, in straight lines. */
+function placeBetween(from: ArcPlace, to: ArcPlace, progress: number): ArcPlace {
+  const at = (a: number, b: number) => a + (b - a) * progress
+  return {
+    start: at(from.start, to.start),
+    end: at(from.end, to.end),
+    inner: at(from.inner, to.inner),
+    outer: at(from.outer, to.outer),
+  }
+}
+
 export {
+  type ArcPlace,
+  placeBetween,
+  RINGS,
+  type RingArc,
+  ringLayout,
+  type RingLayout,
+  arcFrom,
+  arcTo,
+  middleOf,
+  type RingNode,
+  ringTree,
   boxOutOf,
   centreOf,
   boxWithin,
@@ -546,6 +762,7 @@ export {
   tileMoves,
   type TileNode,
   tileNodeAt,
+  topColor,
   tileTree,
   viewShape,
   viewTiles,

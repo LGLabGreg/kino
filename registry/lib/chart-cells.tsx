@@ -891,8 +891,10 @@ function CellStepLegend({
                 {from} – {to}
               </span>
               {/* The value at the step's start, and at the last step's end too. */}
+              {/* A signed value reads in its own order whatever the page's direction. */}
               <span
                 aria-hidden
+                dir='auto'
                 // The first sits from the legend's start, so it stays inside it; the rest centre on their edge.
                 className={cn(
                   'text-muted-foreground absolute start-0 bottom-0 whitespace-nowrap tabular-nums',
@@ -905,6 +907,7 @@ function CellStepLegend({
               {step === steps - 1 && (
                 <span
                   aria-hidden
+                  dir='auto'
                   className='text-muted-foreground absolute end-0 bottom-0 whitespace-nowrap tabular-nums'
                 >
                   {to}
