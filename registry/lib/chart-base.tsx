@@ -544,8 +544,8 @@ const categoryChartKeys = [
 ] as const satisfies readonly (keyof CategoryChartProps)[]
 
 /** The props a root passes on to its `<figure>`: those that aren't every chart's, nor in `own`, the chart's own. */
-function figureProps<P extends CategoryChartProps>(
-  props: P,
+function figureProps(
+  props: object,
   own: readonly string[] = [],
 ): ComponentProps<'figure'> {
   const out: Record<string, unknown> = {}

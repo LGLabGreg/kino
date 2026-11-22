@@ -4,15 +4,17 @@ import {
   type CategoryChartProps,
   type EntrancePhase,
   figureProps,
+  IndexActive,
+  pickedName,
   ShareTooltipContent,
   useChartActive,
+  useChartLife,
+  useChartLoad,
+  useChartPick,
+  useIndexFocus,
+  useLeavingItems,
 } from '@/registry/lib/chart-base'
-import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
+import { flowItem, type FlowStop, flowReader } from '@/registry/lib/chart-flow-reader'
 import {
   type FlowAlign,
   flowAt,
@@ -32,8 +34,15 @@ import {
   stepNode,
 } from '@/registry/lib/chart-flows'
 import type { ChartConfig } from '@/registry/lib/chart-math'
-import { drawingSize, swatchClassName, usePointsMove } from '@/registry/lib/chart-root'
-import { bandAt } from '@/registry/lib/chart-scale'
+import {
+  ChartFrame,
+  type ChartRootValue,
+  drawingSize,
+  swatchClassName,
+  useChartRoot,
+  useChartRootValue,
+  usePointsMove,
+} from '@/registry/lib/chart-root'
 import { useControllable } from '@/registry/lib/controllable'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
@@ -110,10 +119,6 @@ const sankeyChartKeys = [
   'entrance',
 ]
 
-/** Where each mark's own fields sit in the rows the chart core is given. */
-const MARK_KEY = '\u0000mark'
-const MARK_KIND = '\u0000kind'
-
 /** A node's width, in px. */
 const NODE_WIDTH = 8
 /** The least room between two nodes of a column, in px. */
@@ -161,10 +166,6 @@ function SankeyChart(props: SankeyChartProps) {
   const nodes: ChartConfig = { ...config }
   for (const node of all.nodes) nodes[node.key] ??= { label: nameText(node.name) }
   const nodeByKey = new Map(graph.nodes.map((node) => [node.key, node]))
-  const drawnKeys = new Set([
-    ...graph.nodes.map((node) => node.key),
-    ...graph.links.map((link) => link.key),
-  ])
 
   const nameOf = (key: string): string => {
     const name =
@@ -178,28 +179,13 @@ function SankeyChart(props: SankeyChartProps) {
     return chart.messages.flow(nameOf(from), nameOf(to))
   }
 
-  const { chart, placeholder, phase } = useCategoryChart(
+  const state = useChartRoot(
     {
       ...props,
-      index: MARK_KEY,
       config: nodes,
-      // Every node and flow, so hiding them all says so rather than that there are none.
-      data: [
-        ...all.nodes.map((node) => ({
-          [MARK_KEY]: node.key,
-          [MARK_KIND]: 'node',
-        })),
-        ...all.links.map((link) => ({
-          ...link.datum,
-          [MARK_KEY]: link.key,
-          [MARK_KIND]: 'link',
-        })),
-      ],
       hiddenSeries: hidden,
       defaultHiddenSeries: undefined,
       onHiddenSeriesChange: setHidden,
-      categoryFormat: (value): string =>
-        nodeByKey.has(String(value)) ? nameOf(String(value)) : flowName(String(value)),
       messages: {
         series: 'Steps',
         empty: 'No flows yet',
@@ -208,17 +194,53 @@ function SankeyChart(props: SankeyChartProps) {
         ...messages,
       },
     },
-    {
-      orientation: 'vertical',
-      stack: 'none',
-      entrance: entrance !== 'none',
-      // What leaves moves with the rest, so the chart waits on the move before letting it go.
-      nice: false,
-      bandOf: (at, count) => bandAt(at, count),
-      measure: () => ({ extent: [0, 1] as const }),
-      rowsShown: (rows) => rows.filter((row) => drawnKeys.has(String(row[MARK_KEY]))),
-    },
+    { entrance: entrance !== 'none', heightFromData: false },
   )
+  const chart = state
+  const load = useChartLoad(props)
+  const loaded = !load.placeholder && !load.failed
+  // Every node, then every flow, the hidden ones too, so hiding them all says so rather than
+  // that there are none; what the keys and `activeIndex` count are the ones still drawn.
+  const rows = loaded ? all.nodes.length + all.links.length : 0
+  const linkByKey = new Map(graph.links.map((link) => [link.key, link]))
+  const shownNodes = loaded ? all.nodes.filter((node) => nodeByKey.has(node.key)) : []
+  const shownLinks = loaded ? all.links.filter((link) => linkByKey.has(link.key)) : []
+  const items: FlowStop[] = [
+    ...shownNodes.map((node, at): FlowStop => ({
+      kind: 'node',
+      key: node.key,
+      name: nameOf(node.key),
+      value: nodeByKey.get(node.key)?.value ?? 0,
+      index: at,
+    })),
+    ...shownLinks.map((link, at): FlowStop => {
+      const drawn = linkByKey.get(link.key) ?? link
+      return {
+        kind: 'link',
+        key: link.key,
+        source: drawn.source.key,
+        target: drawn.target.key,
+        value: drawn.value,
+        datum: link.datum,
+        index: shownNodes.length + at,
+      }
+    }),
+  ]
+  const { status, phase } = useChartLife(
+    props,
+    state,
+    load,
+    {
+      rows,
+      shown: state.series.filter((key) => !hidden.includes(key)).length,
+      drawn: items.length,
+    },
+    { entrance: entrance !== 'none', cascade: null },
+  )
+  // Its props leave out `selected`, so nothing is picked.
+  const pick = useChartPick({}, items.map(flowKeyOf))
+  // What leaves moves with the rest, so the chart waits on the move before letting it go.
+  const marks = useLeavingItems(state.moves, items, flowKeyOf)
 
   const size = drawingSize(chart.plotSize)
   const label = valueLabel ?? chart.messages.value
@@ -319,12 +341,9 @@ function SankeyChart(props: SankeyChartProps) {
     maximumFractionDigits: 1,
   })
   const share = (value: number, of: number) => percent.format(of === 0 ? 0 : value / of)
-  const linkByKey = new Map(graph.links.map((link) => [link.key, link]))
-  const keyAt = (at: number) => chart.current[at]?.key ?? null
   const nodeBox = new Map(layout.nodes.map((node) => [node.key, node]))
   const linkBox = new Map(layout.links.map((link) => [link.key, link]))
-  const indexOf = (key: string) =>
-    chart.current.findIndex((category) => category.key === key)
+  const byKey = new Map(items.map((item) => [item.key, item]))
   const colorOf = (key: string) =>
     nodeColor(config, key, nodeByKey.get(key)?.layer ?? 0, graph.columns)
 
@@ -336,13 +355,29 @@ function SankeyChart(props: SankeyChartProps) {
         (nodeBox.get(a.key)?.y0 ?? 0) - (nodeBox.get(b.key)?.y0 ?? 0),
     )
     .map((node) => node.key)
-  const full: CategoryChartInput = {
-    ...chart,
+  const nameOfStop = (stop: FlowStop) =>
+    stop.kind === 'node' ? nameOf(stop.key) : flowName(stop.key)
+  const reader = flowReader({
+    items,
+    drawnOrder,
+    step: (from, key) => stepNode(graph, layout, from, key, chart.direction),
+    hit: (point) => {
+      if (point.width === 0 || point.height === 0) return null
+      const found = flowAt(
+        {
+          x: (point.x / point.width) * size.width,
+          y: (point.y / point.height) * size.height,
+        },
+        layout,
+        NEAR_NODE,
+      )
+      if (!found) return null
+      return byKey.get('node' in found ? found.node : found.link) ?? null
+    },
     // The tooltip sits above a node's top, or above the middle of a flow.
-    pointOf: (at) => {
-      const key = keyAt(at)
-      if (key === null || size.width === 0 || size.height === 0) return null
-      const node = nodeBox.get(key)
+    anchor: (stop) => {
+      if (size.width === 0 || size.height === 0) return null
+      const node = nodeBox.get(stop.key)
       if (node) {
         return {
           x: (node.x0 + node.x1) / 2 / size.width,
@@ -350,7 +385,7 @@ function SankeyChart(props: SankeyChartProps) {
           side: 'top',
         }
       }
-      const link = linkBox.get(key)
+      const link = linkBox.get(stop.key)
       if (!link) return null
       const middle = (link.y0 + link.y1) / 2 - link.width / 2
       return {
@@ -359,57 +394,25 @@ function SankeyChart(props: SankeyChartProps) {
         side: 'top',
       }
     },
-    pickAt: (point, box) => {
-      if (box.width === 0 || box.height === 0) return null
-      const found = flowAt(
-        {
-          x: ((point.x - box.left) / box.width) * size.width,
-          y: ((point.y - box.top) / box.height) * size.height,
-        },
-        layout,
-        NEAR_NODE,
-      )
-      if (!found) return null
-      const at = indexOf('node' in found ? found.node : found.link)
-      return at === -1 ? null : at
-    },
-    keys: {
-      stops: graph.nodes.length,
-      start: Math.max(0, indexOf(drawnOrder[0] ?? '')),
-      rank: (at) => {
-        const reached = keyAt(at)
-        if (reached === null) return 1
-        // From a flow the pointer lit, its source's place.
-        const key = nodeByKey.has(reached) ? reached : flowEnds(reached)[0]
-        return Math.max(1, drawnOrder.indexOf(key) + 1)
+    words: {
+      describe: (stop) => {
+        const name = pickedName(
+          nameOfStop(stop),
+          pick.picked === stop.key,
+          chart.messages,
+        )
+        const node = nodeByKey.get(stop.key)
+        if (node) {
+          return `${name}: ${label} ${chart.valueText(node.value)}, ${share(node.value, total)}`
+        }
+        const link = linkByKey.get(stop.key)
+        if (!link) return `${name}: `
+        return `${name}: ${label} ${chart.valueText(link.value)}, ${chart.messages.outOf(share(link.value, link.source.value), nameOf(link.source.key))}`
       },
-      step: (at, key) => {
-        const reached = keyAt(at)
-        if (reached === null) return null
-        // From a flow the pointer lit, the keys start at its source.
-        const from = nodeByKey.has(reached) ? reached : flowEnds(reached)[0]
-        const next = stepNode(graph, layout, from, key, chart.direction)
-        if (next === null) return null
-        const found = indexOf(next)
-        return found === -1 ? null : found
-      },
-    },
-    describe: (at) => {
-      const key = keyAt(at)
-      if (key === null) return ''
-      const node = nodeByKey.get(key)
-      if (node)
-        return `${label} ${chart.valueText(node.value)}, ${share(node.value, total)}`
-      const link = linkByKey.get(key)
-      if (!link) return ''
-      return `${label} ${chart.valueText(link.value)}, ${chart.messages.outOf(share(link.value, link.source.value), nameOf(link.source.key))}`
-    },
-    table: {
-      columns: [chart.messages.to, label, chart.messages.share],
-      cells: () => [],
-      rows: {
+      table: {
         header: chart.messages.from,
-        cells: graph.links.map((link) => ({
+        columns: [chart.messages.to, label, chart.messages.share],
+        rows: graph.links.map((link) => ({
           key: link.key,
           name: nameOf(link.source.key),
           cells: [
@@ -418,86 +421,111 @@ function SankeyChart(props: SankeyChartProps) {
             share(link.value, link.source.value),
           ],
         })),
+        footer: [],
       },
-    },
-    tooltipContent: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      const node = nodeByKey.get(category.key)
-      if (node) {
-        // Where it goes, or for a last step, where it came from: the biggest first, a few.
-        const out = node.sourceLinks.length > 0
-        const flows = (out ? node.sourceLinks : node.targetLinks)
-          .toSorted((a, b) => b.value - a.value)
-          .slice(0, TOOLTIP_FLOWS)
+      tooltip: (stop) => {
+        const node = nodeByKey.get(stop.key)
+        if (node) {
+          // Where it goes, or for a last step, where it came from: the biggest first, a few.
+          const out = node.sourceLinks.length > 0
+          const flows = (out ? node.sourceLinks : node.targetLinks)
+            .toSorted((a, b) => b.value - a.value)
+            .slice(0, TOOLTIP_FLOWS)
+          return (
+            <ShareTooltipContent
+              chart={chart}
+              category={flowItem(stop)}
+              name={nameOf(node.key)}
+              rows={[
+                {
+                  label,
+                  value: chart.valueText(node.value),
+                  share: share(node.value, total),
+                },
+                ...flows.map((link) => ({
+                  label: `${out ? chart.messages.to : chart.messages.from} ${nameOf(out ? link.target.key : link.source.key)}`,
+                  value: chart.valueText(link.value),
+                  share: share(link.value, node.value),
+                })),
+              ]}
+              swatch={<Swatch color={colorOf(node.key)} />}
+            />
+          )
+        }
+        const link = linkByKey.get(stop.key)
+        if (!link) return null
         return (
           <ShareTooltipContent
             chart={chart}
-            category={category}
-            name={nameOf(node.key)}
+            category={flowItem(stop)}
+            name={flowName(link.key)}
             rows={[
               {
-                label,
-                value: chart.valueText(node.value),
-                share: share(node.value, total),
-              },
-              ...flows.map((link) => ({
-                label: `${out ? chart.messages.to : chart.messages.from} ${nameOf(out ? link.target.key : link.source.key)}`,
+                label: null,
                 value: chart.valueText(link.value),
-                share: share(link.value, node.value),
-              })),
+                share: share(link.value, link.source.value),
+              },
             ]}
-            swatch={<Swatch color={colorOf(node.key)} />}
+            swatch={
+              <Swatch
+                color={colorOf(
+                  linkColor === 'target' ? link.target.key : link.source.key,
+                )}
+              />
+            }
           />
         )
-      }
-      const link = linkByKey.get(category.key)
-      if (!link) return null
-      return (
-        <ShareTooltipContent
-          chart={chart}
-          category={category}
-          name={flowName(link.key)}
-          rows={[
-            {
-              label: null,
-              value: chart.valueText(link.value),
-              share: share(link.value, link.source.value),
-            },
-          ]}
-          swatch={
-            <Swatch
-              color={colorOf(linkColor === 'target' ? link.target.key : link.source.key)}
-            />
-          }
-        />
-      )
+      },
+    },
+  })
+  const root: ChartRootValue = {
+    ...state,
+    status,
+    reader,
+    markerOf: () => null,
+    selectable: pick.selectable,
+    picked: pick.picked === null ? null : { kind: 'node', id: pick.picked },
+    togglePicked: (target) => {
+      if (target.kind === 'node' && reader.holds(target)) pick.toggle(target.id)
     },
   }
+  const { focusProps, toldRef } = useIndexFocus(reader.items, props)
 
   return (
-    <CategoryChartFrame
-      chart={full}
+    <ChartFrame
+      root={root}
+      focus={focusProps}
       ref={ref}
       slot='sankey-chart'
       description={description}
       empty={empty}
+      measuring={false}
+      inset={0}
+      data-orientation='vertical'
       className={className}
-      placeholder={placeholder && <SankeyPlaceholder />}
-      {...figureProps({ ...props, index: MARK_KEY }, sankeyChartKeys)}
+      {...figureProps(props, sankeyChartKeys)}
     >
-      <SankeyMarks
-        graph={graph}
-        layout={steady}
-        was={was}
-        phase={phase}
-        linkColor={linkColor}
-        colorOf={colorOf}
-        labelOf={labelOf}
-      />
-      {props.children}
-    </CategoryChartFrame>
+      <IndexActive items={reader.items} active={props} toldRef={toldRef}>
+        <SankeyMarks
+          graph={graph}
+          layout={steady}
+          was={was}
+          phase={phase}
+          marks={marks}
+          items={items}
+          linkColor={linkColor}
+          colorOf={colorOf}
+          labelOf={labelOf}
+        />
+        {props.children}
+        {load.placeholder && <SankeyPlaceholder />}
+      </IndexActive>
+    </ChartFrame>
   )
+}
+
+function flowKeyOf(stop: FlowStop) {
+  return stop.key
 }
 
 /** How many of a node's flows its tooltip lists. */
@@ -586,6 +614,8 @@ function SankeyMarks({
   layout,
   was,
   phase,
+  marks,
+  items,
   linkColor,
   colorOf,
   labelOf,
@@ -594,11 +624,15 @@ function SankeyMarks({
   layout: FlowLayout
   was: FlowLayout | null
   phase: EntrancePhase
+  /** Every node and flow to draw, the leaving ones too. */
+  marks: readonly (FlowStop & { leaving: boolean })[]
+  /** The nodes and flows still drawn, in the order `activeIndex` counts. */
+  items: readonly FlowStop[]
   linkColor: 'gradient' | 'source' | 'target'
   colorOf: (key: string) => string
   labelOf: (key: string) => NodeLabel | null
 }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const svg = useRef<SVGSVGElement>(null)
   const size = drawingSize(chart.plotSize)
@@ -629,8 +663,7 @@ function SankeyMarks({
   // a guess would rearrange itself once the page is running.
   if (chart.status === 'empty' || !isMeasured(chart.plotSize)) return null
 
-  const lit = spotlit === null ? null : chart.current[spotlit]
-  const litKey = lit && !lit.leaving ? lit.key : null
+  const litKey = spotlit === null ? null : (items[spotlit]?.key ?? null)
   const way =
     litKey !== null
       ? flowPath(
@@ -644,12 +677,8 @@ function SankeyMarks({
         : null
   const id = chart.id
 
-  const linkCategories = chart.categories.filter(
-    (category) => byKey.get(category.key)?.kind === 'link',
-  )
-  const nodeCategories = chart.categories.filter(
-    (category) => byKey.get(category.key)?.kind === 'node',
-  )
+  const linkMarks = marks.filter((mark) => byKey.get(mark.key)?.kind === 'link')
+  const nodeMarks = marks.filter((mark) => byKey.get(mark.key)?.kind === 'node')
 
   return (
     <div
@@ -665,38 +694,38 @@ function SankeyMarks({
         height={size.height}
         className='absolute inset-0 size-full overflow-visible'
       >
-        {linkCategories.map((category) => {
-          const shape = byKey.get(category.key)
+        {linkMarks.map((mark) => {
+          const shape = byKey.get(mark.key)
           if (shape?.kind !== 'link') return null
           const color = (key: string) => colorOf(key)
           return (
             <SankeyLink
-              key={category.key}
-              id={`${id}-flow-${category.index}`}
-              flowKey={category.key}
+              key={mark.key}
+              id={`${id}-flow-${mark.index}`}
+              flowKey={mark.key}
               shape={shape}
               from={color(shape.source)}
               to={color(shape.target)}
               mode={linkColor}
-              dim={way !== null && !way.links.has(category.key)}
-              leaving={category.leaving || !shown.has(category.key)}
+              dim={way !== null && !way.links.has(mark.key)}
+              leaving={mark.leaving || !shown.has(mark.key)}
             />
           )
         })}
-        {nodeCategories.map((category) => {
-          const shape = byKey.get(category.key)
+        {nodeMarks.map((mark) => {
+          const shape = byKey.get(mark.key)
           if (shape?.kind !== 'node') return null
           return (
             <SankeyNode
-              key={category.key}
-              flowKey={category.key}
+              key={mark.key}
+              flowKey={mark.key}
               shape={shape}
-              color={colorOf(category.key)}
-              dim={way !== null && !way.nodes.has(category.key)}
-              leaving={category.leaving || !shown.has(category.key)}
-              side={labelOf(category.key)?.side ?? null}
-              name={labelOf(category.key)?.name ?? null}
-              value={labelOf(category.key)?.value ?? null}
+              color={colorOf(mark.key)}
+              dim={way !== null && !way.nodes.has(mark.key)}
+              leaving={mark.leaving || !shown.has(mark.key)}
+              side={labelOf(mark.key)?.side ?? null}
+              name={labelOf(mark.key)?.name ?? null}
+              value={labelOf(mark.key)?.value ?? null}
             />
           )
         })}
@@ -933,7 +962,7 @@ const PLACEHOLDER = flowGraph(
 
 /** The flows in the placeholder's tint, breathing slowly, while the data loads. */
 function SankeyPlaceholder() {
-  const chart = useChart()
+  const chart = useChartRootValue()
   if (!isMeasured(chart.plotSize)) return null
   const size = drawingSize(chart.plotSize)
   const layout = flowLayout(PLACEHOLDER, {

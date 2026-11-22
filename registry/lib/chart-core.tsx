@@ -221,30 +221,6 @@ interface CategoryReaderParts {
    * each series' value: the words after its name and whether it is picked.
    */
   describe?: (index: number) => string
-  /**
-   * The keys' own way between the categories, for marks that aren't a row or
-   * a grid, such as a Sankey's nodes: the category a key goes to from
-   * `index`, or null for a key the chart doesn't take. The keys reach only
-   * the first `stops` categories, which the slider counts, each at its
-   * `rank` among them from 1, in the order they are drawn.
-   */
-  keys?: {
-    stops: number
-    /** Where the keys start, the first stop, when nothing is reached or picked yet. */
-    start: number
-    step: (index: number, key: string) => number | null
-    rank: (index: number) => number
-  }
-  /**
-   * What a press at `point` on the plot opens, such as a treemap zooming
-   * into the group there, or none; a press that opens something doesn't
-   * pick.
-   */
-  zoomAt?: (point: { x: number; y: number }, box: DOMRect) => (() => void) | null
-  /** What Enter or Space on the category at `index` opens, as `zoomAt` does, or none. */
-  zoomIn?: (index: number) => (() => void) | null
-  /** What Escape goes back to once nothing is lit, such as a treemap zooming back out, or none. */
-  zoomOut?: (() => void) | null
   /** The data table's columns after the category, and each category's cells, in place of one per series. */
   table?: CategoryTable
   /** What the tooltip shows for the category at `index`, in place of each series' value. */
@@ -260,15 +236,6 @@ interface CategoryTable {
   cells: (category: ChartCategory) => readonly string[]
   /** A last row under `messages.total`, such as the whole the shares are of. */
   footer?: readonly string[]
-  /**
-   * The table's own rows, in place of one for each category, for a chart
-   * whose data isn't its categories, such as a Sankey's flows: each row's
-   * name and its cells, under `header`, the first column's title.
-   */
-  rows?: {
-    header: string
-    cells: readonly { key: string; name: string; cells: readonly string[] }[]
-  }
 }
 
 const ChartContext = createContext<ChartContextValue | null>(null)
@@ -282,15 +249,10 @@ function useChart() {
 /**
  * The reader of a chart with categories: each category is a stop, held by
  * its key, and the pointer and the keys find them along the category axis,
- * on a grid by column and row, or the chart's own way. On a chart whose
- * series are pointed at one by one, the stop holds its series too, which it
- * brings forward. `opens` keeps what a press under the pointer opens, by the
- * target it found.
+ * or on a grid by column and row. On a chart whose series are pointed at
+ * one by one, the stop holds its series too, which it brings forward.
  */
-function categoryReader(
-  chart: CategoryChartInput,
-  opens: WeakMap<ChartTarget, () => void>,
-): ChartReader {
+function categoryReader(chart: CategoryChartInput): ChartReader {
   const { current, orientation, direction, grid } = chart
   const keys = current.map((category) => category.key)
   const count = keys.length
@@ -303,13 +265,7 @@ function categoryReader(
     return series === null ? { kind: 'x', key } : { kind: 'datum', series, key }
   }
   // A chart that scrolls sideways opens at its end, so the keys start there too.
-  const start =
-    count === 0
-      ? null
-      : Math.min(
-          chart.keys?.start ?? (chart.leastPlotWidth === undefined ? 0 : count - 1),
-          count - 1,
-        )
+  const start = count === 0 ? null : chart.leastPlotWidth === undefined ? 0 : count - 1
   const words = seriesWords(chart, categoryWords(chart))
   return {
     holds: (target) => {
@@ -321,7 +277,7 @@ function categoryReader(
           !chart.hidden.includes(target.series))
       )
     },
-    lights: (target) => (target.kind === 'node' ? target.id : targetSeries(target)),
+    lights: targetSeries,
     item: (target) => {
       const index = indexOf(target)
       const category = index === null ? undefined : current[index]
@@ -335,29 +291,19 @@ function categoryReader(
         // The plot's own box, from its top left, which the chart's own picking reads as the page's.
         const box = new DOMRect(0, 0, point.width, point.height)
         const index = pickIndex(chart, point, box, centres)
+        if (index === null) return null
         const series =
           chart.seriesAt?.({
             x: alongCategories(point, box, 'vertical', direction),
             y: point.height === 0 ? 0 : point.y / point.height,
           }) ?? null
-        // Off every category, what lights a series is the series' own place, such as a
-        // treemap's group header.
-        const target: ChartTarget | null =
-          index === null
-            ? series === null
-              ? null
-              : { kind: 'node', id: series }
-            : at(index, series)
-        const open = target && chart.zoomAt?.(point, box)
-        if (target && open) opens.set(target, open)
-        return target
+        return at(index, series)
       },
       start: start === null ? null : at(start, null),
       step: (from, key) => {
         const index = indexOf(from)
         if (index === null) return null
         const series = targetSeries(from)
-        if (chart.keys) return at(chart.keys.step(index, key), null)
         if (chart.stepSeries && (key === 'ArrowUp' || key === 'ArrowDown')) {
           return at(index, chart.stepSeries(index, series, key === 'ArrowUp' ? -1 : 1))
         }
@@ -369,11 +315,10 @@ function categoryReader(
       },
       rank: (target) => {
         const index = indexOf(target) ?? 0
-        if (chart.keys) return chart.keys.rank(index)
         if (grid) return index + 1
         return sliderValue(index, Math.max(1, count), orientation)
       },
-      stops: chart.keys?.stops ?? count,
+      stops: count,
       orientation: orientation === 'vertical' ? 'horizontal' : 'vertical',
       anchor: (target) => {
         const index = indexOf(target)
@@ -392,13 +337,8 @@ function categoryReader(
           : words.tooltip(category)
       },
       table: categoryTable(chart),
-      open: (target) => {
-        const own = opens.get(target)
-        if (own) return own
-        const index = indexOf(target)
-        return index === null ? null : (chart.zoomIn?.(index) ?? null)
-      },
-      back: chart.zoomOut ?? null,
+      open: () => null,
+      back: null,
     },
   }
 }
@@ -444,14 +384,6 @@ function categoryWords(chart: ChartContextValue): SeriesWordsInput {
  */
 function categoryTable(chart: CategoryChartInput): ChartTable {
   const { table, current, categoryText, messages } = chart
-  if (table?.rows) {
-    return {
-      header: table.rows.header,
-      columns: table.columns,
-      rows: table.rows.cells,
-      footer: [],
-    }
-  }
   if (table) {
     return {
       header: messages.category,
@@ -531,15 +463,6 @@ interface CategoryRowOptions {
    */
   seriesOfRow?: (row: ChartDatum) => string
   /**
-   * The rows still drawn with `hidden` hidden, for a chart whose rows hide
-   * in a way of their own, such as a sankey's flows, which go with either
-   * end. When hiding leaves none, the chart says every series is hidden.
-   */
-  rowsShown?: (
-    rows: readonly ChartDatum[],
-    hidden: readonly string[],
-  ) => readonly ChartDatum[]
-  /**
    * What tells each row's category apart from the rest, its `index` value by
    * default: rows in series of their own may share a name, as the same
    * month for each team does.
@@ -580,11 +503,7 @@ function useCategoryRows(props: CategoryChartProps, options: CategoryRowOptions)
   const { hidden, series } = state
   const load = useChartLoad(props)
   const rows = load.placeholder || load.failed ? NO_ROWS : data
-  const drawn = options.rowsShown
-    ? options.rowsShown(rows, hidden)
-    : options.seriesOfRow
-      ? rowsShown(rows, options.seriesOfRow, hidden)
-      : rows
+  const drawn = options.seriesOfRow ? rowsShown(rows, options.seriesOfRow, hidden) : rows
   const shown = series.filter((key) => !hidden.includes(key))
   const parts = useCartesianParts(props.children)
   const keyOf = options.keyOf ?? ((row: ChartDatum) => String(row[props.index]))
@@ -782,8 +701,7 @@ function CategoryChartFrame({
   browse?: boolean
   ref?: Ref<HTMLElement>
 }) {
-  const [opens] = useState(() => new WeakMap<ChartTarget, () => void>())
-  const read = categoryReader(chart, opens)
+  const read = categoryReader(chart)
   const reader = browse ? read : { ...read, browse: null }
   const { current, selected, toggleSelected } = chart
   const keys = current.map((category) => category.key)

@@ -161,8 +161,9 @@ export function durationOf(time: string): number | null {
 
 /**
  * The focus a chart shows: yours when you pass one, keeping the series the
- * chart's own focus had on the same key; else the group's key when the chart
- * is in a group, the same way; else its own.
+ * chart's own focus had on the same key; else, in a group, its own focus on
+ * a node, such as a tile, which no other chart holds, or the group's key,
+ * the same way; else its own.
  */
 export function resolveFocus(
   own: ChartTarget | null,
@@ -175,7 +176,9 @@ export function resolveFocus(
     if (yours === null) return null
     return yours.kind === 'node' ? yours : (keep(yours.key) ?? yours)
   }
-  if (group !== undefined)
+  if (group !== undefined) {
+    if (own?.kind === 'node') return own
     return group === null ? null : (keep(group) ?? { kind: 'x', key: group })
+  }
   return own
 }
