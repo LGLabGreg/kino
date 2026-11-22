@@ -768,7 +768,7 @@ function FileInputTrigger({
             data-slot='file-input-trigger'
             className={cn(
               buttonVariants({ variant, size }),
-              'cursor-pointer has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 forced-colors:has-focus-visible:outline-2 forced-colors:has-focus-visible:outline-offset-2',
+              'has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 forced-colors:has-focus-visible:outline-2 forced-colors:has-focus-visible:outline-offset-2',
               // Space held on the input presses it, as on a Button.
               'has-[input:active]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:has-[input:active]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--button-press-depth,1))]',
               // In a box, the box's ring shows the focus, as a text field's does,
@@ -1703,7 +1703,7 @@ function FileInputDropzone({
         onClick: openPicker,
         className: cn(
           emptyVariants({ variant: 'outline' }),
-          'group/dropzone relative cursor-pointer transition-[background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)',
+          'group/dropzone relative transition-[background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)',
           'has-aria-invalid:border-destructive/60 forced-colors:has-aria-invalid:outline-2 forced-colors:has-aria-invalid:outline-offset-1 forced-colors:has-aria-invalid:outline-dashed',
           'data-dragging:border-foreground/30',
           'data-over:border-primary data-over:bg-primary/[0.02] data-over:ring-3 data-over:ring-ring/30 dark:data-over:bg-primary/[0.07] forced-colors:data-over:border-[Highlight] forced-colors:data-over:border-solid',
@@ -1762,7 +1762,7 @@ function FileInputBox({
         onClick: openPicker,
         className: cn(
           inputBoxClassName,
-          'h-(--control-height) cursor-pointer gap-2 ps-(--control-padding) pe-[calc((var(--control-height)-var(--control-height-xs))/2-1px)]',
+          'h-(--control-height) gap-2 ps-(--control-padding) pe-[calc((var(--control-height)-var(--control-height-xs))/2-1px)]',
           'data-dragging:border-dashed data-dragging:border-foreground/30',
           'data-over:border-solid data-over:border-ring data-over:ring-3 data-over:ring-ring/50 forced-colors:data-over:outline-2 forced-colors:data-over:outline-[Highlight]',
           'data-reject:border-destructive data-reject:ring-destructive/20 dark:data-reject:ring-destructive/40',

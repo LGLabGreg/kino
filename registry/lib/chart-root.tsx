@@ -1422,8 +1422,6 @@ function ChartBrowse() {
   const { focus, setFocus } = useChartFocus()
   // Where the keys start from when focus comes back: the last stop they reached.
   const [last, setLast] = useState<ChartTarget | null>(null)
-  // Whether a press under the pointer opens something, such as a treemap's group.
-  const [opens, setOpens] = useState(false)
   // Whether the keys opened something, so they start again from its first stop once it shows.
   const [restart, setRestart] = useState(false)
   const ready = status === 'ready'
@@ -1478,13 +1476,11 @@ function ChartBrowse() {
     const rest =
       target?.kind === 'datum' ? { kind: 'x' as const, key: target.key } : target
     if (held(rest)) setLast(rest)
-    setOpens(target !== null && reader.open(target) !== null)
   }
 
   const className = cn(
     'focus-visible:ring-ring/50 relative z-30 min-h-0 min-w-0 rounded-(--control-radius-capped) focus-visible:outline-hidden [grid-area:plot] focus-visible:ring-3 group-data-scrolls/chart:focus-visible:ring-inset',
     reader.orientation === 'horizontal' ? 'touch-pan-y' : 'touch-pan-x',
-    ready && (selectable || opens) && 'cursor-pointer',
   )
   // The slider only while there is something to step through, so a screen reader doesn't
   // find a disabled one beside the note that says why.

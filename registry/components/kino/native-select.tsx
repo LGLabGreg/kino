@@ -25,7 +25,7 @@ function NativeSelect({ className, children, ...props }: ComponentProps<'select'
         className={cn(
           inputControlClassName,
           // A select matches `:read-only`, which would grey its value.
-          'cursor-pointer appearance-none pe-9 read-only:text-foreground group-has-aria-invalid/input:pe-14 [&_option]:bg-[Canvas] [&_option]:font-[inherit] [&_option]:text-[CanvasText]',
+          'appearance-none pe-9 read-only:text-foreground group-has-aria-invalid/input:pe-14 [&_option]:bg-[Canvas] [&_option]:font-[inherit] [&_option]:text-[CanvasText]',
         )}
         // Field.Control's types are an input's; it renders the select above.
         {...(props as object)}

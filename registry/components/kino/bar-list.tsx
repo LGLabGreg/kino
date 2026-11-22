@@ -553,7 +553,7 @@ const BarListRow = memo(function BarListRow({
   const rowClassName = cn(
     'relative isolate flex h-(--control-height) w-full min-w-0 items-center gap-2 text-start rounded-(--item-radius) px-(--control-padding) select-none',
     interactive &&
-      'focus-visible:ring-ring/50 cursor-pointer focus-visible:ring-3 focus-visible:outline-hidden focus-visible:ring-inset',
+      'focus-visible:ring-ring/50 focus-visible:ring-3 focus-visible:outline-hidden focus-visible:ring-inset',
     pressable &&
       'aria-pressed:font-medium forced-colors:aria-pressed:outline-2 forced-colors:aria-pressed:outline-[Highlight] forced-colors:aria-pressed:outline-solid',
   )
