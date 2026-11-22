@@ -314,7 +314,7 @@ function Points(props: PointsProps) {
       dim={spotlit !== null || (chart.emphasis !== null && chart.emphasis !== dataKey)}
       around={(marks) => (
         <ChartLiveLayer live={chart.frame.live} direction={chart.direction} reach='plot'>
-          <EntranceWipe>{marks}</EntranceWipe>
+          <EntranceWipe draws={family.entrance === 'draw'}>{marks}</EntranceWipe>
         </ChartLiveLayer>
       )}
       {...rest}

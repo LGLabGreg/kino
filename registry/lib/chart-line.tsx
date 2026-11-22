@@ -592,30 +592,19 @@ function LineSeries({
     >
       {/* Rows past the plot's end, as arrive while it is held, wait out of sight. */}
       <ChartLiveLayer live={live} direction={chart.direction} reach='plot'>
-        <EntranceWipe>
+        <EntranceWipe draws={family.entrance === 'draw'}>
           {/* The window around the lit category, which the fill and the bright copy of the line
             share, so they glide as one, and how much it shows, which fades both ways. */}
           <div
             ref={spot}
             data-snap={fromRest ? '' : undefined}
-            className='absolute inset-0 transition-[--line-window-from,--line-window-to,--line-window-shown] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-[--line-window-shown] motion-reduce:transition-[--line-window-shown]'
-            style={
-              {
-                '--line-window-from': window.from,
-                '--line-window-to': window.to,
-                '--line-window-shown': otherEmphasised ? 0 : 1,
-              } as CSSProperties
-            }
+            className={litWindowClassName}
+            style={litWindowStyle(window, !otherEmphasised)}
           >
             {/* The fill, stepped back, seen everywhere but through the window, so the bright copy's
               fill there never lies over it. With another series brought forward, it is whole. */}
             {fill && (
-              <div
-                className={cn(
-                  masked(live !== null),
-                  '[mask-image:linear-gradient(to_right,black_calc(var(--line-window-from)-var(--trace-fade)),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-from),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-to),black_calc(var(--line-window-to)+var(--trace-fade)))]',
-                )}
-              >
+              <div className={cn(masked(live !== null), steppedMaskClassName)}>
                 <svg
                   {...unitFrame}
                   data-dim={stepsBack ? '' : undefined}
@@ -682,7 +671,8 @@ function LineSeries({
               className={cn(
                 forcedSeriesTextColor(slot),
                 masked(live !== null),
-                'text-(--line-color) [mask-image:linear-gradient(to_right,transparent_calc(var(--line-window-from)-var(--trace-fade)),black_var(--line-window-from),black_var(--line-window-to),transparent_calc(var(--line-window-to)+var(--trace-fade)))] opacity-(--line-window-shown)',
+                'text-(--line-color)',
+                litMaskClassName,
               )}
             >
               <svg
@@ -854,6 +844,31 @@ function litWindow(
   return { from: `${share(left) * 100}%`, to: `${share(right) * 100}%` }
 }
 
+/**
+ * The window around a lit category that a series steps back outside of: its
+ * box, which glides between categories on `layout` and appears in place
+ * from rest (`data-snap`), with `litWindowStyle` on it.
+ */
+const litWindowClassName =
+  'absolute inset-0 transition-[--line-window-from,--line-window-to,--line-window-shown] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-[--line-window-shown] motion-reduce:transition-[--line-window-shown]'
+
+/** What steps back: seen everywhere but through the window, the fade `--trace-fade` wide at each side. */
+const steppedMaskClassName =
+  '[mask-image:linear-gradient(to_right,black_calc(var(--line-window-from)-var(--trace-fade)),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-from),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-to),black_calc(var(--line-window-to)+var(--trace-fade)))]'
+
+/** The bright copy: seen only through the window, and not while another series is brought forward. */
+const litMaskClassName =
+  '[mask-image:linear-gradient(to_right,transparent_calc(var(--line-window-from)-var(--trace-fade)),black_var(--line-window-from),black_var(--line-window-to),transparent_calc(var(--line-window-to)+var(--trace-fade)))] opacity-(--line-window-shown)'
+
+/** The window's place, from `litWindow`, and whether its bright copy shows. */
+function litWindowStyle(window: { from: string; to: string }, shown: boolean) {
+  return {
+    '--line-window-from': window.from,
+    '--line-window-to': window.to,
+    '--line-window-shown': shown ? 1 : 0,
+  } as CSSProperties
+}
+
 /** A masked part of a series: the plot, or on a live plot, `LIVE_SPAN` plots on from its start. */
 function masked(live: boolean) {
   return live ? 'absolute inset-y-0 start-0 w-[300%]' : 'absolute inset-0'
@@ -865,13 +880,13 @@ function maskedFrame(live: boolean) {
 }
 
 /**
- * The chart's first appearance with `entrance='draw'`: the series are wiped
- * in from the reading start on `draw`, and stay whole from then on.
+ * The chart's first appearance with `entrance='draw'`, when it `draws`: the
+ * marks are wiped in from the reading start on `draw`, and stay whole from
+ * then on.
  */
-function EntranceWipe({ children }: { children: ReactNode }) {
+function EntranceWipe({ draws, children }: { draws: boolean; children: ReactNode }) {
   const chart = useCartesian()
-  const family = useLineFamily()
-  if (family.entrance !== 'draw') return children
+  if (!draws) return children
   return (
     <div
       data-entered={chart.entered ? '' : undefined}
@@ -1121,6 +1136,16 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
 
 export {
   framePoints,
+  litMaskClassName,
+  litWindow,
+  litWindowClassName,
+  litWindowStyle,
+  masked,
+  maskedFrame,
+  mirror,
+  registerLineProperties,
+  steppedMaskClassName,
+  unitFrame,
   frameRest,
   frameTop,
   EntranceWipe,

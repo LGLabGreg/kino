@@ -924,9 +924,9 @@ function useChartId() {
  */
 
 /** The roles a chart's marks move on. */
-type MoveRole = 'enter' | 'exit' | 'layout' | 'draw'
+type MoveRole = 'enter' | 'exit' | 'layout' | 'morph' | 'draw'
 
-const MOVE_ROLES: readonly MoveRole[] = ['enter', 'exit', 'layout', 'draw']
+const MOVE_ROLES: readonly MoveRole[] = ['enter', 'exit', 'layout', 'morph', 'draw']
 
 /** A role's timing where `element` is, from the feel's variables, or null for one that doesn't run. */
 function roleTiming(style: CSSStyleDeclaration, role: MoveRole) {
