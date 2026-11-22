@@ -1,5 +1,5 @@
 import type { ChartConfig, ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
-import { hierarchy, type HierarchyNode, partition, treemap } from 'd3-hierarchy'
+import { hierarchy, type HierarchyNode, pack, partition, treemap } from 'd3-hierarchy'
 
 /*
  * The tiles of a chart drawn as nested boxes sized by value, such as a
@@ -377,6 +377,16 @@ function centreOf(box: TileBox): TileBox {
   return { x0: x, x1: x, y0: y, y1: y }
 }
 
+/**
+ * A top's colour: its own from the config, or the next of the chart's
+ * colours for a top the config leaves out, whose name may not be a CSS
+ * variable's.
+ */
+function topColor(series: readonly string[], config: ChartConfig, top: string) {
+  const ramp = `var(--chart-${(Math.max(0, series.indexOf(top)) % 5) + 1})`
+  return config[top] ? `var(--color-${top}, ${ramp})` : ramp
+}
+
 /** Whether `path` starts with `start`, or is it. */
 function startsWith(path: readonly string[], start: readonly string[]) {
   return start.length <= path.length && start.every((name, at) => path[at] === name)
@@ -532,14 +542,187 @@ function tileAt(
   return best === null ? null : { tile: best }
 }
 
+/* Circles: the tree packed as nested circles, such as circle packing's. */
+
+/** A circle of the packing, in px from the plot's top left corner. */
+interface PackedCircle {
+  key: string
+  node: TileNode
+  /** The top of the tree it is under: its path's first name, its key in the config. */
+  top: string
+  /** How deep it sits: 1 for a top. */
+  depth: number
+  x: number
+  y: number
+  r: number
+}
+
+/** The plot's inscribed circle, which the whole fills and the part in view is zoomed to fill. */
+interface PackWindow {
+  x: number
+  y: number
+  r: number
+}
+
+interface PackLayout {
+  window: PackWindow
+  /** Every node but the whole, depth first, a parent before its children, biggest first. */
+  circles: readonly PackedCircle[]
+  byKey: ReadonlyMap<string, PackedCircle>
+}
+
 /**
- * The colour of the nodes under `top`: its own from the config, or the next
- * of the chart's colours for a top the config leaves out, whose name may
- * not be a CSS variable's.
+ * The tree packed as circles in a plot `width` by `height` px with d3's
+ * pack, each leaf's area as its value, `padding` px between siblings and
+ * inside a parent's edge, biggest first, the whole in the plot's inscribed
+ * circle. Right to left mirrors it. Tops in `hidden` are left out, and the
+ * rest take their room. Deterministic: d3's pack has no randomness.
  */
-function topColor(series: readonly string[], config: ChartConfig, top: string): string {
-  const ramp = `var(--chart-${(Math.max(0, series.indexOf(top)) % 5) + 1})`
-  return config[top] ? `var(--color-${top}, ${ramp})` : ramp
+function packLayout(
+  root: TileNode,
+  {
+    width,
+    height,
+    padding,
+    direction,
+    hidden = [],
+  }: {
+    width: number
+    height: number
+    padding: number
+    direction: ReadingDirection
+    hidden?: readonly string[]
+  },
+): PackLayout {
+  const side = Math.max(0, Math.min(width, height))
+  const window = { x: width / 2, y: height / 2, r: side / 2 }
+  const shown: TileNode = {
+    ...root,
+    children: root.children.filter((child) => !hidden.includes(child.path[0] ?? '')),
+  }
+  const tree = hierarchy(shown, (node) => node.children)
+    .sum((node) => (node.children.length > 0 ? 0 : node.value))
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+  const circles: PackedCircle[] = []
+  const place = (node: HierarchyNode<TileNode>, x: number, y: number, r: number) => {
+    if (node.depth === 0) return
+    circles.push({
+      key: node.data.key,
+      node: node.data,
+      top: node.data.path[0] ?? '',
+      depth: node.depth,
+      x: direction === 'rtl' ? width - x : x,
+      y,
+      r,
+    })
+  }
+  if ((tree.value ?? 0) > 0 && side > 0) {
+    const offsetX = (width - side) / 2
+    const offsetY = (height - side) / 2
+    pack<TileNode>()
+      .size([side, side])
+      .padding(padding)(tree)
+      .eachBefore((node) => place(node, node.x + offsetX, node.y + offsetY, node.r))
+  } else {
+    // With nothing to pack, every circle sits at the middle with no size, where it grows from.
+    tree.eachBefore((node) => place(node, window.x, window.y, 0))
+  }
+  return {
+    window,
+    circles,
+    byKey: new Map(circles.map((circle) => [circle.key, circle])),
+  }
+}
+
+/** How the packing is drawn: each point at `x + k * px`, `y + k * py`, one translate and scale of the whole layer. */
+interface PackView {
+  k: number
+  x: number
+  y: number
+}
+
+/**
+ * How the packing is drawn with `view` filling the window. The whole, or a
+ * node not laid out or of no size, is drawn as it lies.
+ */
+function packView(layout: PackLayout, view: TileNode): PackView {
+  const circle = layout.byKey.get(view.key)
+  if (!circle || circle.r <= 0 || layout.window.r <= 0) return { k: 1, x: 0, y: 0 }
+  const k = layout.window.r / circle.r
+  return { k, x: layout.window.x - k * circle.x, y: layout.window.y - k * circle.y }
+}
+
+/** Where a circle's centre is drawn under `view`, in px from the plot's top left corner. */
+function packPoint(circle: { x: number; y: number }, view: PackView) {
+  return { x: view.x + view.k * circle.x, y: view.y + view.k * circle.y }
+}
+
+/**
+ * The key of the circle at `point`, in px from the plot's top left corner,
+ * among the circles inside `view` as `shown` draws them: the deepest one
+ * the point is in, a group when it falls between the group's own circles,
+ * or else the nearest of the view's own children within `reach` px. None
+ * outside the window, where nothing of the view is drawn.
+ */
+function packAt(
+  point: { x: number; y: number },
+  layout: PackLayout,
+  view: TileNode,
+  shown: PackView,
+  reach: number,
+): string | null {
+  const { window } = layout
+  if (shown.k <= 0 || Math.hypot(point.x - window.x, point.y - window.y) > window.r)
+    return null
+  const x = (point.x - shown.x) / shown.k
+  const y = (point.y - shown.y) / shown.k
+  const inside = (circle: PackedCircle) =>
+    circle.r > 0 && Math.hypot(x - circle.x, y - circle.y) <= circle.r
+  const circlesOf = (node: TileNode) =>
+    node.children.flatMap((child) => layout.byKey.get(child.key) ?? [])
+  let at: PackedCircle | null = null
+  for (let node = view; ;) {
+    const next = circlesOf(node).find(inside)
+    if (!next) break
+    at = next
+    node = next.node
+  }
+  if (at) return at.key
+  let best: string | null = null
+  let nearest = reach
+  for (const circle of circlesOf(view)) {
+    if (circle.r <= 0) continue
+    const gap = (Math.hypot(x - circle.x, y - circle.y) - circle.r) * shown.k
+    // The first of two as near keeps it, so the bigger one wins.
+    if (gap <= reach && (best === null || gap < nearest)) {
+      best = circle.key
+      nearest = gap
+    }
+  }
+  return best
+}
+
+/** The room kept between a circle's edge and the corners of its label, in px. */
+const CIRCLE_LABEL_INSET = 4
+
+/**
+ * What a label centred on a circle `radius` px across can show: its name
+ * and value on two lines, its name only, or nothing, the box's corners kept
+ * inside the edge, never cut short.
+ */
+function circleLabelFit(
+  radius: number,
+  nameWidth: number,
+  valueWidth: number,
+  wanted: 'value' | 'name' | 'none',
+): 'value' | 'name' | 'none' {
+  if (wanted === 'none') return 'none'
+  const room = radius - CIRCLE_LABEL_INSET
+  const fits = (width: number, lines: number) =>
+    room > 0 && Math.hypot(width / 2, (lines * LABEL_LINE) / 2) <= room
+  if (wanted === 'value' && fits(Math.max(nameWidth, valueWidth), 2)) return 'value'
+  if (fits(nameWidth, 1)) return 'name'
+  return 'none'
 }
 
 /*
@@ -746,13 +929,23 @@ export {
   boxOutOf,
   centreOf,
   boxWithin,
+  circleLabelFit,
   HEADER_HEIGHT,
   headerFit,
   LABEL_PADDING,
   type LaidGroup,
   type LaidTile,
   labelFit,
+  packAt,
+  type PackedCircle,
+  type PackLayout,
+  packLayout,
+  packPoint,
+  type PackView,
+  packView,
+  type PackWindow,
   shownBox,
+  startsWith,
   type TileBox,
   tileAncestors,
   tileAt,
