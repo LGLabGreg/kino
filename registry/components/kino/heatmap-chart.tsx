@@ -4,29 +4,26 @@ import {
   type CategoryChartProps,
   figureProps,
   localeTag,
+  pickedName,
 } from '@/registry/lib/chart-base'
 import {
-  CELL_NAME,
   type CellAt,
+  cellAnchor,
+  cellAt,
   CellGridCells,
-  cellGridChart,
-  CellGridContext,
   type CellGridLayout,
-  cellGridOptions,
   CellGridPlaceholder,
-  cellGridRows,
   CellGridSizer,
   CellGridTooltipContent,
-  type CellGridValue,
+  CellsChartFrame,
+  type CellsContextValue,
   CellStepLegend,
+  laidOutCells,
   lineNames,
+  StepLegendContext,
   stepFill,
+  useCellsChart,
 } from '@/registry/lib/chart-cells'
-import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  useCategoryChart,
-} from '@/registry/lib/chart-core'
 import {
   calendarGrid,
   keyedGrid,
@@ -34,7 +31,9 @@ import {
   stepExtent,
   stepOf,
 } from '@/registry/lib/chart-grid'
-import { allWhole, type ChartDatum, numberOf } from '@/registry/lib/chart-math'
+import { gridReader, squareLayout } from '@/registry/lib/chart-grid-reader'
+import { allWhole, numberOf } from '@/registry/lib/chart-math'
+import type { ChartDatum } from '@/registry/lib/chart-math'
 import { linearScale } from '@/registry/lib/chart-scale'
 import {
   formatDate,
@@ -54,7 +53,7 @@ import { cn } from '@/lib/utils'
  * each row's values, such as days by hours, or as a calendar of days, as a
  * year of activity is. Each value takes one of a few steps of its colour,
  * at the value axis's round numbers, and the legend names them. It is drawn
- * on the cell grid (`chart-cells`): the cell under the pointer stays bright
+ * on the cells (`chart-cells`) with the grid reader: the cell under the pointer stays bright
  * while the rest step back, the axes mark its column and its row, and the
  * arrows step through the cells by column and by row. A new range fills the
  * cells in a wave along the columns.
@@ -128,7 +127,7 @@ function gridLayout(
 ): CellGridLayout {
   const grid = keyedGrid(data, x, y, { columns: xValues, rows: yValues })
   return {
-    rows: cellGridRows(
+    cells: laidOutCells(
       grid.cells,
       (cell) => `${yFormat(cell.at.y)}, ${xFormat(cell.at.x)}`,
       (cell) => cellKey(cell.at.x, cell.at.y),
@@ -160,7 +159,7 @@ function calendarLayout(
   const columns = Math.max(1, grid.columns)
   const monthAt = new Map(grid.months.map((month, index) => [month.month, index]))
   return {
-    rows: cellGridRows(
+    cells: laidOutCells(
       grid.cells,
       (cell) =>
         formatDate(cell.at, locale, {
@@ -233,67 +232,101 @@ function HeatmapChart(props: HeatmapChartProps) {
         : gridLayout(data, xKey ?? '', yKey ?? '', xFormat, yFormat, xValues, yValues),
     [data, dateKey, first, dateLocale, xKey, yKey, xFormat, yFormat, xValues, yValues],
   )
-  const values = layout.rows.map((row) => numberOf(row[value]))
+  const values = layout.cells.map((cell) => numberOf(cell.datum?.[value]))
   const scale = linearScale(stepExtent(values), {
     domain,
     tickCount,
     nice: true,
-    allowDecimals: allowDecimals ?? !allWhole(layout.rows, [value]),
+    allowDecimals:
+      allowDecimals ??
+      !allWhole(
+        layout.cells.flatMap((cell) => (cell.datum ? [cell.datum] : [])),
+        [value],
+      ),
   })
   const edges = stepEdges(scale.domain, scale.ticks)
   const steps = edges.length - 1
   const [emphasis, setEmphasis] = useState<number | null>(null)
-  const { chart, placeholder } = useCategoryChart(
-    { ...props, data: layout.rows, index: CELL_NAME },
-    { ...cellGridOptions, nice: true, measure: () => ({ extent: scale.domain }) },
-  )
+  const chart = useCellsChart(props, layout)
+  const { state } = chart
   const valueLabel = config[value]?.label
   const valueName = typeof valueLabel === 'string' ? valueLabel : value
   const columns = Math.max(1, layout.columns || (calendar ? 53 : 24))
   const rows = Math.max(1, layout.rowCount || 7)
-  const grid: CellGridValue = {
+  const cells: CellsContextValue = {
     slot: 'heatmap-chart',
+    cells: chart.cells,
+    drawn: chart.drawn,
     columns,
     rows,
     value,
     edges,
-    fillOf: (category) =>
-      stepFill(value, stepOf(numberOf(category.datum[value]), edges), steps),
     emphasis,
-    setEmphasis,
+    fillOf: (stop) =>
+      stepFill(value, stepOf(numberOf(stop.datum?.[value]), edges), steps),
+    nameText: (stop) => stop.value,
+    datumText: chart.datumText,
   }
-  const full: CategoryChartInput = {
-    ...cellGridChart(chart, layout, columns, rows, calendar),
-    describe: (index) => {
-      const category = chart.current[index]
-      return category ? `${valueName} ${chart.datumText(category.datum[value])}` : ''
+  const valueText = (stop: { datum: ChartDatum | null }) =>
+    chart.datumText(stop.datum?.[value])
+  const reader = gridReader({
+    current: chart.cells,
+    layout: squareLayout,
+    direction: state.direction,
+    hit: (point) => cellAt(point, chart.cells, columns, rows, state.direction),
+    anchor: (stop) => cellAnchor(stop, columns, rows, state.direction),
+    words: {
+      describe: (stop) =>
+        `${pickedName(stop.value, chart.picked === stop.key, state.messages)}: ${valueName} ${valueText(stop)}`,
+      tooltip: (stop) => <CellGridTooltipContent stop={stop} name={valueName} />,
+      table: {
+        header: state.messages.category,
+        columns: [valueName],
+        rows: chart.cells.map((stop) => ({
+          key: stop.key,
+          name: stop.value,
+          cells: [valueText(stop)],
+        })),
+        footer: [],
+      },
     },
-    table: {
-      columns: [valueName],
-      cells: (category) => [chart.datumText(category.datum[value])],
-    },
-    tooltipContent: (index) => <CellGridTooltipContent index={index} name={valueName} />,
-  }
+    // A calendar scrolls and opens at its end, the latest week, so the keys start there too.
+    start: calendar ? 'last' : 'first',
+  })
   return (
-    <CellGridContext value={grid}>
-      <CategoryChartFrame
-        chart={full}
+    <StepLegendContext
+      value={{
+        slot: 'heatmap-chart',
+        label: valueLabel ?? value,
+        edges,
+        fillOf: (step) => stepFill(value, step, steps),
+        valueText: state.valueText,
+        textWidth: state.textWidth,
+        emphasis,
+        setEmphasis,
+      }}
+    >
+      <CellsChartFrame
+        chart={chart}
+        reader={reader}
+        cells={cells}
+        axes={layout}
+        scrolls={calendar}
         ref={ref}
-        slot='heatmap-chart'
         description={description}
         empty={empty}
         className={cn('h-auto', className)}
         placeholder={
-          placeholder && (
+          chart.placeholder && (
             <CellGridPlaceholder slot='heatmap-chart' columns={columns} rows={rows} />
           )
         }
-        {...figureProps({ ...props, index: CELL_NAME }, heatmapChartKeys)}
+        {...figureProps(props, heatmapChartKeys)}
       >
         <CellGridSizer columns={columns} rows={rows} />
         {children}
-      </CategoryChartFrame>
-    </CellGridContext>
+      </CellsChartFrame>
+    </StepLegendContext>
   )
 }
 

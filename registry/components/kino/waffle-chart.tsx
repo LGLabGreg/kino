@@ -3,10 +3,15 @@
 import {
   type CategoryChartProps,
   figureProps,
+  pickedName,
   shareColor,
   ShareTooltipContent,
   shareValue,
   useChartActive,
+  useChartLife,
+  useChartLoad,
+  useChartPick,
+  writeDatum,
 } from '@/registry/lib/chart-base'
 import {
   CellGridCell,
@@ -14,23 +19,20 @@ import {
   CellGridPlaceholder,
   CellGridSizer,
 } from '@/registry/lib/chart-cells'
-import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  type ChartCategory,
-  type ChartContextValue,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
-import { gridCellAt } from '@/registry/lib/chart-math'
+import { ListChartFrame } from '@/registry/lib/chart-list'
+import { listReader, type ListStop } from '@/registry/lib/chart-list-reader'
+import { type ChartDatum, gridCellAt } from '@/registry/lib/chart-math'
 import {
   type ChartPoint,
+  type ChartRootState,
   forcedSeriesColor,
   patternImage,
   plotLayerClassName,
   swatchClassName,
+  useChartRoot,
+  useChartRootValue,
 } from '@/registry/lib/chart-root'
-import { bandAt } from '@/registry/lib/chart-scale'
+import { indexOfKey } from '@/registry/lib/chart-state'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { createContext, type CSSProperties, memo, use, useState } from 'react'
 
@@ -42,7 +44,9 @@ import { cn } from '@/lib/utils'
  * squares are dealt out so they always add up to the grid, and any share
  * above nothing gets at least one. A `total` larger than the values leaves
  * the squares past them as the remaining room, such as the free part of a
- * plan. It is drawn on the cell grid's cells (`chart-cells`): the share under
+ * plan. Its shares are a list of stops on the list reader
+ * (`chart-list-reader`), the remaining room last, and it is drawn on the
+ * cells' squares (`chart-cells`): the share under
  * the pointer, the keys or the legend stays bright while the rest step back,
  * and new data turns each square to its new share in a wave from the first.
  */
@@ -84,7 +88,7 @@ const waffleChartKeys = [
   'entrance',
 ]
 
-/** The remaining room's key, for `selected`: a share can't take it. */
+/** The remaining room's key, for `selected`: a share can't take it. Its stop holds no row of the data. */
 const WAFFLE_REMAINING = 'remaining'
 
 /** The most squares a side, so a grid stays one a pointer can find its squares in. */
@@ -101,6 +105,10 @@ interface WaffleContextValue {
   rows: number
   columns: number
   squares: readonly WaffleSquare[]
+  /** The shares still in the data, and the remaining room last, which holds no row. */
+  stops: readonly ListStop[]
+  /** The entrance has played, or wasn't asked for. */
+  entered: boolean
 }
 
 const WaffleContext = createContext<WaffleContextValue | null>(null)
@@ -145,21 +153,9 @@ function WaffleChart(props: WaffleChartProps) {
   // Every value, the hidden ones too: they still take their part of a total.
   const all = data.reduce((sum, row) => sum + shareValue(row, dataKey), 0)
   const left = whole === null ? 0 : Math.max(0, whole - all)
-  // What a total leaves is a category of its own after the shares, so the pointer, the keys,
-  // the tooltip and the table reach it as they reach a share.
-  const withRemaining =
-    left > 0 ? [...data, { [index]: WAFFLE_REMAINING, [dataKey]: left }] : data
-  const { chart, placeholder } = useCategoryChart(
+  const state = useChartRoot(
     {
       ...props,
-      data: withRemaining,
-      // A share is named by its config's label, as its legend entry is.
-      categoryFormat: (value) => {
-        if (value === WAFFLE_REMAINING) return remainingLabel
-        if (props.categoryFormat) return props.categoryFormat(value)
-        const named = props.config[String(value)]?.label
-        return typeof named === 'string' ? named : String(value)
-      },
       messages: {
         series: 'Shares',
         empty: 'No data yet',
@@ -168,25 +164,60 @@ function WaffleChart(props: WaffleChartProps) {
         ...messages,
       },
     },
-    {
-      orientation: 'vertical',
-      stack: 'none',
-      entrance: entrance !== 'none',
-      nice: false,
-      heightFromData: true,
-      seriesOfRow: (row) => String(row[index]),
-      bandOf: (at, count) => bandAt(at, count),
-      measure: () => ({ extent: [0, 1] as const }),
-    },
+    { entrance: entrance !== 'none', heightFromData: true },
   )
-  const label = valueLabel ?? chart.messages.total
-  const values = chart.current.map((category) => shareValue(category.datum, dataKey))
-  const shown = values.reduce((sum, value) => sum + value, 0)
+  const load = useChartLoad(props)
+  const loaded = !load.placeholder && !load.failed
+  const shares = loaded ? data : NO_ROWS
+  const drawn = shares.filter((row) => !state.hidden.includes(String(row[index])))
+  // What a total leaves is a stop of its own after the shares, so the pointer, the keys, the
+  // tooltip and the table reach it as they reach a share; it holds no row.
+  const remaining = loaded && left > 0
+  const stops: ListStop[] = drawn.map((datum, at) => ({
+    key: String(datum[index]),
+    value: datum[index],
+    datum,
+    index: at,
+  }))
+  if (remaining) {
+    stops.push({
+      key: WAFFLE_REMAINING,
+      value: WAFFLE_REMAINING,
+      datum: null,
+      index: drawn.length,
+    })
+  }
+  const shown = state.series.filter((key) => !state.hidden.includes(key))
+  const { status, entered } = useChartLife(
+    props,
+    state,
+    load,
+    {
+      rows: shares.length + (remaining ? 1 : 0),
+      shown: shown.length,
+      drawn: stops.length,
+    },
+    { entrance: entrance !== 'none', cascade: null },
+  )
+  const keys = stops.map((stop) => stop.key)
+  const pick = useChartPick(props, keys)
+  const { messages: words, direction, plotSize } = state
+  // A share is named by its config's label, as its legend entry is.
+  const nameOf = (stop: ListStop) => {
+    if (stop.datum === null) return remainingLabel
+    if (props.categoryFormat) return props.categoryFormat(stop.value)
+    const named = props.config[String(stop.value)]?.label
+    return typeof named === 'string' ? named : String(stop.value)
+  }
+  const label = valueLabel ?? words.total
+  const values = stops.map((stop) =>
+    stop.datum === null ? left : shareValue(stop.datum, dataKey),
+  )
+  const shownSum = values.reduce((sum, value) => sum + value, 0)
   // Against a total, a hidden share keeps its squares, as nobody's, before the remaining room;
   // with none, the shares shown take every square.
-  const hidden = whole === null ? 0 : Math.max(0, all + left - shown)
-  const at = chart.current.findIndex((category) => category.value === WAFFLE_REMAINING)
-  const before = at === -1 ? values.length : at
+  const hidden = whole === null ? 0 : Math.max(0, all + left - shownSum)
+  const before = remaining ? stops.length - 1 : stops.length
   const counts = waffleCounts(
     [...values.slice(0, before), hidden, ...values.slice(before)],
     cells,
@@ -194,102 +225,115 @@ function WaffleChart(props: WaffleChartProps) {
   const squares = waffleSquares(counts, columns, rows, fill, (part) =>
     part < before ? part : part === before ? null : part - 1,
   )
-  const counted = whole === null ? shown : Math.max(whole, all)
-  const percent = numberFormatter(chart.locale, {
+  const counted = whole === null ? shownSum : Math.max(whole, all)
+  const percent = numberFormatter(state.locale, {
     style: 'percent',
     maximumFractionDigits: 1,
   })
   const shareOf = (at: number) => (counted === 0 ? 0 : (values[at] ?? 0) / counted)
-  // A share's own value as written, so a missing one reads as missing, as a Donut's does.
-  const valueText = (at: number) => {
-    const category = chart.current[at]
-    if (!category) return ''
-    return category.value === WAFFLE_REMAINING
-      ? chart.valueText(values[at] ?? 0)
-      : chart.datumText(category.datum[dataKey])
-  }
+  // A share's own value as written, so a missing one reads as missing, as a Donut's does; the
+  // remaining room's is the total's room left.
+  const valueText = (stop: ListStop) =>
+    stop.datum === null
+      ? state.valueText(left)
+      : writeDatum(stop.datum[dataKey], state.valueText, words.noValue)
 
-  const full: CategoryChartInput = {
-    ...chart,
+  const reader = listReader({
+    current: stops,
+    walk: { kind: 'straight', orientation: 'vertical' },
+    series: { kind: 'none' },
+    direction,
+    hit: (point) => {
+      const box = waffleBox(point.width, point.height, columns, rows, direction)
+      if (box.width === 0 || box.height === 0) return null
+      const x = (point.x - box.left) / box.width
+      const y = (point.y - box.top) / box.height
+      if (x < 0 || x > 1 || y < 0 || y > 1) return null
+      const { column, row } = gridCellAt({ x, y }, columns, rows, direction)
+      return squares[waffleOrder(column, row, columns, rows, fill)]?.owner ?? null
+    },
     // The tooltip sits over the middle of the share's top row of squares.
-    pointOf: (at) => {
+    anchor: (stop) => {
       const point = waffleAnchor(
         squares,
-        at,
-        waffleStart(counts, before, at),
+        stop.index,
+        waffleStart(counts, before, stop.index),
         columns,
         rows,
         fill,
-        chart.direction,
+        direction,
       )
-      const box = waffleBox(
-        chart.plotSize.width,
-        chart.plotSize.height,
-        columns,
-        rows,
-        chart.direction,
-      )
+      const box = waffleBox(plotSize.width, plotSize.height, columns, rows, direction)
       if (box.width === 0 || box.height === 0) return point
       return {
-        x: (box.left + point.x * box.width) / chart.plotSize.width,
-        y: (box.top + point.y * box.height) / chart.plotSize.height,
+        x: (box.left + point.x * box.width) / plotSize.width,
+        y: (box.top + point.y * box.height) / plotSize.height,
         side: 'top',
       }
     },
-    pickAt: (at, plot) => {
-      const box = waffleBox(plot.width, plot.height, columns, rows, chart.direction)
-      if (box.width === 0 || box.height === 0) return null
-      const x = (at.x - plot.left - box.left) / box.width
-      const y = (at.y - plot.top - box.top) / box.height
-      if (x < 0 || x > 1 || y < 0 || y > 1) return null
-      const { column, row } = gridCellAt({ x, y }, columns, rows, chart.direction)
-      return squares[waffleOrder(column, row, columns, rows, fill)]?.owner ?? null
-    },
-    describe: (at) => {
-      if (!chart.current[at]) return ''
-      return `${label} ${valueText(at)}, ${percent.format(shareOf(at))}`
-    },
-    table: {
-      columns: [label, chart.messages.share],
-      cells: (category) => [
-        valueText(category.index),
-        percent.format(shareOf(category.index)),
-      ],
-      footer: [chart.valueText(counted), percent.format(counted === 0 ? 0 : 1)],
-    },
-    tooltipContent: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      return (
+    words: {
+      describe: (stop) =>
+        `${pickedName(nameOf(stop), pick.picked === stop.key, words)}: ${label} ${valueText(stop)}, ${percent.format(shareOf(stop.index))}`,
+      tooltip: (stop) => (
         <ShareTooltipContent
-          chart={chart}
-          category={category}
-          name={chart.categoryText(category.value)}
+          chart={state}
+          category={stop}
+          name={nameOf(stop)}
           rows={[
-            { label: null, value: valueText(at), share: percent.format(shareOf(at)) },
+            {
+              label: null,
+              value: valueText(stop),
+              share: percent.format(shareOf(stop.index)),
+            },
           ]}
           swatch={
-            category.value === WAFFLE_REMAINING ? (
+            stop.datum === null ? (
               <span aria-hidden className={cn(swatchClassName, remainingClassName)} />
             ) : undefined
           }
         />
-      )
+      ),
+      table: {
+        header: words.category,
+        columns: [label, words.share],
+        rows: stops.map((stop) => ({
+          key: stop.key,
+          name: nameOf(stop),
+          cells: [valueText(stop), percent.format(shareOf(stop.index))],
+        })),
+        footer: [state.valueText(counted), percent.format(counted === 0 ? 0 : 1)],
+      },
     },
-  }
+  })
 
   const boxStyle = waffleBoxStyle(columns, rows)
   return (
-    <WaffleContext value={{ rows, columns, squares }}>
-      <CategoryChartFrame
-        chart={full}
+    <WaffleContext value={{ rows, columns, squares, stops, entered }}>
+      <ListChartFrame
+        chart={{
+          state,
+          status,
+          drawn,
+          selectable: pick.selectable,
+          picked: pick.picked,
+          togglePicked: (key) => {
+            if (indexOfKey(keys, key) !== null) pick.toggle(key)
+          },
+          activeProps: {
+            activeIndex: props.activeIndex,
+            defaultActiveIndex: props.defaultActiveIndex ?? null,
+            onActiveIndexChange: props.onActiveIndexChange,
+          },
+        }}
+        reader={reader}
         ref={ref}
         slot='waffle-chart'
         description={description}
         empty={empty}
+        measuring={false}
         className={cn('h-auto', className)}
         placeholder={
-          placeholder && (
+          load.placeholder && (
             <CellGridPlaceholder
               slot='waffle-chart'
               columns={columns}
@@ -304,10 +348,13 @@ function WaffleChart(props: WaffleChartProps) {
         <CellGridSizer columns={columns} rows={rows} />
         <WaffleSquares />
         {props.children}
-      </CategoryChartFrame>
+      </ListChartFrame>
     </WaffleContext>
   )
 }
+
+/** The shares of a chart that loads or failed: one array, so what compares them sees no change. */
+const NO_ROWS: readonly ChartDatum[] = []
 
 /** The remaining room's look: the page's muted fill, and a dashed outline in forced colours. */
 const remainingClassName =
@@ -332,18 +379,17 @@ interface SquareLook {
 const NOBODY: SquareLook = { color: null }
 
 function lookOf(
-  chart: Omit<ChartContextValue, 'pointOf'>,
-  category: ChartCategory | undefined,
+  chart: Pick<ChartRootState, 'series' | 'patternOf'>,
+  stop: ListStop | undefined,
 ): SquareLook {
-  if (!category || category.value === WAFFLE_REMAINING) {
+  if (!stop || stop.datum === null) {
     return { color: 'var(--muted)', forced: remainingClassName }
   }
-  const slot = chart.series.indexOf(category.key)
+  const slot = chart.series.indexOf(stop.key)
   return {
-    color: shareColor(chart, category),
-    image:
-      slot === -1 ? undefined : patternImage(chart.patternOf(category.key)) || undefined,
-    forced: forcedSeriesColor(slot === -1 ? category.index : slot),
+    color: shareColor(chart, stop),
+    image: slot === -1 ? undefined : patternImage(chart.patternOf(stop.key)) || undefined,
+    forced: forcedSeriesColor(slot === -1 ? stop.index : slot),
   }
 }
 
@@ -354,25 +400,24 @@ function lookOf(
  * lit and out as another is, so moving from share to share crossfades.
  */
 function WaffleSquares() {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const waffle = useWaffleChart()
+  const { stops } = waffle
   const { spotlit } = useChartActive()
   // Which share holds each square, by its key, now and before the data last changed, so a lit
   // share's copies turn in the same wave as the squares below.
   const owners = waffle.squares
-    .map((square) =>
-      square.owner === null ? '' : (chart.current[square.owner]?.key ?? ''),
-    )
+    .map((square) => (square.owner === null ? '' : (stops[square.owner]?.key ?? '')))
     .join(OWNER_SEPARATOR)
   const [held, setHeld] = useState({ now: owners, was: owners })
   if (held.now !== owners) setHeld({ now: owners, was: held.now })
   if (chart.status === 'empty') return null
-  const litNow = spotlit === null ? undefined : chart.current[spotlit]
-  const lit = litNow && !litNow.leaving ? litNow.key : chart.emphasis
-  const looks = chart.current.map((category) => lookOf(chart, category))
+  const litNow = spotlit === null ? undefined : stops[spotlit]
+  const lit = litNow ? litNow.key : chart.emphasis
+  const looks = stops.map((stop) => lookOf(chart, stop))
   const rest = lookOf(chart, undefined)
   // Until the chart enters, every square waits in the remaining room's look, then turns.
-  const waiting = !chart.entered
+  const waiting = !waffle.entered
   return (
     <>
       <SquareLayer
@@ -394,12 +439,12 @@ function WaffleSquares() {
           className={waffleBoxClassName}
           style={waffleBoxStyle(waffle.columns, waffle.rows)}
         >
-          {chart.current.map((category) => (
+          {stops.map((stop) => (
             <LitShare
-              key={category.key}
-              on={lit === category.key}
-              share={category.key}
-              look={looks[category.index]!}
+              key={stop.key}
+              on={lit === stop.key}
+              share={stop.key}
+              look={looks[stop.index]!}
               squares={waffle.squares}
               owners={held.now}
               was={held.was}

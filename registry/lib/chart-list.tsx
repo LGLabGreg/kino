@@ -66,6 +66,12 @@ interface ListChart {
   datumText: (value: unknown) => string
 }
 
+/** What the frame of a chart whose stops are held by key reads of it: a list chart's, or the Waffle's, whose remaining room is a stop with no row. */
+type ListChartRoot = Pick<
+  ListChart,
+  'state' | 'status' | 'drawn' | 'selectable' | 'picked' | 'togglePicked' | 'activeProps'
+>
+
 /** The rows of a chart that loads or failed: one array, so what compares rows sees no change. */
 const NO_ROWS: readonly ChartDatum[] = []
 
@@ -149,7 +155,7 @@ function ListChartFrame({
   children,
   ...props
 }: Omit<ComponentProps<'figure'>, 'ref'> & {
-  chart: ListChart
+  chart: ListChartRoot
   reader: ChartReader
   slot: string
   description?: string
@@ -194,4 +200,10 @@ function ListChartFrame({
   )
 }
 
-export { type ListChart, ListChartFrame, type ListChartStop, useListChart }
+export {
+  type ListChart,
+  ListChartFrame,
+  type ListChartRoot,
+  type ListChartStop,
+  useListChart,
+}
