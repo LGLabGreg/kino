@@ -2,21 +2,24 @@
 
 import {
   type CategoryChartProps,
+  chartParts,
+  ChartPartsContext,
+  figureProps,
+  pickedName,
   shareColor,
   ShareTooltipContent,
   shareValue,
-  figureProps,
   useChartActive,
+  useDeclared,
   useRegistry,
 } from '@/registry/lib/chart-base'
 import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  type ChartCategory,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
+  ListChartFrame,
+  type ListChartStop,
+  useListChart,
+} from '@/registry/lib/chart-list'
+import { listReader, type ListStop } from '@/registry/lib/chart-list-reader'
 import type { ChartPattern } from '@/registry/lib/chart-math'
 import {
   foldPoint,
@@ -41,8 +44,8 @@ import {
   forcedSeriesTextColor,
   labelOnClassName,
   plotLayerClassName,
+  useChartRootValue,
 } from '@/registry/lib/chart-root'
-import { bandAt } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -103,7 +106,7 @@ interface DonutRingKey {
 
 /** A ring as the chart draws it: its slices, their values and its band. */
 interface DonutRing extends DonutRingKey {
-  /** Where each category's slice sits, by its key, the leaving ones folded to nothing. */
+  /** Where each slice sits, by its key, the leaving ones folded to nothing. */
   slices: ReadonlyMap<string, Slice>
   /** Each shown slice's place, by its place in the data, for the pointer and labels. */
   shares: readonly Slice[]
@@ -114,11 +117,15 @@ interface DonutRing extends DonutRingKey {
 }
 
 interface DonutContextValue {
+  /** Every slice to draw, the leaving ones too. */
+  stops: readonly ListChartStop[]
+  /** The slices still in the data, in order. */
+  current: readonly ListStop[]
+  /** A slice's name, as the chart writes it, from its value under the chart's `index`. */
+  nameText: (value: unknown) => string
   /** The rings, outermost first: the chart's own, then each `DonutChartRing`'s. */
   rings: readonly DonutRing[]
   addRing: (ring: DonutRingKey) => () => void
-  /** Keeps `px` beside the ring while its labels sit outside it; returns what lets it go. */
-  addRoom: (px: number) => () => void
   innerRadius: number
   /** The outer ring's radius at rest, in px. */
   outer: number
@@ -136,6 +143,30 @@ function useDonutChart() {
   const donut = use(DonutContext)
   if (!donut) throw new Error('Donut chart parts go inside a `DonutChart`.')
   return donut
+}
+
+/** What the Donut's labels need to fit past the ring. */
+interface DonutRoomState {
+  /** The slices still in the data. */
+  stops: readonly ListStop[]
+  /** The outer ring's values, by their key in the data, and their total. */
+  ring: { dataKey: string; total: number }
+  plot: { width: number; height: number }
+  textWidth: (text: string) => number
+  valueText: (value: number) => string
+  nameText: (value: unknown) => string
+  locale: Intl.LocalesArgument
+}
+
+/** What a part written inside the Donut tells it as it renders. */
+interface DonutPartDeclaration {
+  /** The px a part draws past the ring, or null for a part that draws none. */
+  room: ((state: DonutRoomState) => number) | null
+}
+
+/** What tells a part's declaration apart; empty for one that says nothing. */
+function donutSignature(declaration: DonutPartDeclaration) {
+  return declaration.room ? 'room' : ''
 }
 
 const donutChartKeys = [
@@ -183,7 +214,7 @@ function DonutChart(props: DonutChartProps) {
   } = props
   const hole = Math.min(0.95, Math.max(0, innerRadius))
   const gap = Math.max(0, sliceGap)
-  const { chart, placeholder, phase, room, addRoom } = useCategoryChart(
+  const chart = useListChart(
     {
       ...props,
       // A slice is named by its config's label, as its legend entry is.
@@ -201,19 +232,12 @@ function DonutChart(props: DonutChartProps) {
         ...messages,
       },
     },
-    {
-      orientation: 'vertical',
-      stack: 'none',
-      entrance: entrance !== 'none',
-      round: true,
-      nice: false,
-      seriesOfRow: (row) => String(row[props.index]),
-      bandOf: (at, count) => bandAt(at, count),
-      measure: () => ({ extent: [0, 1] as const }),
-    },
+    { entrance: entrance !== 'none', rowsAreSeries: true },
   )
+  const { state, current, stops, stopText } = chart
+  const parts = chartParts(children, donutSignature)
   const added = useRegistry<DonutRingKey>()
-  const label = valueLabel ?? chart.messages.total
+  const label = valueLabel ?? state.messages.total
   // The rings among its own children are known from the first render, as on the server's
   // first paint; any deeper one joins once it mounts.
   const declared = Children.toArray(children).flatMap((child) =>
@@ -225,28 +249,38 @@ function DonutChart(props: DonutChartProps) {
   for (const ring of [...declared, ...added.values]) {
     if (!keys.some((key) => key.dataKey === ring.dataKey)) keys.push(ring)
   }
-  const { width, height } = drawingSize(chart.plotSize)
-  const scale = useGrowScale(chart.root, grow, width, height)
+  const measured = state.plotSize.width > 0 && state.plotSize.height > 0
+  // Labels past the ring keep room for themselves, in px, so the ring waits unseen for the
+  // plot's size rather than draw at one size and then shrink.
+  const rooms = parts.declarations.flatMap((part) => (part.room ? [part.room] : []))
+  const total = current.reduce((sum, stop) => sum + shareValue(stop.datum, dataKey), 0)
+  const roomState: DonutRoomState = {
+    stops: current,
+    ring: { dataKey, total },
+    plot: state.plotSize,
+    textWidth: state.textWidth,
+    valueText: state.valueText,
+    nameText: stopText,
+    locale: state.locale,
+  }
+  const room = measured ? Math.max(0, ...rooms.map((roomOf) => roomOf(roomState))) : 0
+  const { width, height } = drawingSize(state.plotSize)
+  const scale = useGrowScale(state.root, grow, width, height)
   const edge = Math.max(0, Math.min(width, height) / 2 - 0.5 - room)
   const outer = edge / scale
   const bands = ringBands(outer, outer * hole, keys.length, RING_GAP)
   const rings: DonutRing[] = keys.map((key, at) => {
     const band = bands[at] ?? { inner: 0, outer: 0 }
-    const values = chart.current.map((category) =>
-      shareValue(category.datum, key.dataKey),
-    )
+    const values = current.map((stop) => shareValue(stop.datum, key.dataKey))
     const circumference = Math.PI * (band.inner + band.outer)
     const shares = ringSlices(values, circumference > 0 ? MIN_ARC / circumference : 0)
     const slices = new Map<string, Slice>()
-    for (const category of chart.categories) {
-      if (!chart.entered) slices.set(category.key, { start: 0, size: 0 })
-      else if (category.leaving) {
+    for (const stop of stops) {
+      if (!chart.entered) slices.set(stop.key, { start: 0, size: 0 })
+      else if (stop.leaving) {
         // Folded to nothing where it would sit among the slices that stay.
-        slices.set(category.key, {
-          start: foldPoint(shares, category.index),
-          size: 0,
-        })
-      } else slices.set(category.key, shares[category.index] ?? { start: 0, size: 0 })
+        slices.set(stop.key, { start: foldPoint(shares, stop.index), size: 0 })
+      } else slices.set(stop.key, shares[stop.index] ?? { start: 0, size: 0 })
     }
     return {
       ...key,
@@ -258,29 +292,25 @@ function DonutChart(props: DonutChartProps) {
     }
   })
   const main = rings[0]!
-  const percent = numberFormatter(chart.locale, {
+  const percent = numberFormatter(state.locale, {
     style: 'percent',
     maximumFractionDigits: 1,
   })
-  const nameOf = (category: ChartCategory) => chart.categoryText(category.value)
+  const nameOf = (stop: ListStop) => stopText(stop.value)
   const shareOf = (ring: DonutRing, at: number) =>
     ring.total === 0 ? 0 : (ring.values[at] ?? 0) / ring.total
-  const valueText = (ring: DonutRing, category: ChartCategory) =>
-    chart.datumText(category.datum[ring.dataKey])
+  const valueText = (ring: DonutRing, stop: ListStop) =>
+    chart.datumText(stop.datum?.[ring.dataKey])
   const several = rings.length > 1
-
-  const full: CategoryChartInput = {
-    ...chart,
-    // The tooltip sits on the outer edge of the slice's middle, opening away from the ring.
-    pointOf: (at) => {
-      const slice = main.shares[at]
-      if (!slice || width === 0 || height === 0) return null
-      return outerPoint(slice.start + slice.size / 2, width, height, edge)
-    },
-    pickAt: (point, box) =>
+  const reader = listReader({
+    current,
+    walk: { kind: 'round' },
+    series: { kind: 'none' },
+    direction: state.direction,
+    hit: (point) =>
       sliceAt(
-        point.x - box.left - box.width / 2,
-        point.y - box.top - box.height / 2,
+        point.x - point.width / 2,
+        point.y - point.height / 2,
         rings.map((ring, at) => ({
           inner: ring.band.inner,
           // The outer ring reaches as far as a slice of it grows.
@@ -288,83 +318,92 @@ function DonutChart(props: DonutChartProps) {
           slices: ring.shares,
         })),
       ),
-    describe: (at) => {
-      const category = chart.current[at]
-      if (!category) return ''
-      return rings
-        .map(
-          (ring) =>
-            `${ring.label} ${valueText(ring, category)}, ${percent.format(shareOf(ring, at))}`,
-        )
-        .join('; ')
+    // The tooltip sits on the outer edge of the slice's middle, opening away from the ring.
+    anchor: (stop) => {
+      const slice = main.shares[stop.index]
+      if (!slice || width === 0 || height === 0) return null
+      return outerPoint(slice.start + slice.size / 2, width, height, edge)
     },
-    table: several
-      ? {
-          columns: rings.map((ring) => ring.label),
-          cells: (category) => rings.map((ring) => valueText(ring, category)),
-          footer: rings.map((ring) => chart.valueText(ring.total)),
-        }
-      : {
-          columns: [label, chart.messages.share],
-          cells: (category) => [
-            valueText(main, category),
-            percent.format(shareOf(main, category.index)),
-          ],
-          footer: [chart.valueText(main.total), percent.format(main.total === 0 ? 0 : 1)],
-        },
-    tooltipContent: (at) => {
-      const category = chart.current[at]
-      if (!category) return null
-      return (
+    words: {
+      describe: (stop) =>
+        `${pickedName(nameOf(stop), chart.picked === stop.key, state.messages)}: ${rings
+          .map(
+            (ring) =>
+              `${ring.label} ${valueText(ring, stop)}, ${percent.format(shareOf(ring, stop.index))}`,
+          )
+          .join('; ')}`,
+      tooltip: (stop) => (
         <ShareTooltipContent
-          chart={chart}
-          category={category}
-          name={nameOf(category)}
+          chart={state}
+          category={stop}
+          name={nameOf(stop)}
           rows={rings.map((ring) => ({
             label: several ? ring.label : null,
-            value: valueText(ring, category),
-            share: percent.format(shareOf(ring, at)),
+            value: valueText(ring, stop),
+            share: percent.format(shareOf(ring, stop.index)),
           }))}
         />
-      )
+      ),
+      table: {
+        header: state.messages.category,
+        columns: several
+          ? rings.map((ring) => ring.label)
+          : [label, state.messages.share],
+        rows: current.map((stop) => ({
+          key: stop.key,
+          name: nameOf(stop),
+          cells: several
+            ? rings.map((ring) => valueText(ring, stop))
+            : [valueText(main, stop), percent.format(shareOf(main, stop.index))],
+        })),
+        footer: several
+          ? rings.map((ring) => state.valueText(ring.total))
+          : [state.valueText(main.total), percent.format(main.total === 0 ? 0 : 1)],
+      },
     },
-  }
+  })
 
   return (
     <DonutContext
       value={{
+        stops,
+        current,
+        nameText: stopText,
         rings,
         addRing: added.add,
-        addRoom,
         innerRadius: hole,
         outer,
         edge,
         sliceGap: gap,
         grow,
         valueLabel: label,
-        entering: phase === 'entering',
+        entering: chart.entering,
       }}
     >
-      <CategoryChartFrame
-        chart={full}
-        ref={ref}
-        slot='donut-chart'
-        description={description}
-        empty={empty}
-        className={className}
-        placeholder={
-          placeholder ? (
-            <DonutTrack slot='donut-chart-placeholder' breathe />
-          ) : (
-            chart.status === 'ready' &&
-            main.total === 0 && <DonutTrack slot='donut-chart-track' />
-          )
-        }
-        {...figureProps(props, donutChartKeys)}
-      >
-        <DonutSlices ring={0} />
-        {children}
-      </CategoryChartFrame>
+      <ChartPartsContext value={parts}>
+        <ListChartFrame
+          chart={chart}
+          reader={reader}
+          ref={ref}
+          slot='donut-chart'
+          description={description}
+          empty={empty}
+          measuring={rooms.length > 0 && !measured}
+          className={className}
+          placeholder={
+            chart.placeholder ? (
+              <DonutTrack slot='donut-chart-placeholder' breathe />
+            ) : (
+              chart.status === 'ready' &&
+              main.total === 0 && <DonutTrack slot='donut-chart-track' />
+            )
+          }
+          {...figureProps(props, donutChartKeys)}
+        >
+          <DonutSlices ring={0} />
+          {children}
+        </ListChartFrame>
+      </ChartPartsContext>
     </DonutContext>
   )
 }
@@ -400,7 +439,7 @@ function useGrowScale(
  * arrives grows out from its own start.
  */
 function DonutSlices({ ring: at }: { ring: number }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const donut = useDonutChart()
   const ring = donut.rings[at]
@@ -453,7 +492,7 @@ function DonutSlices({ ring: at }: { ring: number }) {
                 height={round(height * 3)}
                 fill='white'
               />
-              {chart.categories.map((category) => {
+              {donut.stops.map((category) => {
                 const slice = ring.slices.get(category.key) ?? {
                   start: 0,
                   size: 0,
@@ -476,7 +515,7 @@ function DonutSlices({ ring: at }: { ring: number }) {
           </defs>
         )}
         <g mask={gaps ? `url(#${maskId})` : undefined}>
-          {chart.categories.map((category) => {
+          {donut.stops.map((category) => {
             const slice = ring.slices.get(category.key) ?? {
               start: 0,
               size: 0,
@@ -679,56 +718,96 @@ interface DonutLabelSlice {
 /** Where a label sits: past the ring's edge on a short line, or on its slice. */
 type DonutLabelPosition = 'outside' | 'inside'
 
+/** What each label writes: the slice's value, its share, its name, or your own words. */
+type DonutLabelContent = 'value' | 'share' | 'name' | ((slice: DonutLabelSlice) => string)
+
+interface DonutChartLabelsProps extends Omit<
+  ComponentProps<'div'>,
+  'children' | 'content'
+> {
+  position?: DonutLabelPosition
+  content?: DonutLabelContent
+}
+
+/**
+ * What a label is given to write for `stop` of the ring whose values are
+ * under `dataKey` and add up to `total`. A leaving slice keeps the share it
+ * had while it was part of the whole.
+ */
+function labelSlice(
+  stop: ListStop & { leaving?: boolean },
+  ring: { dataKey: string; total: number },
+  nameText: (value: unknown) => string,
+): DonutLabelSlice {
+  const value = stop.datum ? shareValue(stop.datum, ring.dataKey) : 0
+  const whole = stop.leaving ? ring.total + value : ring.total
+  return {
+    key: stop.key,
+    name: nameText(stop.value),
+    value,
+    share: whole === 0 ? 0 : value / whole,
+  }
+}
+
+/** What a label with `content` writes for `slice`. */
+function labelText(
+  content: DonutLabelContent,
+  slice: DonutLabelSlice,
+  valueText: (value: number) => string,
+  locale: Intl.LocalesArgument,
+) {
+  if (typeof content === 'function') return content(slice)
+  if (content === 'share')
+    return numberFormatter(locale, {
+      style: 'percent',
+      maximumFractionDigits: 0,
+    }).format(slice.share)
+  if (content === 'name') return slice.name
+  return valueText(slice.value)
+}
+
+/** The px labels with `content` take past the ring: a line of text above and below it, and the widest label beside it. */
+function labelsRoom(content: DonutLabelContent, state: DonutRoomState) {
+  const widths = state.stops.map((stop) =>
+    state.textWidth(
+      labelText(
+        content,
+        labelSlice(stop, state.ring, state.nameText),
+        state.valueText,
+        state.locale,
+      ),
+    ),
+  )
+  return outsideRoom(state.plot.width, state.plot.height, Math.max(0, ...widths))
+}
+
 /**
  * Writes each slice's value, share or name, past the outer ring's edge on a
  * short line, or on the slice. A label with no room, or one that would
  * overlap a bigger slice's, is skipped, and every label travels round with
- * its slice.
+ * its slice. Past the ring, it goes straight inside the chart, or in a
+ * fragment there, so the chart keeps room for it as it renders.
  */
-function DonutChartLabels({
-  position = 'outside',
-  content = 'value',
-  className,
-  ...props
-}: Omit<ComponentProps<'div'>, 'children' | 'content'> & {
-  position?: DonutLabelPosition
-  /** What each label writes: the slice's value, its share, its name, or your own words. */
-  content?: 'value' | 'share' | 'name' | ((slice: DonutLabelSlice) => string)
-}) {
-  const chart = useChart()
+function DonutChartLabels(props: DonutChartLabelsProps) {
+  const { position = 'outside', content = 'value', className, ...rest } = props
+  useDeclared('DonutChartLabels', DonutChartLabels.declare(props), donutSignature)
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const donut = useDonutChart()
-  const { addRoom } = donut
   const ring = donut.rings[0]!
-  const percent = numberFormatter(chart.locale, {
-    style: 'percent',
-    maximumFractionDigits: 0,
-  })
-  // Every category's, a leaving one's too, so its label fades out with its words.
-  const textOf = (category: ChartCategory) => {
-    const value = shareValue(category.datum, ring.dataKey)
-    // A leaving slice keeps the share it had while it was part of the whole.
-    const whole = category.leaving ? ring.total + value : ring.total
-    const slice: DonutLabelSlice = {
-      key: category.key,
-      name: chart.categoryText(category.value),
-      value,
-      share: whole === 0 ? 0 : value / whole,
-    }
-    if (typeof content === 'function') return content(slice)
-    if (content === 'share') return percent.format(slice.share)
-    if (content === 'name') return slice.name
-    return chart.valueText(value)
-  }
-  const widths = chart.current.map((category) => chart.textWidth(textOf(category)))
-  const { width, height } = chart.plotSize
-  const room =
-    position === 'outside' ? outsideRoom(width, height, Math.max(0, ...widths)) : 0
-  useLayoutEffect(() => (room > 0 ? addRoom(room) : undefined), [addRoom, room])
+  // Every slice's, a leaving one's too, so its label fades out with its words.
+  const textOf = (stop: ListChartStop | ListStop) =>
+    labelText(
+      content,
+      labelSlice(stop, ring, donut.nameText),
+      chart.valueText,
+      chart.locale,
+    )
+  const widths = donut.current.map((stop) => chart.textWidth(textOf(stop)))
   const outside = position === 'outside'
   // Before the plot is measured, labels on their slices sit in the slices' square stand-in;
   // those past the ring wait, since the room they take is in pixels, not a share of the plot.
-  const measured = width > 0 && height > 0
+  const measured = chart.plotSize.width > 0 && chart.plotSize.height > 0
   if (chart.status !== 'ready' || (outside && !measured)) return null
   const drawn = drawingSize(chart.plotSize)
   const stretch = measured ? null : 1 / Math.min(drawn.width, drawn.height)
@@ -749,29 +828,36 @@ function DonutChartLabels({
       data-slot='donut-chart-labels'
       aria-hidden
       className={cn(plotLayerClassName, 'z-20', className)}
-      {...props}
+      {...rest}
     >
-      {chart.categories.map((category) => {
-        const slice = ring.slices.get(category.key) ?? { start: 0, size: 0 }
-        const at = category.leaving ? -1 : category.index
+      {donut.stops.map((stop) => {
+        const slice = ring.slices.get(stop.key) ?? { start: 0, size: 0 }
+        const at = stop.leaving ? -1 : stop.index
         return (
           <DonutLabel
-            key={category.key}
+            key={stop.key}
             turn={slice.start + slice.size / 2}
             radius={radius}
             stretch={stretch}
             edge={outside ? donut.edge : null}
-            color={shareColor(chart, category)}
+            color={shareColor(chart, stop)}
             shown={at !== -1 && slice.size > 0 && !donut.entering && (shown[at] ?? false)}
-            dim={spotlit !== null && spotlit !== category.index}
+            dim={spotlit !== null && spotlit !== stop.index}
           >
-            {textOf(category)}
+            {textOf(stop)}
           </DonutLabel>
         )
       })}
     </div>
   )
 }
+
+DonutChartLabels.declare = ({
+  position = 'outside',
+  content = 'value',
+}: DonutChartLabelsProps): DonutPartDeclaration => ({
+  room: position === 'outside' ? (state) => labelsRoom(content, state) : null,
+})
 
 /**
  * One slice's label, on its slice or past the ring on a short line from its
@@ -872,15 +958,15 @@ function DonutChartCentre({
   /** The caption under the total; the chart's `valueLabel` by default. */
   label?: ReactNode
 }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const donut = useDonutChart()
   const ring = donut.rings[0]
   if (!ring || chart.status !== 'ready' || donut.innerRadius < 0.4) return null
-  const category = spotlit === null ? undefined : chart.current[spotlit]
-  const value = category ? (ring.values[category.index] ?? 0) : ring.total
-  const caption = category
-    ? (chart.config[category.key]?.label ?? chart.categoryText(category.value))
+  const stop = spotlit === null ? undefined : donut.current[spotlit]
+  const value = stop ? (ring.values[stop.index] ?? 0) : ring.total
+  const caption = stop
+    ? (chart.config[stop.key]?.label ?? donut.nameText(stop.value))
     : (label ?? donut.valueLabel)
   const hole = donut.outer * 2 * donut.innerRadius
   const drawn = drawingSize(chart.plotSize)
@@ -919,8 +1005,13 @@ export {
   DonutChart,
   DonutChartCentre,
   DonutChartLabels,
+  type DonutChartLabelsProps,
   type DonutChartProps,
   DonutChartRing,
+  type DonutLabelContent,
   type DonutLabelPosition,
   type DonutLabelSlice,
+  type DonutPartDeclaration,
+  type DonutRoomState,
+  labelsRoom,
 }

@@ -2,21 +2,26 @@
 
 import {
   type CategoryChartProps,
+  chartParts,
+  ChartPartsContext,
   figureProps,
+  seriesWords,
+  SeriesWordsContext,
+  type SeriesWordsInput,
   tickMove,
   useChartActive,
-  useRegistry,
+  useDeclared,
+  usePreviousScales,
   useTicks,
 } from '@/registry/lib/chart-base'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  type ChartCategory,
-  type ChartContextValue,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
+  ListChartFrame,
+  type ListChartStop,
+  useListChart,
+} from '@/registry/lib/chart-list'
+import { listReader, type ListStop } from '@/registry/lib/chart-list-reader'
 import {
+  allWhole,
   type ChartDatum,
   numberOf,
   type Span,
@@ -45,10 +50,11 @@ import {
   plotLayerClassName,
   type MoveRole,
   seriesColor,
+  useChartRootValue,
   useFromRest,
   usePointsMove,
 } from '@/registry/lib/chart-root'
-import { bandAt, type LinearScale, tickCountFor } from '@/registry/lib/chart-scale'
+import { type LinearScale, linearScale, tickCountFor } from '@/registry/lib/chart-scale'
 import {
   createHighlight,
   type Highlight,
@@ -66,7 +72,6 @@ import {
   use,
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
@@ -118,15 +123,36 @@ interface VertexMove {
   to: { turn: number; r: number }
 }
 
-/** What `RadarAxis` tells the chart: the room its names take past the edge, and each name's box. */
+/** Where the axes' names sit: each name's box, the room they take past the edge, and those with no room, which show only in the pill. */
 interface RadarNames {
-  /** The axes the names are of, so a fit for other axes is never used. */
-  axes: string
   room: number
   boxes: ReadonlyMap<string, { width: number; height: number }>
+  hidden: ReadonlySet<string>
+}
+
+/** What a part written inside the Radar tells it as it renders. */
+interface RadarPartDeclaration {
+  /** The axes' names a part writes round the chart, which the radius leaves room for: written by `format`, or the chart's `categoryFormat` with null. */
+  names: { format: ((value: unknown) => string) | null } | null
+}
+
+/** What tells a part's declaration apart; empty for one that says nothing. */
+function radarSignature(declaration: RadarPartDeclaration) {
+  return declaration.names ? 'names' : ''
 }
 
 interface RadarContextValue {
+  /** Every axis to draw, a leaving one too, in a fixed order that sorting the data doesn't change. */
+  stops: readonly ListChartStop[]
+  /** The axes still in the data, in order. */
+  current: readonly ListStop[]
+  /** An axis's name, as the chart writes it, from its value under the chart's `index`. */
+  nameText: (value: unknown) => string
+  /** The value axis, the rings' ticks, and the one before its last change, so the rings grow from where they were. */
+  scale: LinearScale
+  previous: LinearScale
+  /** Where `RadarAxis` writes the names, or null with no `RadarAxis`. */
+  names: RadarNames | null
   /** How far out the outer ring is, in px. */
   edge: number
   /** The plot's centre, in px. */
@@ -141,12 +167,13 @@ interface RadarContextValue {
   rotations: ReadonlyMap<string, number>
   /** A series' outline over the shown axes: at the centre when `flat`. */
   outlineOf: (key: string, flat: boolean) => RadarVertex[]
-  /** Where the point of `key` on `category` sits, as a fraction of the edge; null for no value. */
-  fractionAt: (category: ChartCategory, key: string) => number | null
-  addNames: (names: RadarNames) => () => void
+  /** Where the point of `key` on `stop` sits, as a fraction of the edge; null for no value. */
+  fractionAt: (stop: ListStop, key: string) => number | null
   /** Each axis on a scale of its own, so the values have no shared axis. */
   ownScales: boolean
   entrance: 'rise' | 'none'
+  /** The entrance has played, or wasn't asked for. */
+  entered: boolean
   entering: boolean
 }
 
@@ -237,6 +264,43 @@ function radarExtent(rows: readonly ChartDatum[], keys: readonly string[]): Span
 }
 
 /**
+ * How the Radar fits its plot, in px: each name's box and the room they take
+ * past the edge (none with no `names`), how far out the edge is, then as many
+ * rings as the radius has room for, a ring every 24px or more, or rings given
+ * as values (`given`) at least a line of text apart. Until the plot is
+ * measured, the chart is drawn in a stand-in and keeps every ring asked for.
+ */
+function radarFit({
+  names,
+  plot,
+  space,
+  tickCount,
+  given,
+}: {
+  names: readonly NameToFit[] | null
+  plot: { width: number; height: number }
+  /** A space's width, in px, where long names wrap. */
+  space: number
+  tickCount: number
+  given: readonly number[] | undefined
+}) {
+  const measured = plot.width > 0 && plot.height > 0
+  const { width, height } = drawingSize(plot)
+  const named = names ? fitNamesOn(names, plot, space) : null
+  const edge = Math.max(0, Math.min(width, height) / 2 - 0.5 - (named?.room ?? 0))
+  const measuredEdge = measured ? Math.round(edge) : null
+  return {
+    named,
+    edge,
+    rings: tickCountFor(tickCount, measuredEdge ?? 0, RING_SPACING),
+    tickValues:
+      given && measuredEdge !== null
+        ? thinTicks(given, Math.floor(measuredEdge / GIVEN_RING_SPACING))
+        : given,
+  }
+}
+
+/**
  * The chart's root: it places each axis round the centre, fits the value
  * axis to the shapes, and lays out the frame its grid, names, shapes and
  * tooltip draw in.
@@ -255,87 +319,123 @@ function RadarChart(props: RadarChartProps) {
   } = props
   registerRadarProperties()
   const ownScales = maxKey !== undefined
-  // The rings are as many as the radius has room for, once it is measured: a ring every 24px or
-  // more, or rings given as values at least a line of text apart. The value axis fits its ticks
-  // to the plot's height, twice the radius.
-  const [measuredEdge, setMeasuredEdge] = useState<number | null>(null)
-  const rings = tickCountFor(tickCount, measuredEdge ?? 0, RING_SPACING)
-  const given = ownScales ? OWN_SCALE_TICKS : props.tickValues
-  const tickValues =
-    given && measuredEdge !== null
-      ? thinTicks(given, Math.floor(measuredEdge / GIVEN_RING_SPACING))
-      : given
-  const { chart, placeholder, phase } = useCategoryChart(
-    {
-      ...props,
-      tickCount: rings,
-      // On scales of their own, every axis runs from nothing to its top.
-      domain: ownScales ? [0, 1] : domain,
-      tickValues,
-      allowDecimals: ownScales ? true : props.allowDecimals,
-    },
-    {
-      orientation: 'vertical',
-      stack: 'none',
-      entrance: entrance !== 'none',
-      round: true,
-      nice: !ownScales,
-      bandOf: bandAt,
-      measure: (rows, shown) => ({
-        extent: ownScales ? ([0, 1] as const) : radarExtent(rows, shown),
-      }),
-    },
-  )
-  const names = useRegistry<RadarNames>()
-  const { width, height } = drawingSize(chart.plotSize)
-  const measured = chart.plotSize.width > 0 && chart.plotSize.height > 0
-  const turns = useAxisTurns(chart.categories, chart.current)
+  const chart = useListChart(props, {
+    entrance: entrance !== 'none',
+    rowsAreSeries: false,
+  })
+  const { state, current, stops, shown, stopText } = chart
+  const parts = chartParts(children, radarSignature)
+  const axis = parts.declarations.findLast((part) => part.names !== null)?.names ?? null
+  const { width, height } = drawingSize(state.plotSize)
+  const measured = state.plotSize.width > 0 && state.plotSize.height > 0
+  const turns = useAxisTurns(stops, current)
   const rotations = useAxisRotations(turns)
-  // Until RadarAxis tells the chart its names' room, on the server and on the first paint, the
-  // room is worked out here from the names as the chart writes them, so nothing jumps once it does.
-  // A fit RadarAxis made for other axes, such as before the data loaded, isn't used: the names
-  // land where they will stay, rather than sliding in from where the old room put them.
-  const registered = names.values.at(-1)
-  const named =
-    registered?.axes === axesOf(chart.categories)
-      ? registered
-      : measured && registered === undefined
-        ? undefined
-        : fitNamesOn(
-            namesToFit(chart, turns, chart.categoryText),
-            chart.plotSize,
-            chart.textWidth(' '),
-          )
-  const edge = Math.max(0, Math.min(width, height) / 2 - 0.5 - (named?.room ?? 0))
+  // The names' room sets the radius, and the radius how many rings it has room for, all worked
+  // out as the chart renders: until the plot is measured, it waits unseen.
+  const fit = radarFit({
+    names: axis
+      ? namesToFit(stops, turns, axis.format ?? stopText, state.textWidth)
+      : null,
+    plot: state.plotSize,
+    space: state.textWidth(' '),
+    tickCount,
+    given: ownScales ? OWN_SCALE_TICKS : props.tickValues,
+  })
+  const { named, edge } = fit
   const centre = { x: width / 2, y: height / 2 }
-  useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the rings fit the radius the axis names leave, measured once the chart is laid out, before it paints
-    if (measured) setMeasuredEdge(Math.round(edge))
-  }, [measured, edge])
-  const shown = chart.series.filter((key) => !chart.hidden.includes(key))
+  const scale = linearScale(ownScales ? [0, 1] : radarExtent(chart.drawn, shown), {
+    // On scales of their own, every axis runs from nothing to its top.
+    domain: ownScales ? [0, 1] : domain,
+    tickCount: fit.rings,
+    tickValues: fit.tickValues,
+    nice: !ownScales,
+    allowDecimals: ownScales
+      ? true
+      : (props.allowDecimals ?? !allWhole(chart.rows, shown)),
+  })
+  const previous = usePreviousScales({ value: scale }).value ?? scale
 
-  const fractionAt = (category: ChartCategory, key: string) => {
-    const value = numberOf(category.datum[key])
+  const fractionAt = (stop: ListStop, key: string) => {
+    const value = numberOf(stop.datum?.[key])
     if (value === null) return null
-    if (!ownScales) return chart.frame.y.value.scale.place(value)
-    const top = numberOf(category.datum[maxKey])
+    if (!ownScales) return scale.place(value)
+    const top = numberOf(stop.datum?.[maxKey])
     return top === null || top <= 0 ? 0 : Math.min(1, Math.max(0, value / top))
   }
   const outlineOf = (key: string, flat: boolean): RadarVertex[] =>
-    chart.current.map((category) => ({
-      key: category.key,
-      turn: turns.get(category.key) ?? 0,
-      r: flat ? 0 : (fractionAt(category, key) ?? 0),
+    current.map((stop) => ({
+      key: stop.key,
+      turn: turns.get(stop.key) ?? 0,
+      r: flat ? 0 : (fractionAt(stop, key) ?? 0),
     }))
-
-  const full: CategoryChartInput = {
-    ...chart,
+  const words: SeriesWordsInput = {
+    stops: current,
+    // On scales of their own, each value is written against its axis's top, as the shape draws it.
+    seriesText: (stop, key) => {
+      const value = numberOf(stop.datum?.[key])
+      const top = ownScales ? numberOf(stop.datum?.[maxKey]) : null
+      return value === null || top === null
+        ? chart.datumText(stop.datum?.[key])
+        : state.messages.outOf(state.valueText(value), state.valueText(top))
+    },
+    // Its axes don't run in order, so a value has no change since the one before.
+    seriesChange: () => null,
+    stopText: (stop) => stopText(stop.value),
+    ordered: false,
+    totals: (stop) =>
+      shown.length > 1
+        ? shown.reduce((all, key) => all + (numberOf(stop.datum?.[key]) ?? 0), 0)
+        : null,
+    totalByDefault: false,
+    forecast: () => false,
+    picked: chart.picked,
+    // The series brought forward alone, so Up and Down are heard to move.
+    alone: state.emphasis,
+    own: null,
+  }
+  const reader = listReader({
+    current,
+    walk: { kind: 'round' },
+    // With one series shown there is none to bring forward, so the lit axis's wedge stays.
+    series: {
+      kind: 'step',
+      step: (at, from, step) => {
+        const stop = current[at]
+        if (!stop || shown.length < 2) return null
+        return stepOutward(
+          shown.map((key) => ({ key, value: fractionAt(stop, key) })),
+          from,
+          step,
+        )
+      },
+      shown,
+    },
+    direction: state.direction,
+    hit: (point) => {
+      const x = point.x - point.width / 2
+      const y = point.y - point.height / 2
+      // On an axis's name, which the pill shows there, that axis, wherever round the plot it is.
+      const onName = current.findIndex((stop) => {
+        const size = named?.boxes.get(stop.key)
+        if (!size) return false
+        const name = labelBoxAt(
+          turns.get(stop.key) ?? 0,
+          edge + NAME_GAP,
+          size.width,
+          size.height,
+        )
+        return x >= name.left && x <= name.right && y >= name.top && y <= name.bottom
+      })
+      if (onName !== -1) return onName
+      if (Math.hypot(x, y) > Math.min(point.width, point.height) / 2 + NAME_GAP)
+        return null
+      return axisAt(turnOf(x, y), current.length)
+    },
     // The tooltip sits past the axis's name, so it covers neither the name nor the shapes.
-    pointOf: (at) => {
-      const category = chart.current[at]
-      if (!category || width === 0 || height === 0) return null
-      const turn = turns.get(category.key) ?? 0
-      const box = named?.boxes.get(category.key)
+    anchor: (stop) => {
+      if (width === 0 || height === 0) return null
+      const turn = turns.get(stop.key) ?? 0
+      const box = named?.boxes.get(stop.key)
       if (!box) return outerPoint(turn, width, height, edge)
       const { left, right, top, bottom } = labelBoxAt(
         turn,
@@ -348,88 +448,49 @@ function RadarChart(props: RadarChartProps) {
       const y = side === 'top' ? top : side === 'bottom' ? bottom : (top + bottom) / 2
       return { x: (centre.x + x) / width, y: (centre.y + y) / height, side }
     },
-    pickAt: (point, box) => {
-      const x = point.x - box.left - box.width / 2
-      const y = point.y - box.top - box.height / 2
-      // On an axis's name, which the pill shows there, that axis, wherever round the plot it is.
-      const onName = chart.current.findIndex((category) => {
-        const size = named?.boxes.get(category.key)
-        if (!size) return false
-        const name = labelBoxAt(
-          turns.get(category.key) ?? 0,
-          edge + NAME_GAP,
-          size.width,
-          size.height,
-        )
-        return x >= name.left && x <= name.right && y >= name.top && y <= name.bottom
-      })
-      if (onName !== -1) return onName
-      if (Math.hypot(x, y) > Math.min(box.width, box.height) / 2 + NAME_GAP) return null
-      return axisAt(turnOf(x, y), chart.current.length)
-    },
-    // With one series shown there is none to bring forward, so the lit axis's wedge stays.
-    stepSeries: (at, from, step) => {
-      const category = chart.current[at]
-      if (!category || shown.length < 2) return null
-      return stepOutward(
-        shown.map((key) => ({ key, value: fractionAt(category, key) })),
-        from,
-        step,
-      )
-    },
-    // On scales of their own, each value is written against its axis's top, as the shape draws it.
-    seriesText: (category, key) => {
-      const value = numberOf(category.datum[key])
-      const top = ownScales ? numberOf(category.datum[maxKey]) : null
-      return value === null || top === null
-        ? chart.datumText(category.datum[key])
-        : chart.messages.outOf(chart.valueText(value), chart.valueText(top))
-    },
-    // The series brought forward alone, so Up and Down are heard to move.
-    describe: (at) => {
-      const category = chart.current[at]
-      if (!category) return ''
-      const keys =
-        chart.emphasis !== null && shown.includes(chart.emphasis)
-          ? [chart.emphasis]
-          : shown
-      return keys
-        .map((key) => {
-          const name = chart.config[key]?.label
-          return `${typeof name === 'string' ? name : key} ${full.seriesText(category, key)}`
-        })
-        .join(', ')
-    },
-  }
+    words: seriesWords(state, words),
+  })
 
   return (
     <RadarContext
       value={{
+        stops,
+        current,
+        nameText: stopText,
+        scale,
+        previous,
+        names: named,
         edge,
         centre,
         turns,
         rotations,
         outlineOf,
         fractionAt,
-        addNames: names.add,
         ownScales,
         entrance,
-        entering: phase === 'entering',
+        entered: chart.entered,
+        entering: chart.entering,
       }}
     >
-      <CategoryChartFrame
-        chart={full}
-        ref={ref}
-        slot='radar-chart'
-        description={description}
-        empty={empty}
-        className={className}
-        placeholder={placeholder && <RadarPlaceholder />}
-        {...figureProps(props, radarChartKeys)}
-      >
-        {children}
-        <RadarLitMarks />
-      </CategoryChartFrame>
+      <ChartPartsContext value={parts}>
+        <SeriesWordsContext value={words}>
+          <ListChartFrame
+            chart={chart}
+            reader={reader}
+            ref={ref}
+            slot='radar-chart'
+            description={description}
+            empty={empty}
+            measuring={!measured}
+            className={className}
+            placeholder={chart.placeholder && <RadarPlaceholder />}
+            {...figureProps(props, radarChartKeys)}
+          >
+            {children}
+            <RadarLitMarks />
+          </ListChartFrame>
+        </SeriesWordsContext>
+      </ChartPartsContext>
     </RadarContext>
   )
 }
@@ -439,8 +500,8 @@ function RadarChart(props: RadarChartProps) {
  * and an axis that leaves keeps the turn it had, so it fades where it was.
  */
 function useAxisTurns(
-  categories: readonly ChartCategory[],
-  current: readonly ChartCategory[],
+  stops: readonly { key: string }[],
+  current: readonly { key: string }[],
 ): ReadonlyMap<string, number> {
   const signature = current.map((category) => category.key).join('\u0000')
   const now = new Map(
@@ -450,10 +511,10 @@ function useAxisTurns(
   if (kept.signature !== signature)
     setKept({ signature, turns: new Map([...kept.turns, ...now]) })
   const turns = new Map(now)
-  for (const category of categories) {
-    if (turns.has(category.key)) continue
-    const last = kept.turns.get(category.key)
-    if (last !== undefined) turns.set(category.key, last)
+  for (const stop of stops) {
+    if (turns.has(stop.key)) continue
+    const last = kept.turns.get(stop.key)
+    if (last !== undefined) turns.set(stop.key, last)
   }
   return turns
 }
@@ -484,10 +545,9 @@ function useAxisRotations(
  * last axis to the first. Kept where it was while nothing is lit.
  */
 function useLitTurn() {
-  const chart = useChart()
   const radar = useRadar()
   const { spotlit } = useChartActive()
-  const key = spotlit === null ? undefined : chart.current[spotlit]?.key
+  const key = spotlit === null ? undefined : radar.current[spotlit]?.key
   const target = key === undefined ? undefined : radar.turns.get(key)
   const [turn, setTurn] = useState(target ?? 0)
   const next = target === undefined ? turn : nearestTurn(turn, target)
@@ -545,7 +605,7 @@ function Radar({
   style,
   ...props
 }: RadarProps) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radar = useRadar()
   const { spotlit } = useChartActive()
   const lit = useLitTurn()
@@ -553,7 +613,7 @@ function Radar({
   const fromRest = useFromRest(spotlit)
   const id = useId().replaceAll(':', '')
   const hidden = chart.hidden.includes(dataKey)
-  const rising = !chart.entered && radar.entrance === 'rise'
+  const rising = !radar.entered && radar.entrance === 'rise'
   // While the chart loads, the shape folds into the placeholder's and fades, and grows back
   // out of it when the data arrives.
   const loading = chart.status === 'loading'
@@ -597,12 +657,12 @@ function Radar({
   // series is brought forward. Brought forward itself, it stays bright all round.
   const windowAt = emphasised ? null : spotlit
   const stepsBack = windowAt !== null || otherEmphasised
-  const count = Math.max(1, chart.current.length)
+  const count = Math.max(1, radar.current.length)
   const { width, height } = drawingSize(chart.plotSize)
   const frame = drawingFrame(chart.plotSize, 'xMidYMid meet')
   const viewBox = `0 0 ${round(width)} ${round(height)}`
   const d = outlinePath(to, centre.x, centre.y, edge)
-  const points = chart.status === 'ready' && !hidden && dots ? chart.current : []
+  const points = chart.status === 'ready' && !hidden && dots ? radar.current : []
 
   const shape = (copy: 'stepped' | 'bright', part: 'fill' | 'outline') => {
     const at = (copy === 'bright' ? 1 : 0) + (part === 'fill' ? 2 : 0)
@@ -776,7 +836,7 @@ function Radar({
  * in place after a rest, and fade where they are when the pointer leaves.
  */
 function RadarLitMarks() {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radar = useRadar()
   const { spotlit } = useChartActive()
   const lit = useLitTurn()
@@ -786,8 +846,8 @@ function RadarLitMarks() {
   const [last, setLast] = useState(spotlit)
   if (spotlit !== null && spotlit !== last) setLast(spotlit)
   const shownAt = spotlit ?? last
-  const category = shownAt === null ? undefined : chart.current[shownAt]
-  if (chart.status !== 'ready' || !category || !chart.entered) return null
+  const category = shownAt === null ? undefined : radar.current[shownAt]
+  if (chart.status !== 'ready' || !category || !radar.entered) return null
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
   const snap = fromRest ? '' : undefined
   return (
@@ -854,23 +914,23 @@ function RadarGrid({
   /** Draws a spoke from the centre out to each axis. */
   spokes?: boolean
 }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radar = useRadar()
   const { spotlit } = useChartActive()
   const lit = useLitTurn()
   const layer = useRef<HTMLDivElement>(null)
   const litSpoke = useRef<SVGLineElement>(null)
   const fromRest = useFromRest(spotlit)
-  const ticks = useTicks(chart.frame.y.value.scale)
+  const ticks = useTicks(radar.scale)
   const framePath = useRef<SVGPathElement>(null)
   const id = useId().replaceAll(':', '')
   const { edge, centre } = radar
   const ready = chart.status === 'ready' || chart.status === 'hidden'
   const polygon = shape === 'polygon' && ready
   const outline = polygon
-    ? chart.current.map((category) => ({
-        key: category.key,
-        turn: radar.turns.get(category.key) ?? 0,
+    ? radar.current.map((stop) => ({
+        key: stop.key,
+        turn: radar.turns.get(stop.key) ?? 0,
         r: 1,
       }))
     : []
@@ -883,7 +943,7 @@ function RadarGrid({
     `${round(edge)}:${round(centre.x)}:${round(centre.y)}`,
   )
   const { width, height } = drawingSize(chart.plotSize)
-  const { scale, previous: previousScale } = chart.frame.y.value
+  const { scale, previous: previousScale } = radar
   const line =
     'fill-none stroke-border [stroke-dasharray:3_3] [stroke-width:1px] [vector-effect:non-scaling-stroke] forced-colors:stroke-[GrayText]'
   const turning =
@@ -936,7 +996,7 @@ function RadarGrid({
             )
           })}
           {spokes &&
-            chart.categories.map((category) => (
+            radar.stops.map((category) => (
               <line
                 key={category.key}
                 data-leaving={category.leaving ? '' : undefined}
@@ -980,44 +1040,31 @@ function RadarGrid({
 const tickTurn =
   'transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-easing),var(--motion-layout-fade-easing)] group-data-mounted/chart:transition-[transform,opacity] group-data-mounted/chart:starting:[transform:scale(var(--ring-from))] group-data-mounted/chart:starting:opacity-0 data-leaving:opacity-0 motion-reduce:group-data-mounted/chart:transition-[opacity]'
 
+interface RadarAxisProps extends Omit<ComponentProps<'div'>, 'children'> {
+  /** How each axis is named; the chart's `categoryFormat` by default. */
+  categoryFormat?: (value: unknown) => string
+}
+
 /**
  * Each axis's name, outside the outer ring at its turn, against it and
  * upright, wrapping when it is long, with room kept for it inside the
  * chart's own box. The name of the axis lit sits in the pill, which slides
  * from name to name as the axis lit changes.
  */
-function RadarAxis({
-  categoryFormat,
-  className,
-  ...props
-}: Omit<ComponentProps<'div'>, 'children'> & {
-  /** How each axis is named; the chart's `categoryFormat` by default. */
-  categoryFormat?: (value: unknown) => string
-}) {
-  const chart = useChart()
+function RadarAxis(props: RadarAxisProps) {
+  const { categoryFormat, className, ...rest } = props
+  useDeclared('RadarAxis', RadarAxis.declare(props), radarSignature)
+  const chart = useChartRootValue()
   const radar = useRadar()
   const { spotlit } = useChartActive()
-  const { addNames } = radar
   const pill = useRef<HTMLSpanElement>(null)
   const names = useRef(new Map<string, HTMLElement>())
-  const write = categoryFormat ?? chart.categoryText
+  const write = categoryFormat ?? radar.nameText
   const measured = chart.plotSize.width > 0 && chart.plotSize.height > 0
   const { width, height } = drawingSize(chart.plotSize)
   // Long names wrap, narrower until neighbours stop meeting, and the grid makes room for them.
-  const { boxes, room, hidden } = fitNamesOn(
-    namesToFit(chart, radar.turns, write),
-    chart.plotSize,
-    chart.textWidth(' '),
-  )
-  const signature = [...boxes]
-    .map(([key, box]) => `${key}:${box.width}:${box.height}`)
-    .join('|')
-  useLayoutEffect(
-    () => addNames({ axes: axesOf(chart.categories), room, boxes }),
-    // The boxes are compared by their signature.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [addNames, room, signature, axesOf(chart.categories)],
-  )
+  const boxes = radar.names?.boxes
+  const hidden = radar.names?.hidden
   const highlight = useRef<Highlight | null>(null)
   useEffect(() => {
     const element = pill.current
@@ -1030,12 +1077,12 @@ function RadarAxis({
     }
   }, [])
   useEffect(() => {
-    const key = spotlit === null ? undefined : chart.current[spotlit]?.key
+    const key = spotlit === null ? undefined : radar.current[spotlit]?.key
     const item = key === undefined ? null : (names.current.get(key) ?? null)
     // An axis lit as the chart first paints, such as a pick, has the pill there at once.
     if (item && !item.closest('[data-mounted]')) highlight.current?.jump(item)
     else highlight.current?.move(item)
-  }, [spotlit, chart, radar.edge])
+  }, [spotlit, radar, radar.edge])
   const ready = chart.status === 'ready'
   // Before the plot is measured, the names sit round the stand-in the chart is drawn in.
   const stretch = measured ? null : 1 / Math.min(width, height)
@@ -1045,9 +1092,9 @@ function RadarAxis({
   const layer = (copy: boolean) => (
     <span className='absolute inset-0 [container-type:size]'>
       {ready &&
-        chart.categories.map((category) => {
+        radar.stops.map((category) => {
           const turn = radar.rotations.get(category.key) ?? 0
-          const box = boxes.get(category.key)
+          const box = boxes?.get(category.key)
           const sin = Math.sin(turn * Math.PI * 2)
           return (
             <RadialLabel
@@ -1068,7 +1115,7 @@ function RadarAxis({
               radius={radar.edge + NAME_GAP}
               stretch={stretch}
               // A name with no room shows only in the pill, which is above the rest.
-              shown={!category.leaving && (copy || !hidden.has(category.key))}
+              shown={!category.leaving && (copy || !hidden?.has(category.key))}
               dir='auto'
               className='rounded-(--control-radius-xs) px-1.5 py-0.5 text-balance'
               style={{
@@ -1088,7 +1135,7 @@ function RadarAxis({
       data-slot='radar-chart-axis'
       aria-hidden
       className={cn(plotLayerClassName, 'text-muted-foreground z-20', className)}
-      {...props}
+      {...rest}
     >
       {layer(false)}
       <span
@@ -1105,6 +1152,10 @@ function RadarAxis({
   )
 }
 
+RadarAxis.declare = ({ categoryFormat }: RadarAxisProps): RadarPartDeclaration => ({
+  names: { format: categoryFormat ?? null },
+})
+
 /**
  * The value axis: each ring's value up the top spoke, sliding to its ring's
  * new place when the range changes. Axes on scales of their own share no
@@ -1118,10 +1169,10 @@ function RadarValueAxis({
   /** How the values are written; the chart's `format`, shortened, by default. */
   format?: ChartFormat
 }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radar = useRadar()
   const layer = useRef<HTMLDivElement>(null)
-  const all = useTicks(chart.frame.y.value.scale)
+  const all = useTicks(radar.scale)
   const own = chart.format
   const write = formatterOf(
     chart.locale,
@@ -1145,7 +1196,7 @@ function RadarValueAxis({
       {...props}
     >
       {ticks.map(({ value: tick, leaving }) =>
-        chart.frame.y.value.scale.place(tick) <= 0 && !leaving ? null : (
+        radar.scale.place(tick) <= 0 && !leaving ? null : (
           <span
             key={tick}
             data-leaving={leaving ? '' : undefined}
@@ -1157,8 +1208,8 @@ function RadarValueAxis({
             style={
               {
                 left: `${round((centre.x / width) * 100)}%`,
-                '--tick-to': place(tick, chart.frame.y.value.scale),
-                '--tick-from': place(tick, chart.frame.y.value.previous),
+                '--tick-to': place(tick, radar.scale),
+                '--tick-from': place(tick, radar.previous),
               } as CSSProperties
             }
           >
@@ -1175,7 +1226,7 @@ function RadarValueAxis({
  * slowly, which the shapes grow out of when the data arrives.
  */
 function RadarPlaceholder() {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radar = useRadar()
   const { width, height } = drawingSize(chart.plotSize)
   const { edge, centre } = radar
@@ -1236,14 +1287,6 @@ function RadarPlaceholder() {
   )
 }
 
-/** The axes the chart names, as a key. */
-function axesOf(categories: readonly ChartCategory[]) {
-  return categories
-    .filter((category) => !category.leaving)
-    .map((category) => category.key)
-    .join('\u0000')
-}
-
 /** About a radar's plot, in px, to fit its names against before the plot is measured. */
 const TYPICAL_PLOT = 320
 
@@ -1267,20 +1310,21 @@ function fitNamesOn(
   }
 }
 
-/** The chart's axes' names to fit round it, written by `write`. */
+/** The axes' names to fit round the chart, written by `write`, each word `textWidth` px wide. */
 function namesToFit(
-  chart: Pick<ChartContextValue, 'categories' | 'textWidth'>,
+  stops: readonly ListChartStop[],
   turns: ReadonlyMap<string, number>,
   write: (value: unknown) => string,
+  textWidth: (text: string) => number,
 ): NameToFit[] {
-  return chart.categories.map((category) => ({
-    key: category.key,
-    turn: turns.get(category.key) ?? 0,
-    words: write(category.value)
+  return stops.map((stop) => ({
+    key: stop.key,
+    turn: turns.get(stop.key) ?? 0,
+    words: write(stop.value)
       .split(/\s+/)
       .filter(Boolean)
-      .map((word) => chart.textWidth(word)),
-    shown: !category.leaving,
+      .map((word) => textWidth(word)),
+    shown: !stop.leaving,
   }))
 }
 
@@ -1549,8 +1593,10 @@ export {
   outlineAt,
   outlinePath,
   outlineRadius,
+  namesToFit,
   Radar,
   RadarAxis,
+  type RadarAxisProps,
   RadarChart,
   type RadarChartProps,
   RadarGrid,
@@ -1558,6 +1604,8 @@ export {
   RadarValueAxis,
   type RadarVertex,
   radarExtent,
+  radarFit,
+  type RadarPartDeclaration,
   stepOutward,
   thinTicks,
   wrapWords,

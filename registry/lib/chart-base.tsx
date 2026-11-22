@@ -8,6 +8,7 @@ import {
   type ChartMark,
   type ChartOrientation,
   numberOf,
+  rangeOf,
   type ReadingDirection,
   type XYValue,
 } from '@/registry/lib/chart-math'
@@ -860,6 +861,14 @@ interface SeriesWordsInput {
   own: { name: string; text: (item: ChartItem) => string } | null
 }
 
+/** Anything under a series' key as `write` writes a number: a number, a `[from, to]` range, or `noValue` for none. */
+function writeDatum(value: unknown, write: (value: number) => string, noValue: string) {
+  const range = rangeOf(value)
+  if (range) return `${write(range[0])} – ${write(range[1])}`
+  const number = numberOf(value)
+  return number === null ? noValue : write(number)
+}
+
 /** What a reader says of its stops: to a screen reader, in the tooltip, and as the data table. */
 interface ChartWords {
   describe: (item: ChartItem) => string
@@ -1208,6 +1217,7 @@ export {
   ChartTooltipTotal,
   type ChartWords,
   checkSeries,
+  writeDatum,
   type DeclaringPart,
   type EntrancePhase,
   figureProps,

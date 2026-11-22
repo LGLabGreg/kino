@@ -12,6 +12,7 @@ import {
   ChartPartsContext,
   chartParts,
   checkSeries,
+  writeDatum,
   IndexActive,
   isForecast,
   localeTag,
@@ -53,7 +54,6 @@ import {
   nearestPoint,
   numberOf,
   pointRank,
-  rangeOf,
   type ReadingDirection,
   sliderValue,
   type Span,
@@ -174,8 +174,6 @@ interface ChartContextValue extends ChartRootState {
   /** The categories still in the data, in order. */
   current: readonly ChartCategory[]
   orientation: ChartOrientation
-  /** Drawn round a centre, clockwise from the top in either reading direction. */
-  round: boolean
   stack: ChartStack
   frame: ChartFrame
   /**
@@ -496,13 +494,12 @@ function categoryReader(
           return at(index, chart.stepSeries(index, series, key === 'ArrowUp' ? -1 : 1))
         }
         // Points placed by two values step by x along it, and by y up and down; cells step
-        // by column along it, and by row up and down. Round the circle, Right steps
-        // clockwise, the way the marks run, as they aren't mirrored in right to left.
+        // by column along it, and by row up and down.
         const next = points
           ? stepPoint(points, index, key, direction)
           : grid
             ? stepCell(grid.cells, index, key, direction)
-            : stepIndex(key, index, count, orientation, chart.round ? 'ltr' : direction)
+            : stepIndex(key, index, count, orientation, direction)
         if (next === null) return null
         if (points) setAlong(keyAxis(key))
         return at(next, series)
@@ -693,8 +690,6 @@ interface CategoryRowOptions {
 interface CategoryLayout {
   orientation: ChartOrientation
   stack: ChartStack
-  /** Drawn round a centre, clockwise in either reading direction, so the arrows step the way it runs. */
-  round?: boolean
   /**
    * The px kept clear inside the plot's edges, on both axes, for marks drawn
    * around a point, such as a scatter's bubbles; none by default.
@@ -792,12 +787,8 @@ function useCategoryValue(
   const keys = current.map((category) => category.key)
   const pick = useChartPick(props, keys)
 
-  const textOf = (value: unknown, write: (value: number) => string) => {
-    const range = rangeOf(value)
-    if (range) return `${write(range[0])} – ${write(range[1])}`
-    const number = numberOf(value)
-    return number === null ? messages.noValue : write(number)
-  }
+  const textOf = (value: unknown, write: (value: number) => string) =>
+    writeDatum(value, write, messages.noValue)
   const datumText = (value: unknown) => textOf(value, valueText)
   // A series reads in its value axis's own format, where it has one.
   const writers = new Map<string, (value: number) => string>()
@@ -815,7 +806,6 @@ function useCategoryValue(
     categories,
     current,
     orientation: options.orientation,
-    round: options.round ?? false,
     stack: options.stack,
     frame,
     xyOf,

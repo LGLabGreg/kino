@@ -3,6 +3,7 @@
 import {
   type CategoryChartProps,
   figureProps,
+  pickedName,
   shareColor,
   ShareTooltipContent,
   useChartActive,
@@ -10,13 +11,17 @@ import {
 } from '@/registry/lib/chart-base'
 import { ChartCentreText } from '@/registry/lib/chart-centre'
 import {
-  type CategoryChartInput,
-  CategoryChartFrame,
-  type ChartCategory,
-  useCategoryChart,
-  useChart,
-} from '@/registry/lib/chart-core'
-import { type ChartDatum, type ChartPattern, numberOf } from '@/registry/lib/chart-math'
+  ListChartFrame,
+  type ListChartStop,
+  useListChart,
+} from '@/registry/lib/chart-list'
+import { listReader } from '@/registry/lib/chart-list-reader'
+import {
+  allWhole,
+  type ChartDatum,
+  type ChartPattern,
+  numberOf,
+} from '@/registry/lib/chart-math'
 import {
   fitRound,
   outerPoint,
@@ -38,8 +43,9 @@ import {
   ChartSvgPattern,
   forcedSeriesTextColor,
   plotLayerClassName,
+  useChartRootValue,
 } from '@/registry/lib/chart-root'
-import { bandAt, linearScale } from '@/registry/lib/chart-scale'
+import { linearScale } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
 import {
   placeholderBreatheClassName,
@@ -103,7 +109,7 @@ interface RadialChartProps extends Omit<
 
 /** A ring as the chart draws it. */
 interface RadialRing {
-  category: ChartCategory
+  category: ListChartStop
   band: RingBand
   value: number
   /** The ring's top: its `maxKey`'s value, or the domain's end. */
@@ -125,6 +131,10 @@ interface RadialRing {
 type RadialPart = 'needle' | 'range' | 'centre'
 
 interface RadialContextValue {
+  /** Every ring's stop, a leaving one's too, in the chart's fixed order. */
+  stops: readonly ListChartStop[]
+  /** A ring's name, as the chart writes it, from its value under the chart's `index`. */
+  nameText: (value: unknown) => string
   /** Every ring, a leaving one too, outermost first. */
   rings: readonly RadialRing[]
   /** Each ring still in the data's, by its place among them. */
@@ -367,7 +377,7 @@ function RadialChart(props: RadialChartProps) {
     ref,
   } = props
   registerRadialProperties()
-  const { chart, placeholder, phase } = useCategoryChart(
+  const chart = useListChart(
     {
       ...props,
       // A ring is named by its config's label, as its legend entry is.
@@ -377,7 +387,6 @@ function RadialChart(props: RadialChartProps) {
           const named = props.config[String(value)]?.label
           return typeof named === 'string' ? named : String(value)
         }),
-      domain: domain ?? [0, 'auto'],
       messages: {
         series: 'Rings',
         empty: 'No data yet',
@@ -386,17 +395,16 @@ function RadialChart(props: RadialChartProps) {
         ...messages,
       },
     },
-    {
-      orientation: 'vertical',
-      stack: 'none',
-      entrance: entrance !== 'none',
-      nice: false,
-      seriesOfRow: (row) => String(row[props.index]),
-      bandOf: (at, count) => bandAt(at, count),
-      // Rounded out here, once, so the top never changes with the plot's size.
-      measure: (rows) => ({ extent: [0, radialTop(rows, dataKey)] as const }),
-    },
+    { entrance: entrance !== 'none', rowsAreSeries: true },
   )
+  const { state, stopText } = chart
+  // Rounded out here, once, so the top never changes with the plot's size.
+  const scale = linearScale([0, radialTop(chart.drawn, dataKey)], {
+    domain: domain ?? [0, 'auto'],
+    tickCount: 5,
+    nice: false,
+    allowDecimals: !allWhole(chart.rows, chart.shown),
+  })
   const parts = useRegistry<RadialPart>()
   // The parts among its own children are known from the first render, as on the server's
   // first paint; any deeper one joins once it mounts.
@@ -416,13 +424,13 @@ function RadialChart(props: RadialChartProps) {
   const laps = sweep.size >= 1
   const inner = Math.min(
     0.95,
-    Math.max(0, innerRadius ?? defaultInnerRadius(chart.series.length)),
+    Math.max(0, innerRadius ?? defaultInnerRadius(state.series.length)),
   )
   const needle = has('needle')
   const range = has('range') && !laps
   const centrePlace = centrePlaceOf(sweep, inner, needle)
-  const [min, max] = chart.frame.y.value.scale.domain
-  const endText = (value: number) => chart.textWidth(chart.valueText(value))
+  const [min, max] = scale.domain
+  const endText = (value: number) => state.textWidth(state.valueText(value))
   const marks: RoundMark[] = sweepMarks(sweep, inner)
   if (needle) marks.push({ x: 0, y: 0, left: HUB, right: HUB, up: HUB, down: HUB })
   if (needle && has('centre')) {
@@ -442,24 +450,24 @@ function RadialChart(props: RadialChartProps) {
       })
     }
   }
-  const measured = chart.plotSize.width > 0 && chart.plotSize.height > 0
+  const measured = state.plotSize.width > 0 && state.plotSize.height > 0
   // Before the plot is measured, the chart is drawn at a stand-in radius, in a box as large
   // as what it reaches there, which the drawing is fitted to the plot from.
-  const drawn = measured ? chart.plotSize : standInSize(marks)
+  const drawn = measured ? state.plotSize : standInSize(marks)
   const fit = fitRound(drawn.width, drawn.height, marks)
   const radius = fit.radius
   const centre = { x: fit.x, y: fit.y }
   const hole = radius * inner
 
   // Outermost first, in the data's order; a leaving ring keeps the place it had.
-  const order = ringOrder(chart.categories)
+  const order = ringOrder(chart.stops)
   const bandList = ringBandsOf(
     radius,
     hole,
-    order.map((category) => !category.leaving),
+    order.map((stop) => !stop.leaving),
     RING_GAP,
   )
-  const bands = new Map(order.map((category, at) => [category.key, bandList[at]!]))
+  const bands = new Map(order.map((stop, at) => [stop.key, bandList[at]!]))
   const notchesOf = (top: number) =>
     [low, high].flatMap((mark) =>
       mark === undefined ? [] : [ringFraction(mark, min, top, false)],
@@ -467,20 +475,20 @@ function RadialChart(props: RadialChartProps) {
   // A top the reader knows: each ring's own, or a domain's end they set.
   const ownTop = maxKey !== undefined || typeof domain?.[1] === 'number'
   const total = order.reduce(
-    (sum, category) =>
-      category.leaving ? sum : sum + Math.max(0, numberOf(category.datum[dataKey]) ?? 0),
+    (sum, stop) =>
+      stop.leaving ? sum : sum + Math.max(0, numberOf(stop.datum[dataKey]) ?? 0),
     0,
   )
-  const rings: RadialRing[] = order.map((category) => {
-    const value = numberOf(category.datum[dataKey])
-    const top = maxKey === undefined ? max : (numberOf(category.datum[maxKey]) ?? 0)
+  const rings: RadialRing[] = order.map((stop) => {
+    const value = numberOf(stop.datum[dataKey])
+    const top = maxKey === undefined ? max : (numberOf(stop.datum[maxKey]) ?? 0)
     const fraction = ringFraction(value, min, top, laps)
     return {
-      category,
-      band: bands.get(category.key) ?? { inner: 0, outer: 0 },
+      category: stop,
+      band: bands.get(stop.key) ?? { inner: 0, outer: 0 },
       value: value ?? 0,
       top,
-      fraction: chart.entered && !category.leaving ? fraction : 0,
+      fraction: chart.entered && !stop.leaving ? fraction : 0,
       share: !value
         ? 0
         : ownTop
@@ -496,24 +504,33 @@ function RadialChart(props: RadialChartProps) {
       notches: notchesOf(top),
     }
   })
-  const current = chart.current.map((category) =>
-    rings.find((ring) => ring.category.key === category.key)!,
+  const current = chart.current.map((stop) =>
+    rings.find((ring) => ring.category.key === stop.key)!,
   )
-  const percent = numberFormatter(chart.locale, {
+  const percent = numberFormatter(state.locale, {
     style: 'percent',
     maximumFractionDigits: 0,
   })
-  const label = valueLabel ?? chart.messages.value
+  const label = valueLabel ?? state.messages.value
   const amountText = (ring: RadialRing) =>
     maxKey === undefined
-      ? chart.valueText(ring.value)
-      : chart.messages.outOf(chart.valueText(ring.value), chart.valueText(ring.top))
-
-  const full: CategoryChartInput = {
-    ...chart,
+      ? state.valueText(ring.value)
+      : state.messages.outOf(state.valueText(ring.value), state.valueText(ring.top))
+  const reader = listReader({
+    current: chart.current,
+    walk: { kind: 'straight', orientation: 'vertical' },
+    series: { kind: 'none' },
+    direction: state.direction,
+    hit: (point) =>
+      ringAt(
+        point.x - centre.x,
+        point.y - centre.y,
+        current.map((ring) => ring.band),
+        sweep,
+      ),
     // The tooltip sits past the outer ring, where the ring's value ends.
-    pointOf: (at) => {
-      const ring = current[at]
+    anchor: (stop) => {
+      const ring = current[stop.index]
       if (!ring || !measured) return null
       return outerPoint(
         endTurn(ring.fraction, sweep),
@@ -523,51 +540,52 @@ function RadialChart(props: RadialChartProps) {
         centre,
       )
     },
-    pickAt: (point, box) =>
-      ringAt(
-        point.x - box.left - centre.x,
-        point.y - box.top - centre.y,
-        current.map((ring) => ring.band),
-        sweep,
-      ),
-    seriesText: (category) => {
-      const ring = current.find((each) => each.category.key === category.key)
-      return ring ? amountText(ring) : chart.messages.noValue
-    },
-    describe: (at) => {
-      const ring = current[at]
-      return ring ? `${amountText(ring)}, ${percent.format(ring.share)}` : ''
-    },
-    table: {
-      columns: [label, chart.messages.share],
-      cells: (category) => {
-        const ring = current.find((each) => each.category.key === category.key)
-        return ring ? [amountText(ring), percent.format(ring.share)] : []
+    words: {
+      describe: (stop) => {
+        const ring = current[stop.index]
+        const name = pickedName(
+          stopText(stop.value),
+          chart.picked === stop.key,
+          state.messages,
+        )
+        return `${name}: ${ring ? `${amountText(ring)}, ${percent.format(ring.share)}` : ''}`
+      },
+      tooltip: (stop) => {
+        const ring = current[stop.index]
+        if (!ring) return null
+        return (
+          <ShareTooltipContent
+            chart={state}
+            category={ring.category}
+            name={stopText(ring.category.value)}
+            rows={[
+              {
+                label: null,
+                value: amountText(ring),
+                share: percent.format(ring.share),
+              },
+            ]}
+          />
+        )
+      },
+      table: {
+        header: state.messages.category,
+        columns: [label, state.messages.share],
+        rows: current.map((ring) => ({
+          key: ring.category.key,
+          name: stopText(ring.category.value),
+          cells: [amountText(ring), percent.format(ring.share)],
+        })),
+        footer: [],
       },
     },
-    tooltipContent: (at) => {
-      const ring = current[at]
-      if (!ring) return null
-      return (
-        <ShareTooltipContent
-          chart={chart}
-          category={ring.category}
-          name={chart.categoryText(ring.category.value)}
-          rows={[
-            {
-              label: null,
-              value: amountText(ring),
-              share: percent.format(ring.share),
-            },
-          ]}
-        />
-      )
-    },
-  }
+  })
 
   return (
     <RadialContext
       value={{
+        stops: chart.stops,
+        nameText: stopText,
         rings,
         current,
         sweep,
@@ -581,18 +599,20 @@ function RadialChart(props: RadialChartProps) {
         laps,
         addPart: parts.add,
         valueLabel: label,
-        entering: phase === 'entering',
+        entering: chart.entering,
       }}
     >
-      <CategoryChartFrame
-        chart={full}
+      <ListChartFrame
+        chart={chart}
+        reader={reader}
         ref={ref}
         slot='radial-chart'
         description={description}
         empty={empty}
+        measuring={false}
         className={className}
         placeholder={
-          placeholder ? (
+          chart.placeholder ? (
             <RadialTracks slot='radial-chart-placeholder' breathe />
           ) : (
             (chart.status === 'empty' || chart.status === 'hidden') && (
@@ -604,7 +624,7 @@ function RadialChart(props: RadialChartProps) {
       >
         <RadialRings />
         {children}
-      </CategoryChartFrame>
+      </ListChartFrame>
     </RadialContext>
   )
 }
@@ -647,7 +667,7 @@ function RadialSvg({ children }: { children: ReactNode }) {
 
 /** The rings, each in its category's colour, the one under the pointer or the keys bright. */
 function RadialRings() {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const radial = useRadial()
   if (chart.status === 'empty' || chart.status === 'loading') return null
@@ -662,7 +682,7 @@ function RadialRings() {
          * In the chart's fixed order, not the rings' from the outside in: an element moved in
          * the page starts again with no transition, so a ring that leaves would vanish.
          */}
-        {inPageOrder(chart.categories, radial.rings).map((ring) => {
+        {inPageOrder(radial.stops, radial.rings).map((ring) => {
           const { category } = ring
           const slot = chart.series.indexOf(category.key)
           const lit = spotlit === category.index && !category.leaving
@@ -914,7 +934,7 @@ const RingShape = memo(function RingShape({
  * nothing to draw, so it keeps its shape.
  */
 function RadialTracks({ slot, breathe = false }: { slot: string; breathe?: boolean }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radial = useRadial()
   const bands = ringBandsOf(
     radial.radius,
@@ -964,7 +984,7 @@ function RadialTracks({ slot, breathe = false }: { slot: string; breathe?: boole
 }
 
 /** The rings in the chart's fixed order, which sorting or hiding them doesn't change. */
-function inPageOrder(categories: readonly ChartCategory[], rings: readonly RadialRing[]) {
+function inPageOrder(categories: readonly ListChartStop[], rings: readonly RadialRing[]) {
   return categories.flatMap((category) => {
     const ring = rings.find((each) => each.category.key === category.key)
     return ring ? [ring] : []
@@ -999,7 +1019,7 @@ function RadialChartCentre({
   content?: 'value' | 'share'
 }) {
   useRadialPart('centre')
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const radial = useRadial()
   if (chart.status !== 'ready') return null
@@ -1009,8 +1029,8 @@ function RadialChartCentre({
   const own = !lit && value !== undefined
   const shown = own ? value : content === 'share' ? ring.share : ring.value
   const caption = lit
-    ? chart.categoryText(lit.category.value)
-    : (label ?? (own ? radial.valueLabel : chart.categoryText(ring.category.value)))
+    ? radial.nameText(lit.category.value)
+    : (label ?? (own ? radial.valueLabel : radial.nameText(ring.category.value)))
   const format =
     content === 'share' && !own
       ? ({ style: 'percent', maximumFractionDigits: 0 } as const)
@@ -1064,7 +1084,7 @@ function RadialChartNeedle({
   ...props
 }: Omit<ComponentProps<'div'>, 'children'>) {
   useRadialPart('needle')
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radial = useRadial()
   const ring = radial.current[0]
   if (chart.status !== 'ready' || !ring) return null
@@ -1115,7 +1135,7 @@ function RadialChartRange({
   ...props
 }: Omit<ComponentProps<'div'>, 'children'>) {
   useRadialPart('range')
-  const chart = useChart()
+  const chart = useChartRootValue()
   const radial = useRadial()
   if (chart.status !== 'ready' || radial.laps) return null
   const outer = radial.radius
@@ -1176,7 +1196,7 @@ function RadialChartLabels({
   /** What each label writes: the ring's name, its value, its share, or your own words. */
   content?: 'name' | 'value' | 'share' | ((ring: RadialLabelRing) => string)
 }) {
-  const chart = useChart()
+  const chart = useChartRootValue()
   const { spotlit } = useChartActive()
   const radial = useRadial()
   if (chart.status !== 'ready') return null
@@ -1187,7 +1207,7 @@ function RadialChartLabels({
   const textOf = (ring: RadialRing) => {
     const named: RadialLabelRing = {
       key: ring.category.key,
-      name: chart.categoryText(ring.category.value),
+      name: radial.nameText(ring.category.value),
       value: ring.value,
       share: ring.share,
     }
@@ -1214,7 +1234,7 @@ function RadialChartLabels({
       style={{ ...placeStyle(radial), ...style }}
       {...props}
     >
-      {inPageOrder(chart.categories, radial.rings).map((ring) => {
+      {inPageOrder(radial.stops, radial.rings).map((ring) => {
         const at = radial.rings.indexOf(ring)
         const width = chart.textWidth(textOf(ring))
         const box = startLabelBox(
