@@ -1176,7 +1176,6 @@ function RadarValueAxis({
   const chart = useChartRootValue()
   const radar = useRadar()
   const layer = useRef<HTMLDivElement>(null)
-  const all = useTicks(radar.scale)
   const own = chart.format
   const write = formatterOf(
     chart.locale,
@@ -1185,6 +1184,7 @@ function RadarValueAxis({
         ? own
         : { maximumFractionDigits: 1, ...own, notation: 'compact' }),
   )
+  const all = useTicks(radar.scale, undefined, write)
   if (radar.ownScales) return null
   const ticks = chart.status === 'ready' ? all : []
   const { edge, centre } = radar
@@ -1199,7 +1199,7 @@ function RadarValueAxis({
       className={cn(plotLayerClassName, 'text-foreground z-20 tabular-nums', className)}
       {...props}
     >
-      {ticks.map(({ value: tick, leaving }) =>
+      {ticks.map(({ value: tick, text, leaving }) =>
         radar.scale.place(tick) <= 0 && !leaving ? null : (
           <span
             key={tick}
@@ -1217,7 +1217,7 @@ function RadarValueAxis({
               } as CSSProperties
             }
           >
-            {write(tick)}
+            {text}
           </span>
         ),
       )}

@@ -52,10 +52,13 @@ type CartesianBrowse =
   /** Bar, Line, Area, Composed, Funnel: every series at a stop. */
   | { kind: 'x' }
   /**
-   * Bump: one series at a stop, picked by the pointer, and stepped with Up
-   * and Down. `seriesAt`'s point is in fractions of the plot from its
-   * reading start and its top; `step` is the series a step up (-1) or down
-   * (1) from `from` at the stop at `stop`, or null.
+   * Bump, a Bar chart with ribbons: one series at a stop, picked by the
+   * pointer, and stepped with the arrows along the value axis, Up and Down
+   * on an upright chart, and on a lying one the arrows along reading order,
+   * which leave Up and Down to the stops. `seriesAt`'s point is in fractions
+   * of the plot from its reading start and its top; `step` is the series a
+   * step toward the value axis's end (-1: up, or on along reading order) or
+   * back (1) from `from` at the stop at `stop`, or null.
    */
   | {
       kind: 'x-series'
@@ -89,6 +92,25 @@ interface CartesianReaderInput {
   start: 'first' | 'last'
   series: readonly string[]
   hidden: readonly string[]
+}
+
+/**
+ * The step along the value axis a key asks for: -1 toward its end, 1 back
+ * toward its start, or null for a key that steps the stops: Up and Down on
+ * an upright chart, the arrows along reading order on a lying one.
+ */
+function valueStep(
+  key: string,
+  orientation: ChartOrientation,
+  direction: ReadingDirection,
+): -1 | 1 | null {
+  const [toEnd, back] =
+    orientation === 'vertical'
+      ? ['ArrowUp', 'ArrowDown']
+      : direction === 'rtl'
+        ? ['ArrowLeft', 'ArrowRight']
+        : ['ArrowRight', 'ArrowLeft']
+  return key === toEnd ? -1 : key === back ? 1 : null
 }
 
 /** Where a stop with no shown value sits among points, so the keys still reach it. */
@@ -167,8 +189,10 @@ function cartesianReader(input: CartesianReaderInput): ChartReader {
         const index = indexOf(from)
         if (index === null) return null
         const series = targetSeries(from)
-        if (browse.kind === 'x-series' && (key === 'ArrowUp' || key === 'ArrowDown')) {
-          return at(index, browse.step(index, series, key === 'ArrowUp' ? -1 : 1))
+        const along =
+          browse.kind === 'x-series' ? valueStep(key, orientation, direction) : null
+        if (browse.kind === 'x-series' && along !== null) {
+          return at(index, browse.step(index, series, along))
         }
         if (browse.kind === 'points' && values) {
           // Points step by x along it, and by y up and down.

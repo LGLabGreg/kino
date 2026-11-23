@@ -268,20 +268,31 @@ function stickTo(side: 'start' | 'end', direction: ReadingDirection) {
 }
 
 /**
- * The ticks to draw, `drawn` or `scale`'s own, and, until the move their
- * range changed in has ended, every one drawn before that the scale no
- * longer has, which fades as it slides toward where the new scale puts it,
- * so the change of range shows. A tick still fading in when the range turns
- * back fades out from where it is. In value order, so no tick's element
- * moves in the page, which would make it jump.
+ * The ticks to draw, `drawn` or `scale`'s own, each with its text as `write`
+ * gives it, and, until the move their range changed in has ended, every one
+ * drawn before that the scale no longer has, which fades as it slides toward
+ * where the new scale puts it, so the change of range shows. A tick leaving
+ * keeps the text it was written with, so a change of format, such as counts
+ * to shares, never rewrites it on its way out. A tick still fading in when
+ * the range turns back fades out from where it is. In value order, so no
+ * tick's element moves in the page, which would make it jump.
  */
-function useTicks(scale: { ticks: readonly number[] } | null, drawn?: readonly number[]) {
+function useTicks(
+  scale: { ticks: readonly number[] } | null,
+  drawn?: readonly number[],
+  write?: (value: number) => string,
+) {
   const ticks = drawn ?? scale?.ticks ?? NO_TICKS
-  const leaving = useLeaving(useChartMoves(), ticks, String)
+  const written = ticks.map((value) => ({ value, text: write?.(value) ?? '' }))
+  const leaving = useLeaving(useChartMoves(), written, tickKey)
   return [
-    ...ticks.map((value) => ({ value, leaving: false })),
-    ...leaving.map((value) => ({ value, leaving: true })),
+    ...written.map((tick) => ({ ...tick, leaving: false })),
+    ...leaving.map((tick) => ({ ...tick, leaving: true })),
   ].toSorted((a, b) => a.value - b.value)
+}
+
+function tickKey(tick: { value: number }) {
+  return String(tick.value)
 }
 
 const NO_TICKS: readonly number[] = []

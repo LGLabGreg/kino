@@ -964,6 +964,8 @@ type Draw = (progress: number, done: boolean) => void
 
 interface Follower {
   role: MoveRole
+  /** The share of its role's duration it runs for: less than 1 when it turns back mid-move. */
+  share: number
   draw: Draw
   clock: Animation | null
   stopped: boolean
@@ -990,11 +992,16 @@ interface ChartMoves {
    */
   request: (span?: number, travels?: boolean) => Promise<void>
   /**
-   * Draws with this commit's run, on `role`'s timing: `draw` gets each
-   * frame's progress, then 1 and `done`. Where motion is reduced it gets 1
-   * at once, since travel goes. Stopped, it draws no more.
+   * Draws with this commit's run, on `role`'s timing over `share` of its
+   * duration: `draw` gets each frame's progress, then 1 and `done`. Where
+   * motion is reduced it gets 1 at once, since travel goes. Stopped, it
+   * draws no more.
    */
-  follow: (role: MoveRole, draw: Draw) => { run: MoveRun; stop: () => void }
+  follow: (
+    role: MoveRole,
+    draw: Draw,
+    share: number,
+  ) => { run: MoveRun; stop: () => void }
 }
 
 function createChartMoves(figure: RefObject<HTMLElement | null>): ChartMoves {
@@ -1015,8 +1022,8 @@ function createChartMoves(figure: RefObject<HTMLElement | null>): ChartMoves {
       run.span = Math.max(run.span, span)
       return new Promise((resolve) => run.ends.push({ resolve, travels }))
     },
-    follow: (role, draw) => {
-      const follower: Follower = { role, draw, clock: null, stopped: false }
+    follow: (role, draw, share) => {
+      const follower: Follower = { role, share, draw, clock: null, stopped: false }
       queue().followers.push(follower)
       return {
         run: {
@@ -1061,13 +1068,18 @@ function createChartMoves(figure: RefObject<HTMLElement | null>): ChartMoves {
         () => undefined,
       )
     } else end(true)
-    const clocks = new Map<MoveRole, Animation | null>()
+    const clocks = new Map<string, Animation | null>()
     for (const follower of followers) {
-      if (!clocks.has(follower.role)) {
+      const key = `${follower.role} ${follower.share}`
+      if (!clocks.has(key)) {
         const timing = reduced ? null : roleTiming(style, follower.role)
-        clocks.set(follower.role, timing && playClock(element, timing))
+        clocks.set(
+          key,
+          timing &&
+            playClock(element, { ...timing, duration: timing.duration * follower.share }),
+        )
       }
-      follower.clock = clocks.get(follower.role) ?? null
+      follower.clock = clocks.get(key) ?? null
     }
     const frame = () => {
       let moving = false
@@ -1156,6 +1168,10 @@ function usePointsMove<Point, Moves>(
   const state = useRef<{
     moves: Moves
     to: readonly Point[]
+    signature: string
+    /** The points the move left, by their signature, and the share of its role it runs for. */
+    from: string
+    share: number
     run: MoveRun | null
   } | null>(null)
   const mounting = useRef(true)
@@ -1183,16 +1199,39 @@ function usePointsMove<Point, Moves>(
     // A chart that loads with its data shows its points where they are, with no move, until it
     // has painted: the value axis may still settle on its ticks as the page hydrates.
     if (atMount || !root.current?.closest('[data-mounted]')) {
-      state.current = { moves: matched, to, run: null }
+      state.current = {
+        moves: matched,
+        to,
+        signature,
+        from: signature,
+        share: 1,
+        run: null,
+      }
       latest.current.draw(to, false)
       return
     }
-    const { run, stop } = moves.follow(role, (progress, done) =>
-      done
-        ? latest.current.draw(to, false)
-        : latest.current.draw(latest.current.at(matched, progress), true),
+    // Turned back to where a move set out from, it takes as long as it has come, as a CSS
+    // transition does, so it keeps pace with the marks CSS moves.
+    const share =
+      was?.run?.running() && was.from === signature
+        ? reversedShare(was.run.progress(), was.share)
+        : 1
+    const { run, stop } = moves.follow(
+      role,
+      (progress, done) =>
+        done
+          ? latest.current.draw(to, false)
+          : latest.current.draw(latest.current.at(matched, progress), true),
+      share,
     )
-    state.current = { moves: matched, to, run }
+    state.current = {
+      moves: matched,
+      to,
+      signature,
+      from: was?.signature ?? signature,
+      share,
+      run,
+    }
     return stop
     // The points are compared by their signature, so a new array of the same points moves nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1205,6 +1244,15 @@ function usePointsMove<Point, Moves>(
     else latest.current.draw(to, false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [redraw])
+}
+
+/**
+ * The share of its role's duration a move turned back to where it set out
+ * runs for, as CSS shortens a reversed transition: how far the move it turns
+ * from had come, on its easing, with that move's own share.
+ */
+function reversedShare(progress: number, share: number) {
+  return Math.min(1, Math.max(0, Math.abs(progress * share + 1 - share)))
 }
 
 /**
@@ -1952,6 +2000,7 @@ export {
   swatchStyle,
   tooltipQuietClassName,
   tooltipTriggerId,
+  reversedShare,
   useBefore,
   useChartFocus,
   useChartGroup,
@@ -1962,4 +2011,5 @@ export {
   useFromRest,
   useLeaving,
   usePointsMove,
+  useSize,
 }

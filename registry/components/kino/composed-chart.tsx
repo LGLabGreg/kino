@@ -172,6 +172,7 @@ function ComposedChart(props: ComposedChartProps) {
         cascade: stops.map((_, at) => cascadeAt(at, stops.length, 'start')),
         cascadeSpan: 'var(--composed-chart-cascade, 0.6)',
         barGap,
+        lights: 'stop',
       }}
     >
       <LineFamilyFrame

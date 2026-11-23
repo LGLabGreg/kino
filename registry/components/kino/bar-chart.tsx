@@ -11,6 +11,7 @@ import {
   runningTotals,
 } from '@/registry/lib/chart-bar-marks'
 import {
+  barAcross,
   barClip,
   BarFrameContext,
   type BarFrameValue,
@@ -22,10 +23,19 @@ import {
   labelFits,
   labelPlace,
   missingMark,
+  NO_TUCK,
   outsideRoom,
   PLACEHOLDER_COUNT,
   placeholderClip,
   placeholderValues,
+  RIBBON_TUCK,
+  ribbonEnds,
+  type RibbonLayout,
+  ribbonClipPath,
+  ribbonsOf,
+  type RibbonTuck,
+  type StackMarks,
+  stackSeriesAt,
   trackClip,
   useBarFrame,
 } from '@/registry/lib/chart-bars'
@@ -36,6 +46,7 @@ import {
   seriesWords,
   useChartActive,
   useDeclared,
+  useLeavingItems,
 } from '@/registry/lib/chart-base'
 import {
   CartesianChartFrame,
@@ -51,7 +62,7 @@ import {
   useCartesian,
   useCartesianChart,
 } from '@/registry/lib/chart-cartesian'
-import { markLayer, VALUE_AXIS } from '@/registry/lib/chart-frame'
+import { type CartesianModel, markLayer, VALUE_AXIS } from '@/registry/lib/chart-frame'
 import {
   type ChartLive,
   ChartLiveLayer,
@@ -65,11 +76,16 @@ import {
   numberOf,
   plotPoint,
   rangeOf,
+  type ReadingDirection,
   type Span,
+  stacksOf,
+  stepThrough,
 } from '@/registry/lib/chart-math'
 import {
   type ChartFormat,
   type ChartItem,
+  type ChartMoves,
+  type ChartPoint,
   type ChartRootState,
   forcedSeriesColor,
   formatterOf,
@@ -78,6 +94,9 @@ import {
   seriesColor,
   swatchClassName,
   tooltipQuietClassName,
+  useBefore,
+  useChartMoves,
+  useSize,
 } from '@/registry/lib/chart-root'
 import type { BandGaps } from '@/registry/lib/chart-scale'
 import { numberFormatter } from '@/registry/lib/number-format'
@@ -86,6 +105,8 @@ import {
   createContext,
   type CSSProperties,
   use,
+  useLayoutEffect,
+  useRef,
   useState,
 } from 'react'
 
@@ -121,6 +142,13 @@ interface BarChartProps extends CartesianChartProps {
   /** How each category's series combine: side by side, stacked, or stacked as shares of their total. */
   stack?: ChartStack
   /**
+   * Joins each series' bar in one stack to its bar in the next with a soft
+   * ribbon, so its share reads across them, such as a country's cars from
+   * one year to the next. For one stack, `stacked` or `expand`; the stops
+   * then run in order, so the tooltip gives each change since the one before.
+   */
+  ribbons?: boolean
+  /**
    * How the bars arrive the first time the chart comes into view: all
    * rising together, rising one after another, or simply there, the
    * default, since a page that loads doesn't animate into place.
@@ -146,6 +174,7 @@ const barChartKeys = [
   'totals',
   'orientation',
   'stack',
+  'ribbons',
   'entrance',
   'cascadeFrom',
   'categoryGap',
@@ -171,6 +200,7 @@ function BarChart(props: BarChartProps) {
     totals,
     orientation = 'vertical',
     stack = 'none',
+    ribbons = false,
     entrance = 'none',
     cascadeFrom = 'start',
     categoryGap,
@@ -192,26 +222,35 @@ function BarChart(props: BarChartProps) {
       'A bridge builds from its first step, as it reads: leave out `cascadeFrom`.',
     )
   }
+  if (ribbons) ribbonsAllowed(stack, props)
   const kind = isTotal ? bridgeMarks(isTotal) : barMarks
   // A bridge's bars start one after another, each as the one before has nearly landed, so none
   // hangs in the air before the bar it starts from.
   const cascadeFallback = isTotal
     ? Math.min(BRIDGE_STEP_WAIT * Math.max(0, props.data.length - 1), BRIDGE_CASCADE_MOST)
     : 0.8
-  const cartesian = useCartesianChart(props, {
-    kinds: [kind],
-    orientation,
-    stack,
-    entrance: entrance !== 'none',
-    cascade:
-      entrance === 'cascade'
-        ? { variable: '--bar-chart-cascade', fallback: cascadeFallback }
-        : undefined,
-    gaps,
-  })
+  // Ribbons join stops in order, so each one's change since the one before means something.
+  const cartesian = useCartesianChart(
+    { ...props, ordered: props.ordered ?? ribbons },
+    {
+      kinds: [kind],
+      orientation,
+      stack,
+      entrance: entrance !== 'none',
+      cascade:
+        entrance === 'cascade'
+          ? { variable: '--bar-chart-cascade', fallback: cascadeFallback }
+          : undefined,
+      gaps,
+    },
+  )
   const { chart, model, placeholder, fromPlaceholder, phase } = cartesian
   const stops = chart.current
   const bridge = useBridge(chart, isTotal, totals ?? [])
+  // The bars' greatest thickness, `--bar-chart-max-thickness`, measured where the chart is.
+  const capProbe = useRef<HTMLDivElement>(null)
+  const capSize = useSize(capProbe)
+  if (ribbons) oneStack(chart, model)
   // The cascade's order reads the bars against the chart's own value axis.
   const shown = totalled(chart).filter(model.totals)
   const reaches = stops.map((_, at) => farEnd(model.spans, shown, at))
@@ -235,19 +274,31 @@ function BarChart(props: BarChartProps) {
         text: (stop: ChartItem) => (stop.datum ? describe.text(stop.datum) : ''),
       }
     : null
+  const bar: BarFrameValue = {
+    model,
+    kind,
+    phase,
+    fromPlaceholder,
+    entrance,
+    cascade,
+    cascadeSpan: `var(--bar-chart-cascade, ${cascadeFallback})`,
+    barGap,
+    lights: ribbons ? 'series' : 'stop',
+  }
+  const across: RibbonLayout = {
+    orientation,
+    direction: chart.direction,
+    cap: capOf(capSize.width, chart.plotSize, orientation),
+  }
+  const words = bridge
+    ? bridgeWords(chart, bridge)
+    : seriesWords(chart, {
+        ...cartesianWords(chart, own),
+        // With ribbons, the series the keys bring forward is read out alone, so Up and Down are heard.
+        alone: ribbons ? chart.emphasis : null,
+      })
   return (
-    <BarFrameContext
-      value={{
-        model,
-        kind,
-        phase,
-        fromPlaceholder,
-        entrance,
-        cascade,
-        cascadeSpan: `var(--bar-chart-cascade, ${cascadeFallback})`,
-        barGap,
-      }}
-    >
+    <BarFrameContext value={bar}>
       <CartesianChartFrame
         chart={cartesian}
         ref={ref}
@@ -258,7 +309,10 @@ function BarChart(props: BarChartProps) {
         placeholder={placeholder && <BarPlaceholder chart={chart} />}
         markerOf={noMarker}
         // The tooltip sits on the far end of the stop's bars: the tallest, or the stack's top.
-        anchor={(stop) => {
+        anchor={(stop, series) => {
+          const lit =
+            series === null ? null : segmentAnchor(chart, bar, stop, series, across)
+          if (lit) return lit
           const along = chart.entered ? model.reach(stop.index) : null
           return plotPoint(
             stop.band,
@@ -267,18 +321,407 @@ function BarChart(props: BarChartProps) {
             chart.direction,
           )
         }}
-        words={
-          bridge
-            ? bridgeWords(chart, bridge)
-            : seriesWords(chart, cartesianWords(chart, own))
+        words={words}
+        browse={
+          ribbons
+            ? {
+                kind: 'x-series',
+                seriesAt: (point) =>
+                  stackSeriesAt(
+                    stackMarks(chart, bar, across),
+                    pointAcross(point, orientation, chart.direction),
+                    across,
+                  ),
+                step: (at, from, step) =>
+                  stepThrough(segmentsOutward(chart, bar, at), from, step),
+              }
+            : X_BROWSE
         }
-        browse={X_BROWSE}
         {...figureProps(props, barChartKeys)}
       >
+        {/* The bars' greatest thickness, measured, for where the pointer lands on a stack with
+        ribbons and where its tooltip sits. Always there, so ribbons turned on later find it measured. */}
+        <div
+          ref={capProbe}
+          aria-hidden
+          className='invisible absolute h-0 w-(--bar-chart-max-thickness,4rem)'
+        />
+        {ribbons && <BarRibbons layout={across} />}
         <BridgeContext value={bridge}>{children}</BridgeContext>
       </CartesianChartFrame>
     </BarFrameContext>
   )
+}
+
+/* Ribbons. */
+
+/** Throws on a chart ribbons can't join: one whose bars stand side by side. */
+function ribbonsAllowed(stack: ChartStack, props: object) {
+  if (stack === 'none') {
+    throw new Error(
+      "Ribbons join each series from one stack to the next: give `stack='stacked'` or `stack='expand'` too.",
+    )
+  }
+  // A bar chart's type has no window of time, but a chart written in JavaScript can pass one.
+  const { window, live } = props as { window?: number; live?: boolean }
+  if (window !== undefined || live) {
+    throw new Error(
+      'Ribbons join stacks that stand still: leave out `window` and `live`.',
+    )
+  }
+}
+
+/** Throws when the bars stand in more than one stack, whose ribbons would cross each other. */
+function oneStack(chart: CartesianChartValue, model: CartesianModel) {
+  const bars = chart.series.filter((key) => model.markOf(key) === 'bar')
+  if (stacksOf(bars, model.stackOf).length > 1) {
+    throw new Error(
+      'Ribbons join one stack across the categories: give every `Bar` the same `stack` and axis in the config, and no rows of its own.',
+    )
+  }
+}
+
+/** The bars' greatest thickness, `px`, as a share of the plot across the categories; no cap before either is measured. */
+function capOf(
+  px: number,
+  plot: { width: number; height: number },
+  orientation: ChartOrientation,
+) {
+  const across = orientation === 'vertical' ? plot.width : plot.height
+  return px > 0 && across > 0 ? px / across : Number.POSITIVE_INFINITY
+}
+
+/**
+ * A point the pointer is on, from the reading start and the top as the
+ * reader hands it, as the ribbons read it: across the categories from the
+ * physical left (upright) or the top (lying), and along the value axis.
+ */
+function pointAcross(
+  point: { x: number; y: number },
+  orientation: ChartOrientation,
+  direction: ReadingDirection,
+) {
+  return orientation === 'vertical'
+    ? {
+        across: direction === 'rtl' ? 1 - point.x : point.x,
+        along: 1 - point.y,
+      }
+    : { across: point.y, along: point.x }
+}
+
+/** The part of a category's band the bar of `key` at `stop` takes, beside the chart's other stacks. */
+function bandOf(
+  chart: CartesianChartValue,
+  bar: BarFrameValue,
+  stop: CartesianStop,
+  key: string,
+) {
+  return barBand(
+    stop.band,
+    key,
+    chart.series.filter((k) => bar.model.markOf(k) === 'bar'),
+    chart.hidden,
+    chart.stack,
+    bar.model.stackOf,
+    bar.barGap,
+    (k) => chart.rowOf(k, stop) !== null,
+  )
+}
+
+/**
+ * Where the bar of `key` at `stop` stands once risen: a hidden series' where
+ * it would stack, so its ribbons collapse with it; null with no value.
+ */
+function standingPlace(
+  chart: CartesianChartValue,
+  bar: BarFrameValue,
+  stop: CartesianStop,
+  key: string,
+): BarPlace | null {
+  const span = bar.model.spans[key]?.[stop.index]
+  if (!span) return null
+  const { scale } = bar.model.valueAxisOf(key)
+  return {
+    band: bandOf(chart, bar, stop, key),
+    from: scale.place(span[0]),
+    to: scale.place(span[1]),
+  }
+}
+
+/** One series' ribbon from the stack at `from` to the next, by their keys, and where its two bars stand. */
+interface Ribbon {
+  key: string
+  series: string
+  from: string
+  to: string
+  start: BarPlace
+  end: BarPlace
+  /** Whether its bar at each end is the outermost of its stack, whose far corners are rounded. */
+  outer: readonly [boolean, boolean]
+}
+
+/** The chart's ribbons between its stops, each where its bars stand, a hidden series' collapsed. */
+function ribbonsAt(chart: CartesianChartValue, bar: BarFrameValue): Ribbon[] {
+  const stops = chart.current
+  const bars = chart.series.filter((key) => bar.model.markOf(key) === 'bar')
+  return ribbonsOf(bars, stops.length, (key, at) => {
+    const stop = stops[at]
+    return stop ? chart.valueOf(key, stop) : null
+  }).flatMap((pair) => {
+    const from = stops[pair.from]
+    const to = stops[pair.to]
+    const start = from && standingPlace(chart, bar, from, pair.series)
+    const end = to && standingPlace(chart, bar, to, pair.series)
+    if (!from || !to || !start || !end) return []
+    return [
+      {
+        key: `${pair.series}\u0000${from.key}\u0000${to.key}`,
+        series: pair.series,
+        from: from.key,
+        to: to.key,
+        start,
+        end,
+        outer: [
+          isOutermost(chart, bar, from, pair.series),
+          isOutermost(chart, bar, to, pair.series),
+        ] as const,
+      },
+    ]
+  })
+}
+
+/** The bars and ribbons the pointer can land on: the shown series' only, once the bars have risen. */
+function stackMarks(
+  chart: CartesianChartValue,
+  bar: BarFrameValue,
+  layout: RibbonLayout,
+): StackMarks {
+  if (!chart.entered) return { bars: [], ribbons: [] }
+  const shown = (key: string) => !chart.hidden.includes(key)
+  return {
+    bars: chart.current.flatMap((stop) =>
+      chart.series.filter(shown).flatMap((series) => {
+        const place = standingPlace(chart, bar, stop, series)
+        return place ? [{ series, place }] : []
+      }),
+    ),
+    ribbons: ribbonsAt(chart, bar)
+      .filter((ribbon) => shown(ribbon.series))
+      .map((ribbon) => ({
+        series: ribbon.series,
+        ends: ribbonEnds(ribbon.start, ribbon.end, layout),
+      })),
+  }
+}
+
+/** The shown series with a bar at the stop at `index`, the one furthest along the value axis first, as they stand. */
+function segmentsOutward(chart: CartesianChartValue, bar: BarFrameValue, index: number) {
+  const stop = chart.current[index]
+  if (!stop) return []
+  return chart.series
+    .filter((key) => !chart.hidden.includes(key))
+    .flatMap((key) => {
+      const place = standingPlace(chart, bar, stop, key)
+      return place ? [{ key, middle: (place.from + place.to) / 2 }] : []
+    })
+    .toSorted((a, b) => b.middle - a.middle)
+    .map(({ key }) => key)
+}
+
+/**
+ * Where the tooltip of a lit series sits on its bar at `stop`: beside it at
+ * its middle, upright, or above it, lying, so it covers none of the stack;
+ * null where the series has no bar.
+ */
+function segmentAnchor(
+  chart: CartesianChartValue,
+  bar: BarFrameValue,
+  stop: CartesianStop,
+  series: string,
+  layout: RibbonLayout,
+): ChartPoint | null {
+  const place = chart.entered ? standingPlace(chart, bar, stop, series) : null
+  if (!place) return null
+  const { centre, half } = barAcross(place, layout)
+  const middle = (place.from + place.to) / 2
+  if (layout.orientation === 'vertical') {
+    return {
+      x: centre + (layout.direction === 'rtl' ? -half : half),
+      y: 1 - middle,
+      side: 'inline-end',
+    }
+  }
+  return {
+    x: layout.direction === 'rtl' ? 1 - middle : middle,
+    y: centre - half,
+    side: 'top',
+  }
+}
+
+/** Where a ribbon's draw along its length starts: at the stack it leaves, or at the one it meets. */
+function wipeFrom(
+  origin: 'from' | 'to',
+  orientation: ChartOrientation,
+  direction: ReadingDirection,
+) {
+  // The clip that hides all but the side it grows from, as `inset()` sides: top, right, bottom, left.
+  const start =
+    orientation === 'vertical' ? (direction === 'rtl' ? 'right' : 'left') : 'top'
+  const side = origin === 'from' ? start : OPPOSITE[start]
+  const sides = { top: '0', right: '0', bottom: '0', left: '0' }
+  sides[OPPOSITE[side]] = '100%'
+  return `inset(${sides.top} ${sides.right} ${sides.bottom} ${sides.left})`
+}
+
+const OPPOSITE = {
+  top: 'bottom',
+  bottom: 'top',
+  left: 'right',
+  right: 'left',
+} as const
+
+/**
+ * The columns that stand still: those there before the last change to `keys`
+ * while it moves, and all of them once its move has ended, so a ribbon to a
+ * column that arrived runs on under its bars from then.
+ */
+function useStood(moves: ChartMoves, keys: readonly string[]) {
+  const joined = keys.join('\u0000')
+  const before = useBefore(keys, joined)
+  const [settled, setSettled] = useState(joined)
+  useLayoutEffect(() => {
+    if (settled === joined) return
+    let live = true
+    void moves.request().then(() => {
+      if (live) setSettled(joined)
+    })
+    return () => {
+      live = false
+    }
+  }, [moves, joined, settled])
+  return settled === joined ? keys : before
+}
+/**
+ * The ribbons: a layer under the bars, each series' ribbons in its colour,
+ * faint, brighter while its series is lit and stepping back with its bars.
+ * Each is a clip of the plot that moves on the same transition as the bars'
+ * clips, so it lands with them and turns back with them; a new one draws
+ * along its length from the stack that stood before, and one that leaves
+ * fades where it was.
+ */
+function BarRibbons({ layout }: { layout: RibbonLayout }) {
+  const chart = useCartesian()
+  const bar = useBarFrame()
+  const moves = useChartMoves()
+  const ready = chart.status === 'ready'
+  // Each time the data comes back, such as after a reload, its ribbons are new elements, so one
+  // still fading out draws in again with its stacks rather than coming back where it stood.
+  const [arrival, setArrival] = useState({ ready, count: 0 })
+  if (arrival.ready !== ready) {
+    setArrival({ ready, count: arrival.count + (ready ? 1 : 0) })
+  }
+  const ribbons = ready
+    ? ribbonsAt(chart, bar).map((ribbon) => ({ ...ribbon, arrival: arrival.count }))
+    : NO_RIBBONS
+  // In key order, current and leaving alike, so no ribbon's element moves in the page, which
+  // would restart its wipe and drop its fade.
+  const drawn = useLeavingItems(moves, ribbons, ribbonKey)
+  const keys = chart.current.map((stop) => stop.key)
+  const stood = useStood(moves, keys)
+  const at = new Map(chart.current.map((stop) => [stop.key, stop.index]))
+  const { orientation, direction } = layout
+  const entrance = bar.phase !== 'settled' && bar.entrance !== 'none'
+  // A ribbon runs on under its bars, and behind an outermost bar's rounded corner, which it
+  // fills; one that leaves stops at their edges, since its bars go without it.
+  const tuck = (outer: boolean, leaving: boolean): RibbonTuck =>
+    leaving ? NO_TUCK : { share: RIBBON_TUCK, corner: outer }
+  return (
+    <div
+      data-slot='bar-chart-ribbons'
+      aria-hidden
+      // Under the bars, which cover the ends of their ribbons. Only where a browser can draw a
+      // ribbon's shape: elsewhere its unclipped layer would cover the plot.
+      className={cn(
+        plotLayerClassName,
+        'z-7 hidden supports-[clip-path:shape(from_0_0,line_to_1px_1px)]:block',
+      )}
+    >
+      {chart.series.map((series) => {
+        const own = drawn.filter((ribbon) => ribbon.series === series)
+        if (own.length === 0) return null
+        const lit = chart.emphasis === series
+        return (
+          <div
+            key={series}
+            data-series={series}
+            data-lit={lit ? '' : undefined}
+            data-dim={chart.emphasis !== null && !lit ? '' : undefined}
+            className='absolute inset-0 opacity-(--bar-chart-ribbon,0.24) transition-none [--ribbon-fill:var(--bar-color)] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-mounted/chart:transition-opacity data-dim:opacity-[calc(var(--bar-chart-ribbon,0.24)*0.6)] data-dim:[--ribbon-fill:oklch(from_var(--bar-color)_l_calc(c*var(--bar-chart-dim,0.3))_h)] data-lit:opacity-[calc(var(--bar-chart-ribbon,0.24)*2)]'
+            style={{ '--bar-color': seriesColor(series) } as CSSProperties}
+          >
+            {own.map((ribbon) => {
+              const fresh = !stood.includes(ribbon.from) || !stood.includes(ribbon.to)
+              const later = at.get(ribbon.to) ?? 0
+              // On the entrance, a ribbon waits for its later stack to rise; a new one, for a
+              // new stack to grow.
+              const wait = entrance
+                ? `calc(var(--motion-draw-duration) * ${bar.entrance === 'cascade' ? `(${bar.cascadeSpan} * ${bar.cascade[later] ?? 0} + 1)` : 1})`
+                : fresh
+                  ? 'var(--motion-layout-duration)'
+                  : '0s'
+              const leaving = Boolean(ribbon.leaving)
+              return (
+                <div
+                  key={`${ribbon.key}\u0000${ribbon.arrival}`}
+                  data-waiting={bar.phase === 'waiting' ? '' : undefined}
+                  data-leaving={leaving ? '' : undefined}
+                  className='absolute inset-0 [clip-path:inset(0)] transition-none group-data-mounted/chart:[transition:clip-path_var(--motion-draw-duration)_var(--motion-draw-easing)_var(--ribbon-wait),opacity_var(--motion-exit-duration)_var(--motion-exit-fade-easing)] group-data-mounted/chart:starting:[clip-path:var(--ribbon-hidden)] data-leaving:opacity-0 data-waiting:[clip-path:var(--ribbon-hidden)] motion-reduce:group-data-mounted/chart:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-fade-easing)]'
+                  style={
+                    {
+                      '--ribbon-hidden': wipeFrom(
+                        stood.includes(ribbon.from) || !stood.includes(ribbon.to)
+                          ? 'from'
+                          : 'to',
+                        orientation,
+                        direction,
+                      ),
+                      '--ribbon-wait': wait,
+                    } as CSSProperties
+                  }
+                >
+                  <div
+                    data-entering={bar.phase === 'entering' ? '' : undefined}
+                    className='absolute inset-0 bg-(--ribbon-fill) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:var(--ribbon-clip)] group-data-mounted/chart:transition-[background-color,clip-path] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:group-data-mounted/chart:transition-[background-color] forced-colors:bg-[GrayText]'
+                    style={
+                      {
+                        // A variable, as the bars' clip is, so the two read alike.
+                        '--ribbon-clip': ribbonClipPath(
+                          ribbon.start,
+                          ribbon.end,
+                          layout,
+                          [
+                            tuck(ribbon.outer[0], leaving),
+                            tuck(ribbon.outer[1], leaving),
+                          ],
+                        ),
+                      } as CSSProperties
+                    }
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** No ribbons, each as drawn: with the count of the data's arrival it came with. */
+const NO_RIBBONS: readonly (Ribbon & { arrival: number })[] = []
+
+function ribbonKey(ribbon: Ribbon) {
+  return ribbon.key
 }
 
 /* The bridge. */
@@ -509,17 +952,7 @@ function barPlace(
   bridge: BridgeValue | null,
 ): BarPlace {
   const { model } = bar
-  const bars = chart.series.filter((k) => model.markOf(k) === 'bar')
-  const band = barBand(
-    stop.band,
-    key,
-    bars,
-    chart.hidden,
-    chart.stack,
-    model.stackOf,
-    bar.barGap,
-    (k) => chart.rowOf(k, stop) !== null,
-  )
+  const band = bandOf(chart, bar, stop, key)
   const { scale, baseline: zero } = model.valueAxisOf(key)
   if (bridge) {
     // A step folds into where it starts: the running total before it.
@@ -647,8 +1080,9 @@ function Bar(props: BarProps) {
       : undefined
   const images = [pattern, gradient].filter(Boolean).join(', ')
   const live = chart.frame.live
+  // A stop lit steps the others back, unless the pointer lights a series across every stop.
   const dimmed = (stop: CartesianStop) =>
-    (spotlit !== null && spotlit !== stop.index) ||
+    (bar.lights === 'stop' && spotlit !== null && spotlit !== stop.index) ||
     (chart.emphasis !== null && chart.emphasis !== dataKey)
   return (
     <>
@@ -936,7 +1370,7 @@ function BarTotals(props: BarTotalsProps) {
               !stop.leaving &&
               labelFits(chart, place, write(total), 'outside')
             }
-            dim={spotlit !== null && spotlit !== stop.index}
+            dim={bar.lights === 'stop' && spotlit !== null && spotlit !== stop.index}
           >
             {chart.stack === 'expand' ? '' : write(total)}
           </BarLabel>,
@@ -999,4 +1433,5 @@ export {
   type BarProps,
   BarTotals,
   bridgeTotals,
+  ribbonsAllowed,
 }

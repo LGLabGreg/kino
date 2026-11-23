@@ -739,7 +739,7 @@ function NameSlide({
       return
     }
     write(0)
-    const { run, stop } = moves.follow('layout', write)
+    const { run, stop } = moves.follow('layout', write, 1)
     glide.current = { from: shown, to: at, run, stop }
   }, [at, moves])
   useLayoutEffect(() => () => glide.current.stop(), [])

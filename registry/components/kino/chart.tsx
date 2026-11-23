@@ -386,15 +386,8 @@ function ValueAxis({
   const frame = numberAxis({ frame: chartFrame }, axis)
   const across = side === 'start' || side === 'end'
   const ladder = frame && tickLadder(frame.scale, tickSpacing[across ? 'y' : 'x'])
-  const all = useTicks(frame?.scale ?? null, ladder?.ticks)
-  if (!frame || !ladder) {
-    throw new Error(
-      `The chart has no value axis \`${axis}\`: no series in its config names it.`,
-    )
-  }
-  const { scale, previous } = frame
   // The axis's own format, shortened, or the chart's.
-  const own = frame.format ?? chart.format
+  const own = frame?.format ?? chart.format
   const write = formatterOf(
     locale,
     format ??
@@ -410,6 +403,13 @@ function ValueAxis({
               notation: 'compact',
             }),
   )
+  const all = useTicks(frame?.scale ?? null, ladder?.ticks, write)
+  if (!frame || !ladder) {
+    throw new Error(
+      `The chart has no value axis \`${axis}\`: no series in its config names it.`,
+    )
+  }
+  const { scale, previous } = frame
   const layer = useRef<HTMLSpanElement>(null)
   // Beside another value axis, one that holds a single series is titled with it and its key, so
   // which axis reads which series never rests on colour.
@@ -422,7 +422,7 @@ function ValueAxis({
       ? onAxis[0]
       : undefined
   const title = label ?? frame.label ?? (keyed && (chart.config[keyed]?.label ?? keyed))
-  const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [write(tick.value)]))
+  const texts = ticks.flatMap((tick) => (tick.leaving ? [] : [tick.text]))
   return (
     <AxisFrame
       side={side}
@@ -473,7 +473,7 @@ function ValueAxis({
               line={across ? 'y' : 'x'}
             />
           )}
-          {ticks.map(({ value: tick, leaving }) => (
+          {ticks.map(({ value: tick, text, leaving }) => (
             <span
               key={tick}
               data-leaving={leaving ? '' : undefined}
@@ -504,7 +504,7 @@ function ValueAxis({
                         : 'translate-x-[min(-50%,calc(var(--chart-inset,0px)-100%))]'),
                 )}
               >
-                {write(tick)}
+                {text}
               </span>
             </span>
           ))}
@@ -544,7 +544,7 @@ function TimeAxis({
     typeof own === 'function' ? own : (time: number) => timeTickLabel(time, locale, zone)
   const tickWidth = (tick: number) => textWidth(write(tick))
   const ladder = frame && timeLadder(frame.scale, tickWidth, TIME_TICK_GAP)
-  const all = useTicks(frame?.scale ?? null, ladder?.ticks)
+  const all = useTicks(frame?.scale ?? null, ladder?.ticks, write)
   const { current, spotlit, format: categoryText } = useAxisNames(names)
   const ref = useRef<HTMLDivElement>(null)
   const pill = useRef<HTMLSpanElement>(null)
@@ -672,7 +672,7 @@ function TimeAxis({
                 line='x'
               />
             )}
-            {ticks.map(({ value: tick, leaving }) => {
+            {ticks.map(({ value: tick, text, leaving }) => {
               // A tick that leaves stays kept inside the axis as it was, rather than jumping to
               // where its place past the end would keep it.
               const place = physical((leaving ? previous : scale).place(tick))
@@ -707,7 +707,7 @@ function TimeAxis({
                         : `clamp(${-place * 100}cqw, -50%, ${(1 - place) * 100}cqw - 100%) 0`,
                     }}
                   >
-                    {write(tick)}
+                    {text}
                   </span>
                 </span>
               )
