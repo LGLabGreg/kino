@@ -6,6 +6,7 @@ import {
   type CodeLanguage,
   type CodeToken,
   highlightCode,
+  holdColours,
   lineSet,
   plainTokens,
 } from '@/registry/lib/syntax'
@@ -34,7 +35,7 @@ type LineMark = 'highlighted' | 'added' | 'removed'
 interface CodeFile {
   /** The tab's value; the title or the language when not given. */
   value?: string
-  /** A file name, such as `button.tsx`, or a package manager. */
+  /** A file name, such as `button.tsx`, or a package manager. Without one, the header names the language, such as TypeScript, with no file icon. */
   title?: string
   /** What a screen reader calls the code, when the title doesn't set it apart from other code on the page. */
   label?: string
@@ -74,6 +75,9 @@ function fileValue(file: CodeFile) {
 /**
  * `code` as coloured lines. It is plain lines until the colours have loaded,
  * so the text is there on the first paint and nothing moves when they arrive.
+ * When the code changes, as it does while it streams in, the lines that
+ * haven't changed keep their colours until the new ones land, and one
+ * highlight runs at a time, the next taking the code as it is by then.
  * `tokens` worked out ahead, on a server, skip the loading.
  */
 function useCodeTokens(
@@ -82,23 +86,43 @@ function useCodeTokens(
   tokens?: CodeToken[][],
 ): CodeToken[][] {
   const plain = useMemo(() => plainTokens(code), [code])
-  const [loaded, setLoaded] = useState<{ key: string; lines: CodeToken[][] }>()
-  const key = `${language}\n${code}`
+  const [loaded, setLoaded] = useState<{
+    code: string
+    language: CodeLanguage
+    lines: CodeToken[][]
+  }>()
+  const latest = useRef({ code, language })
+  const running = useRef(false)
+  const mounted = useRef(true)
 
   useEffect(() => {
-    if (tokens) return
-    let active = true
-    void highlightCode(code, language).then(
-      (lines) => active && setLoaded({ key, lines }),
-      () => {},
-    )
+    mounted.current = true
     return () => {
-      active = false
+      mounted.current = false
     }
-  }, [code, language, key, tokens])
+  }, [])
 
+  useEffect(() => {
+    latest.current = { code, language }
+    if (tokens || running.current) return
+    running.current = true
+    void (async () => {
+      let done: { code: string; language: CodeLanguage } | undefined
+      while (mounted.current && latest.current !== done) {
+        done = latest.current
+        const lines = await highlightCode(done.code, done.language).catch(() => undefined)
+        if (lines && mounted.current) setLoaded({ ...done, lines })
+      }
+      running.current = false
+    })()
+  }, [code, language, tokens])
+
+  const held = useMemo(
+    () => holdColours(plain, loaded?.language === language ? loaded.lines : undefined),
+    [plain, loaded, language],
+  )
   if (tokens) return tokens
-  return loaded?.key === key ? loaded.lines : plain
+  return loaded?.code === code && loaded.language === language ? loaded.lines : held
 }
 
 /** The mark of each line, by number from 1. A removed or added mark wins over a highlight. */

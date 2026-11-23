@@ -16,8 +16,62 @@ export interface CodeToken {
   italic?: boolean
 }
 
-/** A language shiki knows, by its name or alias (`tsx`, `bash`, `sh`), or plain `text`. */
-export type CodeLanguage = Exclude<BundledLanguage, 'ansi'> | 'text'
+/**
+ * A language by its name or alias (`tsx`, `bash`, `sh`), or plain `text`.
+ * Any other, such as a Markdown fence's `mermaid`, shows as plain text.
+ */
+export type CodeLanguage = Exclude<BundledLanguage, 'ansi'> | 'text' | (string & {})
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  bash: 'Bash',
+  c: 'C',
+  cpp: 'C++',
+  csharp: 'C#',
+  cs: 'C#',
+  css: 'CSS',
+  diff: 'Diff',
+  dockerfile: 'Dockerfile',
+  go: 'Go',
+  graphql: 'GraphQL',
+  html: 'HTML',
+  java: 'Java',
+  javascript: 'JavaScript',
+  js: 'JavaScript',
+  json: 'JSON',
+  jsonc: 'JSON',
+  jsx: 'JSX',
+  kotlin: 'Kotlin',
+  markdown: 'Markdown',
+  md: 'Markdown',
+  mdx: 'MDX',
+  php: 'PHP',
+  python: 'Python',
+  py: 'Python',
+  ruby: 'Ruby',
+  rb: 'Ruby',
+  rust: 'Rust',
+  rs: 'Rust',
+  scss: 'SCSS',
+  sh: 'Shell',
+  shell: 'Shell',
+  shellscript: 'Shell',
+  sql: 'SQL',
+  swift: 'Swift',
+  text: 'Plain text',
+  toml: 'TOML',
+  ts: 'TypeScript',
+  tsx: 'TSX',
+  typescript: 'TypeScript',
+  xml: 'XML',
+  yaml: 'YAML',
+  yml: 'YAML',
+  zsh: 'Zsh',
+}
+
+/** A language's name as a person writes it (`ts` is TypeScript), or the id itself for one not listed. */
+export function languageName(language: string): string {
+  return LANGUAGE_NAMES[language.toLowerCase()] ?? language
+}
 
 type Highlighter = import('shiki/core').HighlighterCore
 
@@ -59,6 +113,44 @@ export function plainTokens(code: string): CodeToken[][] {
 }
 
 /**
+ * `plain` lines with the colours `coloured` gave them, for as much of each
+ * line as hasn't changed since, so code that grows keeps its colours while
+ * the new ones load, and only what changed shows plain.
+ */
+export function holdColours(
+  plain: CodeToken[][],
+  coloured: CodeToken[][] | undefined,
+): CodeToken[][] {
+  if (!coloured) return plain
+  return plain.map((line, index) => {
+    const held = coloured[index]
+    if (!held) return line
+    const text = line.map((token) => token.content).join('')
+    const kept: CodeToken[] = []
+    let at = 0
+    for (const token of held) {
+      const same = commonLength(token.content, text.slice(at))
+      if (same)
+        kept.push(
+          same === token.content.length
+            ? token
+            : { ...token, content: token.content.slice(0, same) },
+        )
+      at += same
+      if (same < token.content.length) break
+    }
+    if (at === text.length) return kept
+    return [...kept, { content: text.slice(at) }]
+  })
+}
+
+function commonLength(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return i
+}
+
+/**
  * Shiki's colour for a token, in Kino's names: `var(--code-token-keyword)`
  * becomes `var(--code-keyword)`, and its text colour none, so it inherits.
  */
@@ -84,6 +176,13 @@ export function mergeTokens(line: CodeToken[]): CodeToken[] {
   return merged
 }
 
+function isBundled(
+  language: string,
+  bundled: Record<BundledLanguage, unknown>,
+): language is BundledLanguage {
+  return Object.hasOwn(bundled, language)
+}
+
 /**
  * `code` as lines of coloured tokens. A language shiki doesn't know, or one
  * that fails to load, comes back as plain lines.
@@ -97,7 +196,7 @@ export async function highlightCode(
     getHighlighter(),
     import('shiki/langs'),
   ])
-  if (!Object.hasOwn(bundledLanguages, language)) return plainTokens(code)
+  if (!isBundled(language, bundledLanguages)) return plainTokens(code)
   try {
     if (!shiki.getLoadedLanguages().includes(language)) {
       await shiki.loadLanguage(bundledLanguages[language])

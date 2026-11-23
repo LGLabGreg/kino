@@ -17,7 +17,7 @@ import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
 import { bringTopBack } from '@/registry/lib/fold'
 import { followHeight } from '@/registry/lib/resize'
-import { codeLines } from '@/registry/lib/syntax'
+import { codeLines, languageName } from '@/registry/lib/syntax'
 import { useEffect, useId, useRef, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -64,7 +64,7 @@ function CodeBody({
   return (
     <CodeScroller
       id={id}
-      label={file.label ?? `${file.title ?? file.language} code`}
+      label={file.label ?? `${file.title ?? languageName(file.language)} code`}
       labelledBy={file.label ? undefined : labelledBy}
       collapsed={collapsed}
       collapsedLines={collapsedLines}
@@ -139,8 +139,11 @@ function CodeBlock({
   label = 'Files',
   tooltipProps,
   onCopy,
+  streaming = false,
   className,
 }: CodeBlockProps & {
+  /** The code is still arriving: each line shows as it lands, with no glide, and Copy waits until it has all of it. */
+  streaming?: boolean
   /** Props for the Copy button's tooltip, as the Copy button takes them. */
   tooltipProps?: Omit<TooltipContentProps, 'children'>
   /** Called when the Copy button is pressed, with the file it copies. */
@@ -172,8 +175,11 @@ function CodeBlock({
     const inner = body?.firstElementChild
     if (!body || !(inner instanceof HTMLElement)) return
     // A fold moves the lines' own box: the body takes each of its frames as they come.
+    // Code still arriving lands at once, or a glide would hide lines that have come.
     return followHeight(body, inner, {
-      instant: () => body.querySelector('[data-moving]') !== null,
+      instant: () =>
+        body.querySelector('[data-moving]') !== null ||
+        rootRef.current?.hasAttribute('data-streaming') === true,
     })
   }, [])
 
@@ -190,6 +196,7 @@ function CodeBlock({
     <div
       ref={rootRef}
       data-slot='code-block'
+      data-streaming={streaming ? '' : undefined}
       className={cn(
         'bg-card text-card-foreground flex min-w-0 flex-col overflow-clip rounded-(--surface-radius) border text-sm',
         className,
@@ -210,24 +217,29 @@ function CodeBlock({
                 <TabsTrigger
                   key={fileValue(file)}
                   value={fileValue(file)}
-                  className='font-mono text-xs'
+                  className={cn('text-xs', file.title !== undefined && 'font-mono')}
                 >
-                  {file.title ?? file.language}
+                  {file.title ?? languageName(file.language)}
                 </TabsTrigger>
               ))}
             </TabsList>
           ) : (
             <>
-              <FileIcon />
+              {active.title !== undefined ? <FileIcon /> : null}
               <CutTooltip
                 render={
                   <span
                     id={titleId}
                     data-cut
                     dir='auto'
-                    className='min-w-0 flex-1 truncate font-mono text-xs'
+                    className={cn(
+                      'min-w-0 flex-1 truncate text-xs',
+                      active.title !== undefined
+                        ? 'font-mono'
+                        : 'text-muted-foreground font-medium',
+                    )}
                   >
-                    {active.title ?? active.language}
+                    {active.title ?? languageName(active.language)}
                   </span>
                 }
               />
@@ -239,6 +251,7 @@ function CodeBlock({
             aria-label='Copy code'
             tooltipProps={tooltipProps}
             onClick={() => onCopy?.(active)}
+            disabled={streaming}
             className='shrink-0'
           />
         </div>
