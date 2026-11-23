@@ -71,6 +71,32 @@ function liveRate(): number {
 }
 
 /**
+ * Calls `then` once `ms` have passed on the page's clock: a Web Animation
+ * that follows the transitions, so a wait slows with the page's animations,
+ * even when they are slowed part-way through it. Gives a function that
+ * cancels it.
+ */
+function afterPageTime(ms: number, then: () => void): () => void {
+  const wait = document.documentElement.animate([], {
+    duration: Math.max(0, ms),
+    id: FOLLOWS_TRANSITION,
+  })
+  wait.playbackRate = liveRate()
+  let cancelled = false
+  wait.finished.then(
+    () => {
+      if (!cancelled) then()
+    },
+    // Cancelling it rejects `finished`.
+    () => {},
+  )
+  return () => {
+    cancelled = true
+    wait.cancel()
+  }
+}
+
+/**
  * The pulse beside something live: a dot whose ring breathes out while it
  * is live, and fades once it isn't. Sized and coloured by its parent
  * (`size-2`, `text-success`).
@@ -97,4 +123,4 @@ function LivePulse({
   )
 }
 
-export { liveNow, LivePulse, liveRate }
+export { afterPageTime, liveNow, LivePulse, liveRate }

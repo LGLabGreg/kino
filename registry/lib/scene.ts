@@ -1,13 +1,27 @@
 'use client'
 
+import { afterPageTime, liveNow } from '@/registry/lib/live'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { FOLLOWS_TRANSITION, roleDuration } from '@/registry/lib/resize'
-import { type RefObject, useEffect, useRef, useState } from 'react'
+import {
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 
 /*
  * A scene: a small picture of a product at work that plays once, a step at a
  * time, when it is seen, such as a feature's picture on a landing page.
  * Under reduced motion it lands on its last step instead of playing.
+ *
+ * A script plays when it is asked to instead, such as a preview's reply when
+ * the visitor sends a message: timed events folded into a state by a
+ * reducer, on the page's clock, that can stop part-way and wait at a step for
+ * the visitor's decision.
  */
 
 /** Where a scene is: not seen yet, seen and playing, or landed on its end under reduced motion. */
@@ -156,13 +170,199 @@ function useScene<Element extends HTMLElement>(
   }
 }
 
+/* Scripts */
+
+/**
+ * One step of a script: an event that lands `at` ms after the play started,
+ * or after the last wait, on the page's clock; or a wait for the visitor's
+ * decision, which is reached as soon as the step before it lands.
+ */
+type ScriptStep<Event> = { at: number; event: Event } | { wait: 'decision' }
+
+/** Where a play is: not playing, playing `steps` from `next`, or held at the wait at `next`. */
+type ScriptPlay<Event> =
+  | { status: 'idle' }
+  | {
+      status: 'playing'
+      steps: readonly ScriptStep<Event>[]
+      next: number
+      /** When the play started, or the last wait was passed, on the page's clock. */
+      since: number
+    }
+  | { status: 'waiting'; steps: readonly ScriptStep<Event>[]; next: number }
+
+/** A script's state and where its play is. */
+interface Script<State, Event> {
+  state: State
+  play: ScriptPlay<Event>
+}
+
+const NOT_PLAYING = Object.freeze({ status: 'idle' }) satisfies ScriptPlay<never>
+
+/** A script at `initial`, not playing: where it starts, and where a reset goes back to. */
+function scriptOf<State, Event>(initial: State): Script<State, Event> {
+  return { state: initial, play: NOT_PLAYING }
+}
+
+/** The script playing `steps` from the first, from its state as it is, at `now`. The same script while it plays. */
+function scriptPlay<State, Event>(
+  script: Script<State, Event>,
+  steps: readonly ScriptStep<Event>[],
+  now: number,
+): Script<State, Event> {
+  if (script.play.status !== 'idle') return script
+  return { ...script, play: { status: 'playing', steps, next: 0, since: now } }
+}
+
+/** The script held where it is, not playing. */
+function scriptStop<State, Event>(script: Script<State, Event>): Script<State, Event> {
+  return script.play.status === 'idle' ? script : { ...script, play: NOT_PLAYING }
+}
+
+/**
+ * The script after the visitor's decision: `decision` changes the state, and
+ * a play held at a wait plays on past it, its next steps timed from `now`.
+ */
+function scriptDecide<State, Event>(
+  script: Script<State, Event>,
+  decision: (state: State) => State,
+  now: number,
+): Script<State, Event> {
+  const { play } = script
+  return {
+    state: decision(script.state),
+    play:
+      play.status === 'waiting'
+        ? { status: 'playing', steps: play.steps, next: play.next + 1, since: now }
+        : play,
+  }
+}
+
+/**
+ * The script with every step due at `now` landed, in order, through
+ * `reducer`: up to a step whose time hasn't come, or a wait, which holds it.
+ * With `land`, as under reduced motion, every step up to the next wait lands
+ * at once. Past the last step it stops playing. `due` is how long, on the
+ * page's clock, until the next step lands, while it plays; the same script
+ * when nothing landed.
+ */
+function scriptLand<State, Event>(
+  script: Script<State, Event>,
+  reducer: (state: State, event: Event) => State,
+  now: number,
+  land: boolean,
+): { script: Script<State, Event>; due: number | null } {
+  const { play } = script
+  if (play.status !== 'playing') return { script, due: null }
+  let { state } = script
+  let next = play.next
+  for (; next < play.steps.length; next++) {
+    const step = play.steps[next]
+    if ('wait' in step) {
+      return {
+        script: { state, play: { status: 'waiting', steps: play.steps, next } },
+        due: null,
+      }
+    }
+    if (!land && step.at > now - play.since) {
+      if (next === play.next) return { script, due: step.at - (now - play.since) }
+      return { script: { state, play: { ...play, next } }, due: null }
+    }
+    state = reducer(state, step.event)
+  }
+  return { script: { state, play: NOT_PLAYING }, due: null }
+}
+
+/**
+ * Lands a script's steps on the page's clock while it plays, so the
+ * playground's Speed slows it, even when changed part-way: a render when a
+ * step lands, never one per frame. Under reduced motion each stretch up to a
+ * wait lands at once. Unmounting cancels.
+ */
+function useScriptClock<State, Event>(
+  script: Script<State, Event>,
+  setScript: Dispatch<SetStateAction<Script<State, Event>>>,
+  reducer: (state: State, event: Event) => State,
+) {
+  useLayoutEffect(() => {
+    if (script.play.status !== 'playing') return undefined
+    let cancel = () => {}
+    const tick = () => {
+      const landed = scriptLand(script, reducer, liveNow(), reducesMotion())
+      // Only onto the script it was worked out from, so an effect run twice lands once.
+      if (landed.script !== script)
+        setScript((current) => (current === script ? landed.script : current))
+      else if (landed.due !== null) cancel = afterPageTime(landed.due, tick)
+    }
+    tick()
+    return () => cancel()
+  }, [script, setScript, reducer])
+}
+
+/**
+ * Plays steps through `reducer` from `initial` when asked, on the page's
+ * clock. Nothing plays until `play(steps)`, which plays them from the state
+ * as it is and does nothing while a play goes on. `stop()` holds where it
+ * is and `reset()` goes back to `initial`. `decide(decision)` changes the
+ * state with the visitor's decision and plays on past a wait; `change`
+ * changes it and leaves the play as it is. Under reduced motion a play lands
+ * on its end, or on its next wait, in the commit that starts it.
+ */
+function useScript<State, Event>(
+  reducer: (state: State, event: Event) => State,
+  initial: State,
+): {
+  state: State
+  /** From `play()` until its last step lands or it stops, waits included. */
+  playing: boolean
+  play: (steps: readonly ScriptStep<Event>[]) => void
+  stop: () => void
+  reset: () => void
+  decide: (decision: (state: State) => State) => void
+  change: (update: (state: State) => State) => void
+} {
+  const [script, setScript] = useState(() => scriptOf<State, Event>(initial))
+  useScriptClock(script, setScript, reducer)
+
+  const act = (
+    action: (script: Script<State, Event>, now: number) => Script<State, Event>,
+  ) => {
+    const now = liveNow()
+    const land = reducesMotion()
+    setScript((current) => scriptLand(action(current, now), reducer, now, land).script)
+  }
+
+  return {
+    state: script.state,
+    playing: script.play.status !== 'idle',
+    play: (steps) => act((current, now) => scriptPlay(current, steps, now)),
+    stop: () => setScript(scriptStop),
+    reset: () => setScript(scriptOf(initial)),
+    decide: (decision) => act((current, now) => scriptDecide(current, decision, now)),
+    change: (update) =>
+      setScript((current) => {
+        const state = update(current.state)
+        return state === current.state ? current : { ...current, state }
+      }),
+  }
+}
+
 export {
   type SceneSeen,
+  type Script,
+  type ScriptPlay,
+  type ScriptStep,
   CRISP_ENTER_MS,
   feelStretch,
   fullView,
   onScreen,
+  scriptDecide,
   sceneStep,
+  scriptLand,
+  scriptOf,
+  scriptPlay,
+  scriptStop,
   useScene,
+  useScript,
   useSeen,
 }
