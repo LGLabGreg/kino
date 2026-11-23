@@ -25,7 +25,7 @@ import {
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
-import { useFlow } from '@/registry/lib/flow'
+import { flowItemClassName, useFlow } from '@/registry/lib/flow'
 import { pageColumnClassName } from '@/registry/lib/hero-parts'
 import {
   type Integration,
@@ -197,14 +197,14 @@ function IntegrationsDirectory({
               ref={rowRef}
               id={gridId}
               aria-label={picked ? picked.label : 'All integrations'}
-              className='group/directory relative isolate grid min-w-0 grid-cols-1 gap-3 @xl/integrations:grid-cols-2 @4xl/integrations:grid-cols-3'
+              className='group/flow relative isolate grid min-w-0 grid-cols-1 gap-3 @xl/integrations:grid-cols-2 @4xl/integrations:grid-cols-3'
             >
               {shown.map((integration) => (
                 <li
                   key={integration.value}
                   data-slot='integrations-directory-item'
                   data-integration={integration.value}
-                  className={itemMoveClassName}
+                  className={cn(flowItemClassName, 'flex min-w-0')}
                 >
                   <IntegrationCard integration={integration} heading={cardHeading} />
                 </li>
@@ -293,14 +293,6 @@ function IntegrationsDirectory({
     </section>
   )
 }
-
-/**
- * A card moving: gliding to its place when the grid changes, fading in when
- * it arrives after the first paint, and its copy fading out where it was
- * when it leaves.
- */
-const itemMoveClassName =
-  'flex min-w-0 [transition:translate_var(--motion-layout-duration)_var(--motion-layout-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-mounted/directory:starting:opacity-0 data-[flow=start]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] data-leaving:opacity-0 data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]'
 
 /** A tool's card: its mark, its name, which leads to its page, and what it does. */
 function IntegrationCard({

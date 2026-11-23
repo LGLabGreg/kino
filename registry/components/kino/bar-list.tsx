@@ -35,12 +35,12 @@ import { linearScale } from '@/registry/lib/chart-scale'
 import type { ChartTarget } from '@/registry/lib/chart-state'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
-import { useFlow } from '@/registry/lib/flow'
+import { flowItemClassName, useFlow } from '@/registry/lib/flow'
 import {
   placeholderBreatheClassName,
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
-import { mergeRefs } from '@/registry/lib/refs'
+import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { sameOrder } from '@/registry/lib/sort'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
@@ -409,7 +409,7 @@ function BarListRows({
     '[data-slot=bar-list-row]',
   )
   const own = useRef<HTMLOListElement>(null)
-  const listRef = useMemo(() => mergeRefs(list, plot, own), [list, plot])
+  const listRef = useMemo(() => mergeRefs(list, plot, own, markMounted), [list, plot])
   const ready = status === 'ready'
   // A focused row that goes, past the limit or out of the data, hands the
   // focus to the list rather than to the page, and lets its light go.
@@ -453,7 +453,7 @@ function BarListRows({
         tabIndex={-1}
         data-chart-plot=''
         data-slot='bar-list-rows'
-        className='focus-visible:ring-ring/50 relative isolate flex min-w-0 flex-col gap-1 rounded-(--item-radius) focus-visible:ring-3 focus-visible:outline-hidden focus-visible:ring-inset'
+        className='group/flow focus-visible:ring-ring/50 relative isolate flex min-w-0 flex-col gap-1 rounded-(--item-radius) focus-visible:ring-3 focus-visible:outline-hidden focus-visible:ring-inset'
       >
         {ready &&
           rows.map((row) => (
@@ -646,7 +646,7 @@ const BarListRow = memo(function BarListRow({
     <li
       data-slot='bar-list-row'
       data-dim={dim ? '' : undefined}
-      className={rowMoveClassName}
+      className={cn(flowItemClassName, 'min-w-0')}
     >
       {link ? (
         <BarListLink
@@ -728,14 +728,6 @@ function BarListPlaceholder({ count }: { count: number }) {
     </div>
   )
 }
-
-/**
- * A row moving: gliding to its place when the order changes, fading in when
- * it arrives after the first paint, and its copy fading out where it was
- * when it leaves.
- */
-const rowMoveClassName =
-  'min-w-0 [transition:translate_var(--motion-layout-duration)_var(--motion-layout-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-mounted/chart:starting:opacity-0 data-[flow=start]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] data-leaving:opacity-0 data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]'
 
 /**
  * A bar: a tint of its colour behind the row, as long as `--bar-clip` lets

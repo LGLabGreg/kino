@@ -11,13 +11,12 @@ import { useControllable } from '@/registry/lib/controllable'
 import {
   faqAnswerClassName,
   faqColumnClassName,
-  faqLinkTargetClassName,
   type FaqSectionProps,
   type FaqQuestion,
   faqQuestionClassName,
   faqSectionClassName,
-  useQuestionLink,
 } from '@/registry/lib/faq-parts'
+import { linkTargetClassName, useLinkTarget } from '@/registry/lib/link-target'
 import { followHeight, runningTransitions } from '@/registry/lib/resize'
 import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
 import { type ReactNode, useCallback, useEffect, useId, useRef } from 'react'
@@ -89,7 +88,7 @@ function FaqTopics({
       topics.find((each) => each.questions.some((question) => question.value === value)),
     [topics],
   )
-  useQuestionLink(
+  useLinkTarget(
     ref,
     useCallback((value: string) => topicOf(value) !== undefined, [topicOf]),
     useCallback(
@@ -177,10 +176,13 @@ function FaqTopics({
                       <AccordionItem
                         key={question.value}
                         value={question.value}
-                        data-faq-question={question.value}
-                        className={faqLinkTargetClassName}
+                        data-link-target={question.value}
+                        className={linkTargetClassName}
                       >
-                        <AccordionTrigger className='py-4 [&>svg]:mt-1'>
+                        <AccordionTrigger
+                          data-link-focus=''
+                          className='py-4 [&>svg]:mt-1'
+                        >
                           <span className={cn(faqQuestionClassName, 'min-w-0 flex-1')}>
                             <bdi>{question.question}</bdi>
                           </span>

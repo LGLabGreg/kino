@@ -91,6 +91,26 @@ export function flowStart(
 }
 
 /**
+ * Whether an item that was resized moves the others to new places they
+ * glide to. Items that wrap move whenever one changes size, items stacked
+ * one under another (a table's rows) only when one changes height. An item
+ * that grows or shrinks on a height transition of its own (`sizing`), such
+ * as an accordion's panel opening, carries what is below it as it goes, a
+ * frame at a time: a glide would hold them back where they were.
+ */
+export function sizeMoves({
+  stacked,
+  heightChanged,
+  sizing,
+}: {
+  stacked: boolean
+  heightChanged: boolean
+  sizing: boolean
+}): boolean {
+  return !sizing && (!stacked || heightChanged)
+}
+
+/**
  * Whether items that changed size glide to their new places, or are only
  * measured where they now are. They glide when they moved because of
  * something inside the row: an item that came, went or changed (`inside`).
@@ -481,7 +501,16 @@ export function followFlow(
         continue
       }
       const height = entry.borderBoxSize[0]?.blockSize ?? 0
-      if (!stacked || heights.get(entry.target) !== height) moves = true
+      if (
+        sizeMoves({
+          stacked,
+          heightChanged: heights.get(entry.target) !== height,
+          sizing:
+            runningTransitions(entry.target, { property: 'height', subtree: true })
+              .length > 0,
+        })
+      )
+        moves = true
       heights.set(entry.target, height)
     }
     const inside = changedInside
@@ -634,6 +663,16 @@ export function followFlow(
     resizes.disconnect()
   }
 }
+
+/**
+ * An item of a list that flows, such as a directory's card or a changelog's
+ * release: it glides to its place when the list changes, fades in when it
+ * arrives after the list's first paint, and its copy fades out where it was
+ * when it leaves. The list is `group/flow`, marked `data-mounted`
+ * (`markMounted`).
+ */
+export const flowItemClassName =
+  '[transition:translate_var(--motion-layout-duration)_var(--motion-layout-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-mounted/flow:starting:opacity-0 data-[flow=start]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] data-leaving:opacity-0 data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]'
 
 /**
  * A row whose `items` flow, in a frame that moves to the row's height as it

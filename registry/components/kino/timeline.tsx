@@ -1,6 +1,6 @@
 'use client'
 
-import { useFlow } from '@/registry/lib/flow'
+import { flowItemClassName, useFlow } from '@/registry/lib/flow'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import {
   type StepStatus,
@@ -81,7 +81,7 @@ function Timeline({
         data-slot='timeline-list'
         data-variant={variant}
         className={cn(
-          'group/timeline relative isolate flex flex-col gap-(--timeline-gap) bg-inherit [--timeline-gap:var(--surface-gap)] [--timeline-marker:var(--control-height-xs)]',
+          'group/timeline group/flow relative isolate flex flex-col gap-(--timeline-gap) bg-inherit [--timeline-gap:var(--surface-gap)] [--timeline-marker:var(--control-height-xs)]',
           className,
         )}
         {...props}
@@ -111,10 +111,9 @@ function TimelineItem({
         className: cn(
           'group/timeline-item group/step relative grid grid-cols-[var(--timeline-marker)_minmax(0,1fr)] content-start gap-x-(--control-padding) bg-inherit @md/timeline:group-data-[variant=split]/timeline:grid-cols-[minmax(0,1fr)_var(--timeline-marker)_minmax(0,1fr)]',
           // It glides to a new place on `layout` (`followFlow`), fades in on
-          // `enter` once the timeline has painted, and its copy fades where
-          // it was on `exit`.
-          '[transition:translate_var(--motion-layout-duration)_var(--motion-layout-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-mounted/timeline:starting:opacity-0 data-[flow=start]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)]',
-          'data-leaving:opacity-0 data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]',
+          // `enter` once the timeline has painted, and its copy fades on
+          // `exit` (`flowItemClassName`).
+          flowItemClassName,
           // How far its marker, and the next one, sit inside the rail's
           // column: a dot is smaller than the column, an icon fills it.
           '[--timeline-inset:0px] [&:has(>[data-slot=timeline-marker][data-dot])]:[--timeline-inset:calc((var(--timeline-marker)-0.625rem)/2)]',

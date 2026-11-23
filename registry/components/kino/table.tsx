@@ -7,7 +7,7 @@ import { SkeletonText } from '@/registry/components/kino/skeleton'
 import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
-import { followFlow } from '@/registry/lib/flow'
+import { flowItemClassName, followFlow } from '@/registry/lib/flow'
 import {
   followPointer,
   type HighlightTarget,
@@ -382,8 +382,6 @@ function Table({
  * fades in on `enter` once its body has painted, and its copy fades where it
  * was on `exit`, finishing a glide it was on.
  */
-const rowMotionClassName =
-  '[transition:translate_var(--motion-layout-duration)_var(--motion-layout-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-mounted/table-body:starting:opacity-0 data-[flow=start]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] data-leaving:opacity-0 data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:data-leaving:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]'
 
 /**
  * A column that stays in view at the table's start or end edge as the rest
@@ -441,7 +439,7 @@ function TableBody({ className, ref, children, ...props }: ComponentProps<'tbody
     <tbody
       ref={mergeRefs(bodyRef, ref)}
       data-slot='table-body'
-      className={cn('group/table-body relative isolate bg-inherit', className)}
+      className={cn('group/flow relative isolate bg-inherit', className)}
       {...props}
     >
       <InBodyContext value>{children}</InBodyContext>
@@ -473,7 +471,7 @@ function TableRow({
       data-slot='table-row'
       data-selected={selected ? '' : undefined}
       className={cn(
-        rowMotionClassName,
+        flowItemClassName,
         // Opaque, so rows that cross as they reorder, and the copies of rows that leave, don't show through.
         'bg-inherit',
         // Its corners, for the highlight to take; the cells draw them.
@@ -969,7 +967,7 @@ function TableDetail({
   return (
     <tr
       data-slot='table-detail'
-      className={cn(rowMotionClassName, 'bg-inherit', className)}
+      className={cn(flowItemClassName, 'bg-inherit', className)}
       {...props}
     >
       <td colSpan={colSpan} className='p-0'>

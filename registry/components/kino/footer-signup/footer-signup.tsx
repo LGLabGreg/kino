@@ -7,10 +7,10 @@ import {
   type FooterLink,
   FooterLinkItem,
   FooterLegal,
-  FooterNewsletter,
   FooterSocial,
   FooterStatusLink,
 } from '@/registry/lib/footer-parts'
+import { NewsletterForm } from '@/registry/lib/newsletter'
 import { type ReactNode, useId } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -91,7 +91,7 @@ function FooterSignup({
               </p>
             ) : null}
           </div>
-          <FooterNewsletter onSubscribe={onSubscribe} submitLabel={submitLabel} />
+          <NewsletterForm onSubscribe={onSubscribe} submitLabel={submitLabel} />
         </section>
         <div className='flex min-w-0 flex-col gap-6 border-t pt-8 @3xl/footer:flex-row @3xl/footer:items-center @3xl/footer:gap-10'>
           <div className='flex shrink-0 items-center'>{logo}</div>

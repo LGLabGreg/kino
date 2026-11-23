@@ -10,13 +10,12 @@ import { useControllable } from '@/registry/lib/controllable'
 import {
   faqAnswerClassName,
   faqColumnClassName,
-  faqLinkTargetClassName,
   type FaqSectionProps,
   type FaqQuestion,
   faqQuestionClassName,
   faqSectionClassName,
-  useQuestionLink,
 } from '@/registry/lib/faq-parts'
+import { linkTargetClassName, useLinkTarget } from '@/registry/lib/link-target'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
 import { useCallback, useId, useRef } from 'react'
@@ -65,7 +64,7 @@ function Faq({
   const titleId = useId()
   const ref = useRef<HTMLElement>(null)
   const [open, setOpen] = useControllable(valueProp, defaultValue ?? [], onValueChange)
-  useQuestionLink(
+  useLinkTarget(
     ref,
     useCallback(
       (value: string) => questions.some((question) => question.value === value),
@@ -116,10 +115,10 @@ function Faq({
             <AccordionItem
               key={question.value}
               value={question.value}
-              data-faq-question={question.value}
-              className={faqLinkTargetClassName}
+              data-link-target={question.value}
+              className={linkTargetClassName}
             >
-              <AccordionTrigger className='gap-4 py-5 [&>svg]:mt-1'>
+              <AccordionTrigger data-link-focus='' className='gap-4 py-5 [&>svg]:mt-1'>
                 <span
                   aria-hidden
                   className='text-muted-foreground w-6 shrink-0 text-sm leading-6 tabular-nums'

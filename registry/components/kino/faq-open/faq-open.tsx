@@ -3,13 +3,12 @@
 import {
   faqAnswerClassName,
   faqColumnClassName,
-  faqLinkTargetClassName,
   type FaqSectionProps,
   type FaqQuestion,
   faqQuestionClassName,
   faqSectionClassName,
-  useQuestionLink,
 } from '@/registry/lib/faq-parts'
+import { linkTargetClassName, useLinkTarget } from '@/registry/lib/link-target'
 import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
 import { useCallback, useId, useRef } from 'react'
 
@@ -47,7 +46,7 @@ function FaqOpen({
 }: FaqOpenProps) {
   const titleId = useId()
   const ref = useRef<HTMLElement>(null)
-  useQuestionLink(
+  useLinkTarget(
     ref,
     useCallback(
       (value: string) => questions.some((question) => question.value === value),
@@ -80,11 +79,11 @@ function FaqOpen({
           {questions.map((question) => (
             <div
               key={question.value}
-              data-faq-question={question.value}
+              data-link-target={question.value}
               // A link to it moves focus here, so the keyboard goes on from it.
               tabIndex={-1}
               className={cn(
-                faqLinkTargetClassName,
+                linkTargetClassName,
                 'focus-visible:ring-ring/50 flex min-w-0 flex-col gap-2 border-t pt-6 focus-visible:rounded-(--surface-radius) focus-visible:ring-3 focus-visible:outline-hidden',
               )}
             >
