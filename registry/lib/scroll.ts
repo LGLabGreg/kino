@@ -220,11 +220,21 @@ export function topEdge(element: Element, gap = 0): number {
   const scroller = scrollerOf(element)
   return (
     (scroller ? scroller.getBoundingClientRect().top : 0) +
+    topInset(element, scroller) +
+    gap
+  )
+}
+
+/**
+ * How far below its scroller's top (the page's, without one) an element
+ * scrolled to the top stops: the scroller's `scroll-padding-top`, for a
+ * sticky header, and the element's `scroll-margin-top`, in pixels.
+ */
+export function topInset(element: Element, scroller: Element | null): number {
+  return (
     (Number.parseFloat(
       getComputedStyle(scroller ?? document.documentElement).scrollPaddingTop,
-    ) || 0) +
-    (Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0) +
-    gap
+    ) || 0) + (Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0)
   )
 }
 
@@ -238,22 +248,56 @@ export function topEdge(element: Element, gap = 0): number {
  */
 export function holdAtEdge(element: Element, watch: Element, line: number) {
   const scroller = scrollerOf(element)
+  whileHeightsMove(watch, scroller, () => {
+    if (!element.isConnected) return false
+    const over = element.getBoundingClientRect().top - line
+    if (over < -0.5) (scroller ?? window).scrollBy({ top: over, behavior: 'instant' })
+    return true
+  })
+}
+
+/** Whether a height transition runs on `watch` or inside it. */
+export function heightsMoving(watch: Element) {
+  return runningTransitions(watch, { property: 'height', subtree: true }).length > 0
+}
+
+/**
+ * Calls `step` once a frame, from the next, while heights inside `watch`
+ * move or `scroller` (the page, when null) scrolls, and stops once nothing
+ * has moved for a few frames, or when `step` returns false. A step sees each
+ * frame of a height transition, so what it keeps in place never lags one.
+ * Returns a function that stops it sooner, and when it has stopped.
+ */
+export function whileHeightsMove(
+  watch: Element,
+  scroller: Element | null,
+  step: () => boolean,
+): { stop: () => void; stopped: Promise<void> } {
   const position = () => (scroller ? scroller.scrollTop : window.scrollY)
   let last = position()
   let quiet = 0
-  const frame = () => {
-    if (!element.isConnected) return
-    const over = element.getBoundingClientRect().top - line
-    if (over < -0.5) (scroller ?? window).scrollBy({ top: over, behavior: 'instant' })
+  let frame = 0
+  let end = () => {}
+  const stopped = new Promise<void>((resolve) => {
+    end = resolve
+  })
+  const tick = () => {
+    if (!step()) return end()
     const now = position()
-    const moving =
-      now !== last ||
-      runningTransitions(watch, { property: 'height', subtree: true }).length > 0
+    const moving = now !== last || heightsMoving(watch)
     last = now
     quiet = moving ? 0 : quiet + 1
-    if (quiet < SETTLE_FRAMES) requestAnimationFrame(frame)
+    if (quiet < SETTLE_FRAMES) frame = requestAnimationFrame(tick)
+    else end()
   }
-  requestAnimationFrame(frame)
+  frame = requestAnimationFrame(tick)
+  return {
+    stop: () => {
+      cancelAnimationFrame(frame)
+      end()
+    },
+    stopped,
+  }
 }
 
 /**
@@ -292,12 +336,13 @@ export function bringIntoSightBy(
 /**
  * The scroll jumps when motion is reduced, by the device or by the motion
  * preference (`data-motion='reduce'`, as the `motion-reduce:` variant reads
- * it), or when the morph role takes no time.
+ * it), or when the morph role takes no time: `instant`, never `auto`, which
+ * would take a `scroll-behavior: smooth` set on the scroller.
  */
 export function revealBehavior(scroller: HTMLElement): ScrollBehavior {
   const reduced =
     reducesMotion(scroller) || roleDuration(scroller, 'morph', Number.NaN) === 0
-  return reduced ? 'auto' : 'smooth'
+  return reduced ? 'instant' : 'smooth'
 }
 
 function reveal(scroller: HTMLElement, item: Element | null, behavior: ScrollBehavior) {
@@ -457,6 +502,15 @@ function pageTop(element: HTMLElement) {
 }
 
 /**
+ * An element's top in its scroller's content, in pixels from the content's
+ * start, from layout alone: the scroll position and any transform, such as
+ * an entrance's rise, leave it where it is.
+ */
+export function contentTop(element: HTMLElement, scroller: HTMLElement) {
+  return pageTop(element) - pageTop(scroller) - scroller.clientTop
+}
+
+/**
  * Moves `ref`'s element from `from` to `to` as the page scrolls it into
  * view, on the scroll itself, off the main thread: a scroll timeline on the
  * element that actually scrolls it, never the nearest box that clips, which
@@ -512,7 +566,7 @@ export function useScrollLinked(
       const offsets = reduced
         ? null
         : scrollLinkedRange({
-            top: pageTop(element) - (own ? pageTop(own) + own.clientTop : 0),
+            top: own ? contentTop(element, own) : pageTop(element),
             view: scroller.clientHeight,
             max: scroller.scrollHeight - scroller.clientHeight,
             from: rangeFrom,
@@ -547,7 +601,9 @@ export function useScrollLinked(
       if (reduced) return
       if (!offsets || !easing) {
         // Too little scroll for the move: it rests where it would end.
-        animation = element.animate([keyframes.at(-1) ?? end], { fill: 'forwards' })
+        animation = element.animate([keyframes.at(-1) ?? end], {
+          fill: 'forwards',
+        })
         return
       }
       // In scroll px, so content that grows below the element moves nothing.
