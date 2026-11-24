@@ -100,7 +100,7 @@ function UserMenuHeader({
       {avatar}
       <span className='flex min-w-0 flex-1 flex-col'>
         {/* A long name or email wraps, so the whole of it shows. */}
-        <MenuSheetLabel className='text-foreground p-0 text-sm font-medium wrap-break-word group-has-[[data-menu-indicator]]/menu:ps-0'>
+        <MenuSheetLabel className='text-foreground p-0 text-sm font-medium wrap-break-word group-has-[:is([data-menu-indicator]:last-child,[data-menu-indicator]+:not(svg))]/menu:ps-0'>
           {name}
         </MenuSheetLabel>
         {email ? (
@@ -128,7 +128,7 @@ function UserMenuWorkspaces<Value extends string>({
     <MenuSheetRadioGroup<Value> data-slot='user-menu-workspaces' closeOnClick {...props}>
       {label === null ? null : (
         // At the start, over the logos, as the theme's heading is: not past a tick's gutter, since its rows have none.
-        <MenuSheetLabel className='group-has-[[data-menu-indicator]]/menu:ps-(--control-padding)'>
+        <MenuSheetLabel className='group-has-[:is([data-menu-indicator]:last-child,[data-menu-indicator]+:not(svg))]/menu:ps-(--control-padding)'>
           {label}
         </MenuSheetLabel>
       )}

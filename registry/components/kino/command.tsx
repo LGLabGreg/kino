@@ -2,7 +2,11 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { Dialog, DialogContent, DialogTitle } from '@/registry/components/kino/dialog'
-import { inputControlClassName } from '@/registry/components/kino/input'
+import {
+  searchLineClassName,
+  searchLineIcon,
+  searchLineInputClassName,
+} from '@/registry/components/kino/input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
 import {
@@ -182,20 +186,6 @@ const CommandRoot = CommandPrimitive.Root as <Item>(
   props: CommandPrimitive.Root.Props<Item>,
 ) => ReactElement
 
-function CommandSearchIcon() {
-  return (
-    <IconPlaceholder
-      lucide='SearchIcon'
-      tabler='IconSearch'
-      hugeicons='Search01Icon'
-      phosphor='MagnifyingGlassIcon'
-      remixicon='RiSearchLine'
-      aria-hidden
-      className='text-muted-foreground size-4'
-    />
-  )
-}
-
 /** The current page's name: a press on it goes back. */
 function CommandPageName({ page }: { page: string }) {
   const { back } = useCommand()
@@ -285,21 +275,18 @@ function CommandInput({
     else back?.()
   }
   return (
-    <div
-      data-slot='command-input-group'
-      className='flex shrink-0 items-center gap-2 border-b px-[calc(var(--control-padding)+0.25rem)] has-focus-visible:border-ring'
-    >
+    <div data-slot='command-input-group' className={searchLineClassName}>
       {/* The search's icon gives way to the page's name, and back. */}
       <Swap align='start' className='-ms-1 max-w-[50%] shrink-0 ps-1'>
-        {page ? <CommandPageName page={page} /> : <CommandSearchIcon />}
+        {page ? <CommandPageName page={page} /> : searchLineIcon}
       </Swap>
       <CommandPrimitive.Input
         data-slot='command-input'
         onKeyDown={keyDown}
         className={cn(
-          inputControlClassName,
+          searchLineInputClassName,
           // Its forced-colours outline drawn inside, where the dialog's edge can't clip it.
-          'h-(--control-height-lg) px-0 forced-colors:-outline-offset-2',
+          'forced-colors:-outline-offset-2',
           className,
         )}
         {...props}

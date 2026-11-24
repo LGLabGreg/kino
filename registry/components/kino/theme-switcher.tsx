@@ -558,7 +558,7 @@ function ThemeMenuRadioGroup({
     >
       {inline ? (
         <>
-          <DropdownMenuLabel className='text-foreground min-w-0 flex-1 p-0 text-sm font-normal group-has-[[data-menu-indicator]]/menu:ps-0'>
+          <DropdownMenuLabel className='text-foreground min-w-0 flex-1 p-0 text-sm font-normal group-has-[:is([data-menu-indicator]:last-child,[data-menu-indicator]+:not(svg))]/menu:ps-0'>
             {label}
           </DropdownMenuLabel>
           <ThemeMenuSegments />

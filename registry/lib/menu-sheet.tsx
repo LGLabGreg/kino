@@ -181,7 +181,7 @@ function SheetList({ className, children }: { className?: string; children: Reac
       ref={listRef}
       data-slot='menu-list'
       className={cn(
-        'group/menu scrollbar-thin relative flex min-h-0 flex-col overflow-y-auto overscroll-contain px-2 pt-1 pb-3 text-sm',
+        'group/menu scrollbar-thin relative flex min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-2 pt-1 pb-3 text-sm',
         edgeFadeClassName,
         className,
       )}

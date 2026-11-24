@@ -2,6 +2,7 @@
 
 import { Button } from '@/registry/components/kino/button'
 import {
+  fieldClearClassName,
   focusControl,
   InputInvalidIcon,
   inputBoxClassName,
@@ -114,7 +115,7 @@ function FilterListClear({
 }) {
   return (
     <FilterListPrimitive.Clear
-      data-filter-list-clear=''
+      data-field-clear=''
       aria-label='Clear'
       render={
         <Button
@@ -124,11 +125,7 @@ function FilterListClear({
             fieldButtonClassName,
             // Nothing to clear in a field you can't change.
             'in-data-disabled:hidden in-data-readonly:hidden',
-            // It fades in on `enter` and out on `exit` where it is, and turns
-            // back from where it is; a press still answers on `press`. Scoped
-            // to its attribute, so it wins over the Button's own transition. With
-            // less motion it doesn't scale, so only the fade and colours move.
-            'data-starting-style:opacity-0 data-ending-style:opacity-0 motion-safe:data-filter-list-clear:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),scale_var(--motion-press-duration)_var(--motion-press-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)] motion-reduce:data-filter-list-clear:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)] data-ending-style:data-filter-list-clear:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]',
+            fieldClearClassName,
             className,
           )}
         />
@@ -255,7 +252,7 @@ function FilterListList({
 
 /** The scroller around a list's rows: thin, its own scroll only, its edges fading (`useEdgeFades`). */
 const filterListScrollerClassName = cn(
-  'scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain',
+  'scrollbar-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain',
   edgeFadeClassName,
 )
 

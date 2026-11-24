@@ -277,7 +277,7 @@ function SelectPopup({
         // Its scroll padding, the fade's width, is also the scroll buttons' height,
         // so a row the keys move to is never under one.
         className={cn(
-          'scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain',
+          'scrollbar-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain',
           edgeFadeClassName,
         )}
       >

@@ -69,7 +69,9 @@ function InputInvalidIcon({ className, ...props }: ComponentProps<'span'>) {
   )
 }
 
-type InputControlProps = Omit<InputPrimitive.Props, 'className'> & { className?: string }
+type InputControlProps = Omit<InputPrimitive.Props, 'className'> & {
+  className?: string
+}
 
 /** The `<input>` alone, at the control's height, for a box of your own. */
 function InputControl({ className, ...props }: InputControlProps) {
@@ -95,11 +97,48 @@ function Input({ className, ...props }: InputControlProps) {
   )
 }
 
+/*
+ * A field's Clear button, a ghost icon Button marked `data-field-clear`: it
+ * fades in on `enter` and out on `exit` where it is, and turns back from
+ * where it is; a press still answers on `press`. Scoped to its attribute, so
+ * it wins over the Button's own transition. With less motion it doesn't
+ * scale, so only the fade and colours move.
+ */
+const fieldClearClassName =
+  'data-starting-style:opacity-0 data-ending-style:opacity-0 motion-safe:data-field-clear:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),scale_var(--motion-press-duration)_var(--motion-press-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)] motion-reduce:data-field-clear:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)] data-ending-style:data-field-clear:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)]'
+
+/*
+ * A search pinned above a popup's rows, as one line: its icon, then the text
+ * at the large control's height, with a rule under it that takes the ring's
+ * colour while the text has focus. The Command and the menus' search.
+ */
+const searchLineClassName =
+  'flex shrink-0 items-center gap-2 border-b px-[calc(var(--control-padding)+0.25rem)] has-focus-visible:border-ring'
+
+const searchLineInputClassName = cn(inputControlClassName, 'h-(--control-height-lg) px-0')
+
+/** The search line's icon. */
+const searchLineIcon = (
+  <IconPlaceholder
+    lucide='SearchIcon'
+    tabler='IconSearch'
+    hugeicons='Search01Icon'
+    phosphor='MagnifyingGlassIcon'
+    remixicon='RiSearchLine'
+    aria-hidden
+    className='text-muted-foreground size-4 shrink-0'
+  />
+)
+
 export {
+  fieldClearClassName,
   focusControl,
   Input,
   InputControl,
   InputInvalidIcon,
   inputBoxClassName,
   inputControlClassName,
+  searchLineClassName,
+  searchLineIcon,
+  searchLineInputClassName,
 }
