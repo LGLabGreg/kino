@@ -124,6 +124,8 @@ interface TokenInputActions {
     content: string | Token | TokenInputValue,
     options?: { resolve?: Promise<Partial<Omit<Token, 'id'>> | void> },
   ) => string | undefined
+  /** Puts content in place of everything the field holds, as one undo step, with the caret at its end. */
+  replace: (content: string | Token | TokenInputValue) => void
   /** Changes a token in place, such as its status, without an undo step. */
   updateToken: (id: string, patch: Partial<Omit<Token, 'id'>>) => void
   removeToken: (id: string) => void
@@ -413,6 +415,11 @@ function TokenInput({
 
   useImperativeHandle(actionsRef, () => ({
     insert,
+    replace: (content) => {
+      const pieces = Array.isArray(content) ? content : [content]
+      replaceRange(0, valueLength(latest.current), pieces, 'insert')
+      editor?.focus({ preventScroll: true })
+    },
     updateToken,
     removeToken: (id) => removeToken(id, 'remove'),
     undo: () => step('undo'),
