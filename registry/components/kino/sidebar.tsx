@@ -196,7 +196,9 @@ function SidebarInset({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'main'>, 'className'> & { className?: string }) {
+}: Omit<useRender.ComponentProps<'main'>, 'className'> & {
+  className?: string
+}) {
   return useRender({
     defaultTagName: 'main',
     render,
@@ -337,8 +339,9 @@ const rowSelector =
  * it (closed, or folded into the rail), the section's.
  */
 function currentRow(area: HTMLElement): HTMLElement | null {
+  // Never a copy of a row that is leaving (the `flow` lib's), which keeps its marks while it fades.
   const current = area.querySelector<HTMLElement>(
-    '[data-slot=sidebar-menu-button][aria-current=page]',
+    '[data-slot=sidebar-menu-button][aria-current=page]:not([data-leaving] *)',
   )
   if (!current) return null
   const sub = current.closest('[data-slot=sidebar-menu-sub]')
@@ -386,7 +389,10 @@ function RowArea({
     if (!area || !highlight) return
     const stops = [
       followPointer(area, highlight, {
-        itemOf: itemMatching(area, rowSelector),
+        // A heading that opens and closes its group is a control of its own: over it, the highlight goes.
+        itemOf: itemMatching(area, rowSelector, {
+          rows: '[data-slot=sidebar-group-toggle]',
+        }),
         focus: true,
       }),
     ]
@@ -477,7 +483,9 @@ function SidebarContent({
   children,
   'aria-label': label = 'Pages',
   ...props
-}: Omit<ComponentProps<typeof ScrollArea>, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof ScrollArea>, 'className'> & {
+  className?: string
+}) {
   return (
     <ScrollArea
       data-slot='sidebar-content'
@@ -532,9 +540,21 @@ const contentWidth =
 
 /**
  * A group's heading. In the rail its words fade and a short line takes its
- * place, so the rows below stay where they are.
+ * place, so the rows below stay where they are. Given `open`, it is a
+ * disclosure button that shows and hides the group's rows, its chevron
+ * turning down while they show.
  */
-function SidebarGroupLabel({ className, children, ...props }: ComponentProps<'div'>) {
+function SidebarGroupLabel({
+  className,
+  children,
+  open,
+  onOpenChange,
+  ...props
+}: ComponentProps<'div'> & {
+  /** Whether the group's rows show; the heading only says so, and the rows are yours to hide. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const group = use(GroupContext)
   const { rail } = use(SurfaceContext)
   useLayoutEffect(() => {
@@ -542,13 +562,28 @@ function SidebarGroupLabel({ className, children, ...props }: ComponentProps<'di
     group.labelled(true)
     return () => group.labelled(false)
   }, [group])
+  const toggles = open !== undefined
+  // In the rail its words fade, and its chevron with them.
+  const fadesInRail =
+    'transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-[state=collapsed]/sidebar:opacity-0 group-data-[state=collapsed]/sidebar:duration-(--motion-exit-duration) group-data-[state=collapsed]/sidebar:ease-(--motion-exit-easing)'
+  const words = (
+    <span
+      data-cut
+      className={cn(
+        'truncate',
+        toggles ? 'min-w-0' : cn('shrink-0', fadesInRail, contentWidth),
+      )}
+    >
+      {children}
+    </span>
+  )
   return (
     <div
       id={group?.id}
       data-slot='sidebar-group-label'
       className={cn(
         'text-muted-foreground relative flex h-(--control-height-sm) shrink-0 items-center overflow-hidden text-xs font-medium',
-        rowPadding,
+        !toggles && rowPadding,
         // The line drawn in the rail, as wide as an icon, under where the words were.
         'after:bg-border after:pointer-events-none after:absolute after:start-[calc((var(--control-height)-1rem)/2)] after:w-4 after:top-1/2 after:h-px after:opacity-0 after:transition-opacity after:duration-(--motion-exit-duration) after:ease-(--motion-exit-easing) forced-colors:after:bg-[CanvasText] group-data-[state=collapsed]/sidebar:after:opacity-100 group-data-[state=collapsed]/sidebar:after:duration-(--motion-enter-duration) group-data-[state=collapsed]/sidebar:after:ease-(--motion-enter-easing)',
         className,
@@ -556,21 +591,43 @@ function SidebarGroupLabel({ className, children, ...props }: ComponentProps<'di
       {...props}
     >
       {/* A long heading truncates, and shows whole under the pointer; in the rail it is hidden. */}
-      <CutTooltip
-        // In the rail the heading is hidden.
-        disabled={rail}
-        render={
-          <span
-            data-cut
-            className={cn(
-              'shrink-0 truncate transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-[state=collapsed]/sidebar:opacity-0 group-data-[state=collapsed]/sidebar:duration-(--motion-exit-duration) group-data-[state=collapsed]/sidebar:ease-(--motion-exit-easing)',
-              contentWidth,
-            )}
-          >
-            {children}
-          </span>
-        }
-      />
+      {toggles ? (
+        <CutTooltip
+          disabled={rail}
+          render={
+            <button
+              type='button'
+              aria-expanded={open}
+              // In the rail its words are gone, so it leaves the tab order.
+              tabIndex={rail ? -1 : undefined}
+              onClick={() => onOpenChange?.(!open)}
+              data-slot='sidebar-group-toggle'
+              className={cn(
+                'group/collapsible-trigger hover:text-sidebar-foreground flex h-full shrink-0 items-center gap-1 rounded-(--control-radius-capped) text-start',
+                rowPadding,
+                // As wide as a row whatever the sidebar's own width, so its words don't reflow as the rail closes.
+                'w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding))]',
+                'transition-[color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)',
+                // Inset, since the list scrolls and would clip a ring past its edge.
+                'focus-visible:ring-ring/50 focus-visible:ring-3 focus-visible:ring-inset focus-visible:outline-hidden',
+                // Forced colours' outline, inside, since the heading clips what passes its edge.
+                'focus-visible:-outline-offset-2',
+              )}
+            >
+              <span className={cn('flex min-w-0 items-center gap-1', fadesInRail)}>
+                {words}
+                <CollapsibleIndicator open={open} className='size-3' />
+              </span>
+            </button>
+          }
+        />
+      ) : (
+        <CutTooltip
+          // In the rail the heading is hidden.
+          disabled={rail}
+          render={words}
+        />
+      )}
     </div>
   )
 }
@@ -1076,7 +1133,13 @@ function Sidebar({
     }
   }, [open, icon, rail])
 
-  const peeking = usePeek({ enabled: !icon && !open, peek, setPeek, panelRef, id })
+  const peeking = usePeek({
+    enabled: !icon && !open,
+    peek,
+    setPeek,
+    panelRef,
+    id,
+  })
   // Slid away, or sliding: it still catches the pointer, which turns it back.
   const away = !icon && !open && peek !== 'open'
   const hidden = !icon && !open && peek === 'off'
@@ -1108,7 +1171,9 @@ function Sidebar({
           data-slot='sidebar-edge'
           data-side={side}
           className='absolute inset-y-0 z-20 hidden w-2 data-[side=end]:end-(--sidebar-edge-inset,0px) data-[side=start]:start-0 @3xl/sidebar-provider:block'
-          style={{ ['--sidebar-edge-inset' as string]: `${peeking.scrollbar}px` }}
+          style={{
+            ['--sidebar-edge-inset' as string]: `${peeking.scrollbar}px`,
+          }}
           {...peeking.edge}
         />
       ) : null}

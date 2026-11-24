@@ -10,7 +10,11 @@
  * faded, it appears in place again (Greg, 2026-11-13).
  */
 
-import { runningTransitions, withoutTransition } from '@/registry/lib/resize'
+import {
+  FOLLOWS_TRANSITION,
+  runningTransitions,
+  withoutTransition,
+} from '@/registry/lib/resize'
 import { registerProperties } from '@/registry/lib/run-progress'
 
 /** Where the highlight is in its life. The layer carries it as `data-highlight`. */
@@ -145,8 +149,25 @@ export function boxesAround(item: Element, group: Element) {
 }
 
 /** Whether `item` is sliding into a new place on a translate transition. */
-function sliding(item: HTMLElement) {
-  return runningTransitions(item, { property: 'translate' }).length > 0
+/**
+ * The `translate` transitions sliding `item` into a new place: its own, and
+ * those of the boxes around it inside `within`, such as a list's row that
+ * glides when the list changes (the `flow` lib) with the item inside it.
+ * Boxes from `within` up move the highlight's layer too, so they don't count.
+ */
+function slidesOf(item: HTMLElement, within?: Element | null): CSSTransition[] {
+  const slides: CSSTransition[] = []
+  for (
+    let at: HTMLElement | null = item;
+    at && at !== within && (within ? within.contains(at) : at === item);
+    at = at.parentElement
+  )
+    slides.push(...runningTransitions(at, { property: 'translate' }))
+  return slides
+}
+
+function sliding(item: HTMLElement, within?: Element | null) {
+  return slidesOf(item, within).length > 0
 }
 
 /**
@@ -156,8 +177,8 @@ function sliding(item: HTMLElement) {
  * reads the end whatever the translate is written in, such as a `calc()`
  * with percentages, which can't be added up from outside.
  */
-function boxOf(item: HTMLElement): Box {
-  const moving = runningTransitions(item, { property: 'translate' })
+function boxOf(item: HTMLElement, within?: Element | null): Box {
+  const moving = slidesOf(item, within)
   if (moving.length === 0) return item.getBoundingClientRect()
   const times = moving.map((transition) => transition.currentTime)
   for (const transition of moving) {
@@ -352,7 +373,7 @@ export function createHighlight(layer: HTMLElement): Highlight {
     box.left,
   ]
   const pursue = (on: HTMLElement, wider: number, taller: number) => {
-    const target = measure(boxOf(on), on)
+    const target = measure(boxOf(on, layer.parentElement), on)
     if (pursuit) {
       // The layer's own end and bottom edges moved: where it started stays put.
       const [top = 0, right = 0, bottom = 0, left = 0] = pursuit.from
@@ -385,6 +406,59 @@ export function createHighlight(layer: HTMLElement): Highlight {
     // Chromium holds a clip-path animation at its start while its keyframes
     // change every frame, unless its start time is set.
     animation.startTime = document.timeline.currentTime
+    const mine = { animation, from }
+    pursuit = mine
+    animation.finished.then(
+      () => {
+        if (pursuit === mine) pursuit = null
+      },
+      () => {},
+    )
+    return true
+  }
+
+  /**
+   * Moves with `on` as `slide` carries it: from where the slide started it,
+   * offset by the slide's first `translate`, to where it ends, at the
+   * slide's own time, easing and rate. The insets move in px as the
+   * translate does, so the highlight stays on the item every frame. False
+   * when the slide can't be read, and the highlight moves its own way.
+   */
+  const ride = (on: HTMLElement, slide: CSSTransition) => {
+    const effect = slide.effect
+    if (!(effect instanceof KeyframeEffect)) return false
+    const [first, last] = [effect.getKeyframes()[0], effect.getKeyframes().at(-1)]
+    const timing = effect.getComputedTiming()
+    if (!first || !last || slide.currentTime === null) return false
+    const [fromX, fromY] = translateOf(String(first.translate ?? '0px'))
+    const [toX, toY] = translateOf(String(last.translate ?? '0px'))
+    const target = measure(boxOf(on, layer.parentElement), on)
+    const [dx, dy] = [fromX - toX, fromY - toY]
+    const from = [
+      target.top + dy,
+      target.right - dx,
+      target.bottom - dy,
+      target.left + dx,
+    ]
+    stopPursuit()
+    jump(() => {
+      write(target)
+      layer.dataset.variant = on.dataset.variant ?? 'default'
+    })
+    const animation = layer.animate(
+      [
+        { clipPath: clipOf(from, target) },
+        { clipPath: clipOf(insetsOfBox(target), target) },
+      ],
+      {
+        duration: Number(timing.duration) || 0,
+        delay: Number(effect.getTiming().delay) || 0,
+        easing: effect.getTiming().easing ?? 'linear',
+        id: FOLLOWS_TRANSITION,
+      },
+    )
+    animation.playbackRate = slide.playbackRate
+    animation.currentTime = slide.currentTime
     const mine = { animation, from }
     pursuit = mine
     animation.finished.then(
@@ -441,7 +515,7 @@ export function createHighlight(layer: HTMLElement): Highlight {
       void getComputedStyle(layer).clipPath
     }
     enter(to)
-    if (next) place(boxOf(next), next)
+    if (next) place(boxOf(next, layer.parentElement), next)
     const last = item
     follow(next)
     const faded = fadingOver
@@ -503,21 +577,26 @@ export function createHighlight(layer: HTMLElement): Highlight {
     // Fading over an item that moves, it goes on toward it if it was on its
     // way there, else with it at once: a transition started every frame
     // would hold it where it was.
-    if (on !== item && !sliding(on)) {
-      const next = measure(boxOf(on), on)
+    if (on !== item && !sliding(on, layer.parentElement)) {
+      const next = measure(boxOf(on, layer.parentElement), on)
       if (placed && sameBox(placed, next)) return
-      if (!(gliding() && pursue(on, 0, 0))) jump(() => place(boxOf(on), on))
+      if (!(gliding() && pursue(on, 0, 0)))
+        jump(() => place(boxOf(on, layer.parentElement), on))
       return
     }
-    if (moving || sliding(on) || gliding()) {
+    // Its item slides to a new place (a pinned row gliding up its list): it
+    // goes with it, on the slide's own timing, so the two never part.
+    const [slide] = slidesOf(on, layer.parentElement)
+    if (on === item && slide && ride(on, slide)) return
+    if (moving || sliding(on, layer.parentElement) || gliding()) {
       // A glide already following its moving item goes on following it.
-      if (pursuit && on === item && !sliding(on)) pursue(on, 0, 0)
-      else place(boxOf(on), on)
+      if (pursuit && on === item && !sliding(on, layer.parentElement)) pursue(on, 0, 0)
+      else place(boxOf(on, layer.parentElement), on)
       return
     }
-    const next = measure(boxOf(on), on)
+    const next = measure(boxOf(on, layer.parentElement), on)
     if (placed && sameBox(placed, next)) return
-    jump(() => place(boxOf(on), on))
+    jump(() => place(boxOf(on, layer.parentElement), on))
   }
 
   const sizes = new ResizeObserver(() => {
@@ -530,16 +609,16 @@ export function createHighlight(layer: HTMLElement): Highlight {
       on?.isConnected &&
       state !== 'hidden' &&
       gliding() &&
-      !sliding(on) &&
+      !sliding(on, layer.parentElement) &&
       (wider !== 0 ||
         taller !== 0 ||
         !placed ||
-        !sameBox(placed, measure(boxOf(on), on))) &&
+        !sameBox(placed, measure(boxOf(on, layer.parentElement), on))) &&
       pursue(on, wider, taller)
     ) {
       return
     }
-    const moving = gliding() || (on !== null && sliding(on))
+    const moving = gliding() || (on !== null && sliding(on, layer.parentElement))
     rebase(wider, taller)
     refit(moving)
   })
@@ -549,9 +628,9 @@ export function createHighlight(layer: HTMLElement): Highlight {
   const reshape = () => {
     if (!item || state === 'hidden' || !item.isConnected) return
     // A glide on its way keeps going; it takes the new corners where it lands.
-    if (sliding(item) || gliding()) return
+    if (sliding(item, layer.parentElement) || gliding()) return
     const shown = item
-    withoutTransition(layer, () => place(boxOf(shown), shown))
+    withoutTransition(layer, () => place(boxOf(shown, layer.parentElement), shown))
   }
   const shaped = new MutationObserver(reshape)
   shaped.observe(document.documentElement, {
@@ -1041,10 +1120,17 @@ export function followPick(
   const first = picked()
   if (first) highlight.jump(first)
   // Items that come or go change the boxes around the picked one.
-  const changed = new MutationObserver(() => {
-    highlight.refit()
-    sync()
-  })
+  // Once every observer of the same change has run: a list that glides its
+  // rows (the `flow` lib) has started their slides by then, and the
+  // highlight goes with the picked one.
+  let stopped = false
+  const changed = new MutationObserver(() =>
+    queueMicrotask(() => {
+      if (stopped) return
+      highlight.refit()
+      sync()
+    }),
+  )
   // An item can also arrive already picked, as options that load late do.
   changed.observe(area, {
     subtree: true,
@@ -1053,6 +1139,7 @@ export function followPick(
     attributeFilter: attributes,
   })
   return () => {
+    stopped = true
     cancelAnimationFrame(frame)
     changed.disconnect()
     highlight.stop()
