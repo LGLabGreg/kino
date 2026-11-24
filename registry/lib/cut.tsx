@@ -52,11 +52,15 @@ function cutsAcross(part: { scrollWidth: number; clientWidth: number }, display:
 
 /** The text of each label marked `data-cut` in or on `owner`, while any of them is cut; otherwise none. */
 function cutLines(owner: HTMLElement, selector = cutLabels): readonly string[] {
-  // A count beside a label, such as a Badge's, isn't part of what it names.
+  // A count beside a label, such as a Badge's, isn't part of what it names, and a copy
+  // drawn for the eye only, such as a Text shimmer's light, would say it twice.
   const labels = [
     ...(owner.matches(selector) ? [owner] : []),
     ...owner.querySelectorAll<HTMLElement>(selector),
-  ].filter((label) => !label.closest('[data-slot=badge]'))
+  ].filter((label) => {
+    const hidden = label.closest('[aria-hidden=true]')
+    return !label.closest('[data-slot=badge]') && !(hidden && owner.contains(hidden))
+  })
   // A label may hold what cuts across, such as a name that truncates beside
   // an icon; one that says whether it is cut is taken at its word.
   const cut = (label: HTMLElement) =>

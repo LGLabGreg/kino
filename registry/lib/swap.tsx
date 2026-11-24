@@ -12,6 +12,7 @@ import {
   type RefObject,
   use,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -631,6 +632,36 @@ function nextView(view: SwapTextView, text: string): SwapTextView {
 /** Whether a `SwapText` cut short gives its whole text as a `title`: not inside a `CutTooltip`, which shows it. */
 const SwapTextTitleContext = createContext(true)
 
+type SwapTextMove = { text: string; from: number; to: number }
+
+/** Who measures in a stack, and its last move. */
+function swapTextStack() {
+  let lead: string | null = null
+  let last: SwapTextMove | null = null
+  return {
+    /** Leads the stack if no one does yet. */
+    join: (id: string) => {
+      lead ??= id
+    },
+    leave: (id: string) => {
+      if (lead === id) lead = null
+    },
+    /** The lead's own move, or for the others, the lead's move to the same text. */
+    move: (id: string, own: SwapTextMove): SwapTextMove => {
+      if (lead === id) last = own
+      return last?.text === own.text ? last : own
+    },
+  }
+}
+
+const SwapTextStackContext = createContext<ReturnType<typeof swapTextStack> | null>(null)
+
+/** Copies of one text laid over each other: the first `SwapText` inside measures each change and the rest move with it. */
+function SwapTextStack({ children }: { children: ReactNode }) {
+  const [stack] = useState(swapTextStack)
+  return <SwapTextStackContext value={stack}>{children}</SwapTextStackContext>
+}
+
 function currentPart(middle: Element | null): Element | null {
   return middle?.querySelector(':scope > [data-phase=in]') ?? null
 }
@@ -692,6 +723,15 @@ function SwapText({ text, className }: { text: string; className?: string }) {
     return () => observer.disconnect()
   }, [view])
 
+  // The first in a stack to mount leads it; layout effects run in tree order.
+  const self = useId()
+  const stack = use(SwapTextStackContext)
+  useLayoutEffect(() => {
+    if (!stack) return
+    stack.join(self)
+    return () => stack.leave(self)
+  }, [stack, self])
+
   const lastWidth = useLastWidth(rootRef)
   useLayoutEffect(() => {
     const middle = middleRef.current
@@ -705,8 +745,9 @@ function SwapText({ text, className }: { text: string; className?: string }) {
       to = layoutWidth(middle)
       from = Math.max(0, total - layoutWidth(prefix) - layoutWidth(suffix))
     })
+    if (stack) ({ from, to } = stack.move(self, { text, from, to }))
     if (Math.abs(to - from) >= 0.5) animateWidth(middle, from, to)
-  }, [text, lastWidth])
+  }, [text, lastWidth, stack, self])
 
   return (
     <span
@@ -790,6 +831,8 @@ function SwapIcon({
 }
 
 export {
+  SwapTextStack,
+  swapTextStack,
   SwapTextTitleContext,
   contentKey,
   fullPixels,

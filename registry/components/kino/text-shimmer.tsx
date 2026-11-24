@@ -1,6 +1,6 @@
 'use client'
 
-import { SwapText } from '@/registry/lib/swap'
+import { SwapText, SwapTextStack } from '@/registry/lib/swap'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -107,7 +107,7 @@ function TextShimmer({
           className,
         ),
         children: (
-          <>
+          <SwapTextStack>
             <span data-slot='text-shimmer-text' className={baseVariants(look)}>
               <SwapText text={children} />
             </span>
@@ -120,7 +120,7 @@ function TextShimmer({
                 <SwapText text={children} />
               </span>
             </span>
-          </>
+          </SwapTextStack>
         ),
       },
       props,
