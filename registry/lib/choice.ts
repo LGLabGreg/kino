@@ -18,7 +18,7 @@ export const choiceClassName =
 
 /** How a 16px box looks at rest: its border, surface and shadow, in either theme. */
 const choiceBoxLookClassName =
-  'size-4 justify-center border border-muted-foreground/80 bg-background shadow-xs dark:bg-input/30'
+  'size-4 shrink-0 justify-center border border-muted-foreground/80 bg-background shadow-xs dark:bg-input/30'
 
 /**
  * The 16px box a Checkbox or Radio is drawn in. While held (by the pointer,

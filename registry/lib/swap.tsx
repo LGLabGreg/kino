@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
   use,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -830,6 +831,31 @@ function SwapIcon({
   )
 }
 
+/**
+ * Focus that follows what a Swap brings in. Call the function it gives
+ * before a change, then, once the change has rendered with a new `key`, the
+ * first `[data-focus-target]` in `root` outside what is leaving (which is
+ * inert) takes focus. With no argument it follows only when focus was inside
+ * `root`, so it never pulls focus in from elsewhere.
+ */
+function useSwapFocus(root: RefObject<HTMLElement | null>, key: unknown) {
+  const moving = useRef(false)
+  useLayoutEffect(() => {
+    if (!moving.current) return
+    moving.current = false
+    const targets = root.current?.querySelectorAll<HTMLElement>('[data-focus-target]')
+    Array.from(targets ?? [])
+      .find((target) => !target.closest('[inert]'))
+      ?.focus()
+  }, [key, root])
+  return useCallback(
+    (follow?: boolean) => {
+      moving.current = follow ?? root.current?.contains(document.activeElement) ?? false
+    },
+    [root],
+  )
+}
+
 export {
   SwapTextStack,
   swapTextStack,
@@ -846,5 +872,6 @@ export {
   swapIconClassName,
   swapTo,
   SwapText,
+  useSwapFocus,
 }
 export type { SwapItem, SwapTextView }

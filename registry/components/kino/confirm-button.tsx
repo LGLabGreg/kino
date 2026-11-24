@@ -6,7 +6,7 @@ import { useAnnouncer } from '@/registry/lib/announce'
 import { CutTooltip } from '@/registry/lib/cut'
 import { noticeIcon } from '@/registry/lib/notice'
 import { settle } from '@/registry/lib/settle'
-import { Swap } from '@/registry/lib/swap'
+import { Swap, useSwapFocus } from '@/registry/lib/swap'
 import {
   type ComponentProps,
   type FocusEvent,
@@ -16,7 +16,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
@@ -106,24 +105,16 @@ function ConfirmButton({
   const questionId = useId()
   const rootRef = useRef<HTMLSpanElement>(null)
   // Focus follows the change when it was inside, so it never falls to the page.
-  const moveFocus = useRef(false)
+  const followFocus = useSwapFocus(rootRef, status)
   const run = useRef(0)
 
-  const go = useCallback((event: ConfirmEvent, follow?: boolean) => {
-    moveFocus.current =
-      follow ?? rootRef.current?.contains(document.activeElement) ?? false
-    setStatus((current) => confirmStatus(current, event))
-  }, [])
-
-  useLayoutEffect(() => {
-    if (!moveFocus.current) return
-    moveFocus.current = false
-    // What leaves is inert, so the mark that counts is the one on what arrived.
-    const targets = rootRef.current?.querySelectorAll<HTMLElement>('[data-focus-target]')
-    Array.from(targets ?? [])
-      .find((target) => !target.closest('[inert]'))
-      ?.focus()
-  }, [status])
+  const go = useCallback(
+    (event: ConfirmEvent, follow?: boolean) => {
+      followFocus(follow)
+      setStatus((current) => confirmStatus(current, event))
+    },
+    [followFocus],
+  )
 
   // A press anywhere else cancels the question.
   useEffect(() => {
