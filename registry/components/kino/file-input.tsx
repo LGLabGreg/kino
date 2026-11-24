@@ -11,7 +11,7 @@ import { useAnnouncer } from '@/registry/lib/announce'
 import { useLocale } from '@/registry/lib/dates'
 import { FieldValues, FieldWiring, OutsideField } from '@/registry/lib/field-control'
 import { useFlow } from '@/registry/lib/flow'
-import { numberFormatter } from '@/registry/lib/number-format'
+import { formatFileSize } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { transitionsSettled } from '@/registry/lib/resize'
 import { Swap, SwapText } from '@/registry/lib/swap'
@@ -173,36 +173,6 @@ function addFiles(
     return { value: [...value], added, removed: [], rejected }
   const removed = single ? value.filter((held) => !next.includes(held)) : []
   return { value: next, added, removed, rejected }
-}
-
-const UNITS = ['kilobyte', 'megabyte', 'gigabyte', 'terabyte'] as const
-
-/** A file's size the way a file manager writes it, in steps of 1,000: `820 B`, `2.4 MB`. */
-function formatFileSize(bytes: number, locale?: string) {
-  if (bytes < 1000) {
-    return numberFormatter(locale, {
-      style: 'unit',
-      unit: 'byte',
-      unitDisplay: 'narrow',
-    })
-      .format(bytes)
-      .replace(/(\d)B$/, '$1 B')
-  }
-  let size = bytes / 1000
-  let unit = 0
-  // Up a unit once the rounded number would read 1,000.
-  const digits = (value: number) => (value < 9.95 ? 1 : 0)
-  const rounded = (value: number) => Number(value.toFixed(digits(value)))
-  while (rounded(size) >= 1000 && unit < UNITS.length - 1) {
-    size /= 1000
-    unit += 1
-  }
-  return numberFormatter(locale, {
-    style: 'unit',
-    unit: UNITS[unit],
-    unitDisplay: 'short',
-    maximumFractionDigits: digits(size),
-  }).format(size)
 }
 
 const TYPE_NAMES: Record<string, string> = {

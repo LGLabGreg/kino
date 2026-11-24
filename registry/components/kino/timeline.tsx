@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils'
  * `status` reads a timeline as steps: a complete step's marker fills and the
  * line out of it fills along its length on `draw`; the current one is ringed
  * and lights once the line reaching it has filled; an upcoming one is hollow.
+ * A step that failed takes the destructive colour, its dot a diamond, and one
+ * skipped is hollow, its title struck through.
  *
  * When an event comes or goes, the others glide to their new places on
  * `layout` (`followFlow`) while the timeline follows its height: one that
@@ -38,7 +40,7 @@ import { cn } from '@/lib/utils'
  * than 28rem it goes back to a rail at the start, the aside above the title.
  */
 
-type TimelineStatus = Exclude<StepStatus, 'error'>
+type TimelineStatus = StepStatus
 
 /**
  * `className` is for the list itself, as `<ol>`'s; `containerClassName` for
@@ -91,8 +93,8 @@ function Timeline({
 }
 
 /**
- * One event. `status` makes it a step: `complete`, `current` or `upcoming`,
- * which its marker shows and a screen reader reads before its title
+ * One event. `status` makes it a step: `complete`, `current`, `upcoming`,
+ * `error` or `skipped`, which its marker shows and a screen reader reads before its title
  * (`aria-current='step'` for the current one). Left out, it is an event that
  * happened.
  */
@@ -253,14 +255,14 @@ function TimelineHeader({
   })
 }
 
-/** Muted while upcoming. A long unbroken word breaks rather than run out of the box. */
+/** Muted while upcoming, destructive on an error, and struck through when skipped. A long unbroken word breaks rather than run out of the box. */
 function TimelineTitle({ className, render, ...props }: useRender.ComponentProps<'div'>) {
   return useRender({
     defaultTagName: 'div',
     props: mergeProps<'div'>(
       {
         className: cn(
-          'min-w-0 text-sm leading-5 font-medium wrap-anywhere group-data-[status=upcoming]/timeline-item:text-muted-foreground',
+          'min-w-0 text-sm leading-5 font-medium wrap-anywhere group-data-[status=error]/timeline-item:text-destructive group-data-[status=skipped]/timeline-item:text-muted-foreground group-data-[status=skipped]/timeline-item:line-through group-data-[status=upcoming]/timeline-item:text-muted-foreground',
           className,
         ),
       },

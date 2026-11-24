@@ -3,19 +3,21 @@ import { cn } from '@/lib/utils'
 /*
  * What a step's marker looks like by its status, shared by the Timeline and
  * the Stepper so a step reads the same in both: complete fills, current is
- * ringed, upcoming is hollow, and an error takes the destructive colour.
+ * ringed, upcoming is hollow, an error takes the destructive colour, and a
+ * skipped step is hollow, its title struck through.
  * Each reads `data-status` on the step that carries `group/step`, and waits
  * `--step-wait` before its colours move, so a marker can light once the line
  * reaching it has filled.
  */
 
-type StepStatus = 'complete' | 'current' | 'upcoming' | 'error'
+type StepStatus = 'complete' | 'current' | 'upcoming' | 'error' | 'skipped'
 
 /** What a step's status reads as, before its title; the current one is `aria-current='step'` instead. */
 const stepStatusText: Partial<Record<StepStatus, string>> = {
   complete: 'Completed',
   upcoming: 'Upcoming',
   error: 'Error',
+  skipped: 'Skipped',
 }
 
 /** Its colours move on `morph` after `--step-wait`; one that arrives grows into place on `enter` (`starting:` in the component). */
@@ -25,18 +27,19 @@ const stepMarkerTransition =
 const currentRing =
   'group-data-[status=current]/step:ring-primary/20 group-data-[status=current]/step:ring-3 forced-colors:group-data-[status=current]/step:outline-2 forced-colors:group-data-[status=current]/step:outline-offset-1 forced-colors:group-data-[status=current]/step:outline-[Highlight]'
 
-/** A dot by status: filled when complete, ringed when current, hollow when upcoming. */
+/** A dot by status: filled when complete, ringed when current, hollow when upcoming, a destructive diamond on an error, so the error isn't told by colour alone, and hollow when skipped, its title struck through. */
 const stepDotClassName = cn(
   'bg-muted-foreground/60 size-2.5 rounded-full border-2 border-transparent forced-colors:bg-[CanvasText]',
   'group-data-[status=complete]/step:bg-primary forced-colors:group-data-[status=complete]/step:bg-[Highlight]',
   'group-data-[status=current]/step:bg-background group-data-[status=current]/step:border-primary forced-colors:group-data-[status=current]/step:border-[Highlight] forced-colors:group-data-[status=current]/step:bg-[Canvas]',
   currentRing,
   'group-data-[status=upcoming]/step:bg-background group-data-[status=upcoming]/step:border-muted-foreground/50 forced-colors:group-data-[status=upcoming]/step:border-[CanvasText] forced-colors:group-data-[status=upcoming]/step:bg-[Canvas]',
-  'group-data-[status=error]/step:bg-destructive forced-colors:group-data-[status=error]/step:bg-[CanvasText]',
+  'group-data-[status=error]/step:bg-destructive group-data-[status=error]/step:size-2 group-data-[status=error]/step:rotate-45 group-data-[status=error]/step:rounded-none forced-colors:group-data-[status=error]/step:bg-[CanvasText]',
+  'group-data-[status=skipped]/step:bg-background group-data-[status=skipped]/step:border-muted-foreground/50 forced-colors:group-data-[status=skipped]/step:border-[GrayText] forced-colors:group-data-[status=skipped]/step:bg-[Canvas]',
   stepMarkerTransition,
 )
 
-/** A circle that holds an icon, a number or an avatar, by status as a dot is: filled, ringed, hollow and dashed, or destructive. */
+/** A circle that holds an icon, a number or an avatar, by status as a dot is: filled, ringed, hollow and dashed, destructive, or hollow when skipped. */
 const stepTileClassName = cn(
   "bg-muted text-muted-foreground size-full overflow-hidden rounded-full border border-transparent [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 forced-colors:border-[CanvasText]",
   'group-data-[status=complete]/step:bg-primary group-data-[status=complete]/step:text-primary-foreground',
@@ -44,6 +47,7 @@ const stepTileClassName = cn(
   currentRing,
   'group-data-[status=upcoming]/step:bg-background group-data-[status=upcoming]/step:border-border group-data-[status=upcoming]/step:border-dashed',
   'group-data-[status=error]/step:bg-background group-data-[status=error]/step:text-destructive group-data-[status=error]/step:border-destructive forced-colors:group-data-[status=error]/step:border-dashed',
+  'group-data-[status=skipped]/step:bg-background group-data-[status=skipped]/step:text-muted-foreground group-data-[status=skipped]/step:border-border forced-colors:group-data-[status=skipped]/step:text-[GrayText]',
   stepMarkerTransition,
 )
 

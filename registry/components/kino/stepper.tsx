@@ -3,7 +3,7 @@
 import { choiceWipeClassName } from '@/registry/lib/choice'
 import { mergeRefs } from '@/registry/lib/refs'
 import {
-  type StepStatus,
+  type StepStatus as AnyStepStatus,
   stepLineClassName,
   stepLineFillClassName,
   stepStatusText,
@@ -26,6 +26,9 @@ import {
 } from 'react'
 
 import { cn } from '@/lib/utils'
+
+/** A Stepper's step is never skipped: a wizard's steps are each done, current or to come. */
+type StepperStatus = Exclude<AnyStepStatus, 'skipped'>
 
 /*
  * Where a person is in a flow of steps, such as a checkout or a setup: each
@@ -64,7 +67,7 @@ function useStepper() {
 
 interface StepperItemContextValue {
   step: number
-  status: StepStatus
+  status: StepperStatus
   setHasTrigger: (has: boolean) => void
 }
 
@@ -204,9 +207,9 @@ function StepperItem({
   render,
   children,
   ...props
-}: useRender.ComponentProps<'li'> & { step: number; status?: StepStatus }) {
+}: useRender.ComponentProps<'li'> & { step: number; status?: StepperStatus }) {
   const { value, from, orientation } = useStepper()
-  const status: StepStatus =
+  const status: StepperStatus =
     statusProp ?? (step < value ? 'complete' : step === value ? 'current' : 'upcoming')
   const [hasTrigger, setHasTrigger] = useState(false)
   const horizontal = orientation === 'horizontal'
@@ -504,4 +507,4 @@ export {
   StepperTitle,
   StepperTrigger,
 }
-export type { StepperOrientation }
+export type { StepperOrientation, StepperStatus }
