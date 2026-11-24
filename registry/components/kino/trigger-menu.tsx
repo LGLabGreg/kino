@@ -9,6 +9,7 @@ import {
   FilterListRows,
   filterListScrollerClassName,
 } from '@/registry/lib/filter-list'
+import { isComposing } from '@/registry/lib/keys'
 import { matchRange } from '@/registry/lib/match'
 import {
   menuLabelClassName,
@@ -314,7 +315,7 @@ function TriggerMenu({
     if (!editor) return
     const { element } = editor
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing) return
+      if (isComposing(event)) return
       const state = keys.current
       if (!state.open) {
         // Ctrl+Space opens it at the trigger the caret is in, read afresh,

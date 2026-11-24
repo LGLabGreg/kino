@@ -16,6 +16,7 @@ import {
 import { CutTooltip } from '@/registry/lib/cut'
 import { useFieldControl } from '@/registry/lib/field-control'
 import { fromWhereItIs, leaveAsCopy, returnFromCopy } from '@/registry/lib/flow'
+import { isComposing } from '@/registry/lib/keys'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Swap, swapIconClassName } from '@/registry/lib/swap'
 import {
@@ -735,7 +736,7 @@ function TokenInput({
 
   const handlers: EditorHandlers = {
     onKeyDown: (event) => {
-      if (event.defaultPrevented || event.nativeEvent.isComposing || !editor) return
+      if (event.defaultPrevented || isComposing(event.nativeEvent) || !editor) return
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
       if (readOnly && mod && !event.altKey && key === 'a') {
@@ -750,9 +751,8 @@ function TokenInput({
         return
       }
       if (event.key === 'Enter' && !event.shiftKey) {
-        const sends = submitShortcut === 'enter' ? !mod : mod
         const owner = hidden.current?.form
-        if (sends && (onSubmit || owner)) {
+        if (submits(event.nativeEvent, submitShortcut) && (onSubmit || owner)) {
           event.preventDefault()
           if (onSubmit) onSubmit(latest.current)
           else owner?.requestSubmit()
@@ -901,6 +901,19 @@ function TokenInput({
       {region}
     </TokenInputContext>
   )
+}
+
+/** Whether a key press is the submit shortcut: never while an input method composes, so the Enter that picks a word stays in the text. */
+function submits(
+  event: Pick<
+    globalThis.KeyboardEvent,
+    'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'isComposing' | 'keyCode'
+  >,
+  shortcut: 'enter' | 'mod+enter',
+) {
+  if (event.key !== 'Enter' || event.shiftKey || isComposing(event)) return false
+  const mod = event.metaKey || event.ctrlKey
+  return shortcut === 'enter' ? !mod : mod
 }
 
 function subscribeNever() {
@@ -1140,7 +1153,7 @@ function TokenInputToken({
           className={cn(
             chipClassName,
             chipLeavingClassName,
-            'px-2 leading-none whitespace-nowrap has-[[data-slot=token-input-token-remove]]:pe-0',
+            'px-2 whitespace-nowrap has-[[data-slot=token-input-token-remove]]:pe-0',
             // It scales in on `enter` once the field has painted, as a tag does.
             '[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),scale_var(--motion-enter-duration)_var(--motion-enter-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)] in-data-mounted:starting:opacity-0 motion-safe:in-data-mounted:starting:scale-75 motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)]',
             'data-selected:ring-3 data-selected:ring-ring/50 forced-colors:data-selected:outline-2 forced-colors:data-selected:outline-[Highlight]',
@@ -2011,6 +2024,7 @@ export {
   splice,
   stepCaret,
   stepOffset,
+  submits,
   tokenCodec,
   toLabel,
   toText,

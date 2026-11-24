@@ -13,6 +13,7 @@ import {
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
+import { isComposing } from '@/registry/lib/keys'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import {
   type ComponentProps,
@@ -364,7 +365,7 @@ function TagInputInput({
       enterKeyHint='enter'
       onKeyDown={(event) => {
         onKeyDown?.(event)
-        if (event.baseUIHandlerPrevented || event.nativeEvent.isComposing) return
+        if (event.baseUIHandlerPrevented || isComposing(event.nativeEvent)) return
         const text = event.currentTarget.value
         // Enter on a suggestion picks it; Enter on what was typed adds it.
         const adds =

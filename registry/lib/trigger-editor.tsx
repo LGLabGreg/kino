@@ -18,6 +18,8 @@ interface TriggerTokenContent {
   label: string
   /** The text it turns back into when it is reverted, such as `@Ada Lovelace`. */
   text?: string
+  /** Anything else its drawing needs, in an editor that holds tokens. */
+  data?: unknown
 }
 
 /** Text, or a token, to put in the field. */

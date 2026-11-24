@@ -15,6 +15,7 @@ import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
+import { isComposing } from '@/registry/lib/keys'
 import { noticeIcon } from '@/registry/lib/notice'
 import { mergeRefs } from '@/registry/lib/refs'
 import { settle } from '@/registry/lib/settle'
@@ -333,7 +334,7 @@ function InlineEdit({
   const fieldKeyDown: InputPrimitive.Props['onKeyDown'] = (event) => {
     onKeyDown?.(event)
     // Enter that picks a word in an input method editor isn't a save.
-    if (event.nativeEvent.isComposing || event.key !== 'Enter') return
+    if (isComposing(event.nativeEvent) || event.key !== 'Enter') return
     event.preventDefault()
     // A held Enter repeats, and would open the field it just closed.
     if (!event.repeat) commit(true)
@@ -341,7 +342,7 @@ function InlineEdit({
 
   // Escape puts the text back from anywhere in the field, its buttons included.
   const boxKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!editing || event.key !== 'Escape' || event.nativeEvent.isComposing) return
+    if (!editing || event.key !== 'Escape' || isComposing(event.nativeEvent)) return
     // Only the field closes, not a dialog it sits in.
     event.preventDefault()
     event.stopPropagation()

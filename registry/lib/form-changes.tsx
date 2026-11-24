@@ -2,7 +2,7 @@
 
 import { type FormStatus, useFormSubmission } from '@/registry/components/kino/field'
 import { useAnnouncer } from '@/registry/lib/announce'
-import { matchesShortcut, useApplePlatform } from '@/registry/lib/keys'
+import { isComposing, matchesShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { refuse } from '@/registry/lib/refuse'
 import { transitionsQuiet } from '@/registry/lib/resize'
 import { revealBehavior } from '@/registry/lib/scroll'
@@ -530,7 +530,7 @@ export function useSaveBar({
     if (!changed || saving) return undefined
     const onKeyDown = (event: KeyboardEvent) => {
       const form = elementRef.current
-      if (!form || event.isComposing || !matchesShortcut(event, ['Mod', 'S'], apple))
+      if (!form || isComposing(event) || !matchesShortcut(event, ['Mod', 'S'], apple))
         return
       const target = event.target instanceof Element ? event.target : null
       const owns = ownsSaveShortcut({

@@ -22,7 +22,7 @@ const chipLeavingClassName =
 
 /** Its remove button: as tall as the chip, square, at its end. */
 const chipRemoveClassName =
-  'text-muted-foreground hover:text-foreground hover:bg-foreground/10 grid size-(--control-height-xs) shrink-0 place-items-center rounded-(--control-radius-xs) transition-[color,background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)'
+  'text-muted-foreground hover:text-foreground hover:bg-foreground/10 focus-visible:ring-ring/50 grid size-(--control-height-xs) shrink-0 place-items-center rounded-(--control-radius-xs) transition-[color,background-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) focus-visible:ring-3 focus-visible:outline-hidden'
 
 /** The cross on a chip's remove button: an xs icon button's size, larger than the chip's own icons. */
 function ChipRemoveIcon() {

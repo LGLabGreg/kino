@@ -1408,10 +1408,6 @@ function FileInputRejected({
 }: Omit<ComponentProps<'div'>, 'children'>) {
   const { rejected, dismissRejected, accept, maxSize, maxFiles, multiple, locale } =
     useFileInput()
-  const rules: FileRules = { accept, maxSize, maxFiles, multiple }
-  // What it said, kept while it closes.
-  const [shown, setShown] = useState(rejected)
-  if (rejected.length > 0 && shown !== rejected) setShown(rejected)
   return (
     <div
       data-slot='file-input-rejected'
@@ -1422,39 +1418,68 @@ function FileInputRejected({
       )}
       {...props}
     >
-      <Alert
-        type='warning'
-        open={rejected.length > 0}
-        onOpenChange={(open) => {
-          if (!open) dismissRejected()
-        }}
-        showCloseButton
-      >
-        <AlertTitle dir='auto'>{rejectedTitle(shown)}</AlertTitle>
-        <AlertDescription>
-          {shown.length === 1 ? (
-            // The title names the file: the reason is all that's left to say.
-            <span dir='auto'>{rejectionText(shown[0], rules, locale)}</span>
-          ) : (
-            <ul className='flex flex-col gap-0.5'>
-              {shown.slice(0, 4).map((rejection) => (
-                <li
-                  key={`${rejection.file.name}-${rejection.reason}`}
-                  className='flex min-w-0 flex-col'
-                >
-                  <span dir='auto' className='max-w-full font-medium wrap-anywhere'>
-                    {rejection.file.name}
-                    <span className='sr-only'>: </span>
-                  </span>
-                  <span dir='auto'>{rejectionText(rejection, rules, locale)}</span>
-                </li>
-              ))}
-              {shown.length > 4 ? <li>And {shown.length - 4} more</li> : null}
-            </ul>
-          )}
-        </AlertDescription>
-      </Alert>
+      <FileRejections
+        rejected={rejected}
+        rules={{ accept, maxSize, maxFiles, multiple }}
+        locale={locale}
+        onDismiss={dismissRejected}
+      />
     </div>
+  )
+}
+
+/**
+ * The files turned away and why, as a warning that closes once they're
+ * dismissed: the File input's, and any part's that takes files by its rules.
+ */
+function FileRejections({
+  rejected,
+  rules,
+  locale,
+  onDismiss,
+}: {
+  /** Empty closes it. */
+  rejected: readonly FileRejection[]
+  rules: FileRules
+  locale?: string
+  onDismiss: () => void
+}) {
+  // What it said, kept while it closes.
+  const [shown, setShown] = useState(rejected)
+  if (rejected.length > 0 && shown !== rejected) setShown(rejected)
+  return (
+    <Alert
+      type='warning'
+      open={rejected.length > 0}
+      onOpenChange={(open) => {
+        if (!open) onDismiss()
+      }}
+      showCloseButton
+    >
+      <AlertTitle dir='auto'>{rejectedTitle(shown)}</AlertTitle>
+      <AlertDescription>
+        {shown.length === 1 ? (
+          // The title names the file: the reason is all that's left to say.
+          <span dir='auto'>{rejectionText(shown[0], rules, locale)}</span>
+        ) : (
+          <ul className='flex flex-col gap-0.5'>
+            {shown.slice(0, 4).map((rejection) => (
+              <li
+                key={`${rejection.file.name}-${rejection.reason}`}
+                className='flex min-w-0 flex-col'
+              >
+                <span dir='auto' className='max-w-full font-medium wrap-anywhere'>
+                  {rejection.file.name}
+                  <span className='sr-only'>: </span>
+                </span>
+                <span dir='auto'>{rejectionText(rejection, rules, locale)}</span>
+              </li>
+            ))}
+            {shown.length > 4 ? <li>And {shown.length - 4} more</li> : null}
+          </ul>
+        )}
+      </AlertDescription>
+    </Alert>
   )
 }
 
@@ -1779,6 +1804,7 @@ export {
   FileInputRejected,
   FileInputStatus,
   FileInputTrigger,
+  FileRejections,
 }
 
 export type {
@@ -1786,6 +1812,7 @@ export type {
   FileInputChangeDetails,
   FileRejection,
   FileRejectionReason,
+  FileRules,
   SavedFile,
   UploadFile,
   UploadOptions,

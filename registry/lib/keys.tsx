@@ -220,6 +220,15 @@ type ShortcutPress = Pick<
 >
 
 /**
+ * Whether a key press belongs to an input method that is composing, such as
+ * the Enter that picks a word in Japanese: it is never a shortcut. Safari
+ * sends that Enter with `isComposing` false, and only keyCode 229 tells.
+ */
+export function isComposing(event: Pick<KeyboardEvent, 'isComposing' | 'keyCode'>) {
+  return event.isComposing || event.keyCode === 229
+}
+
+/**
  * Whether a press is the shortcut `keys` names, as `['Mod', 'K']` or `['/']`:
  * the same modifiers, no more, and one other key, by what it typed or where it
  * is. Shift is left free for a sign it types, as `?` is Shift and `/`.
@@ -274,7 +283,7 @@ export function useShortcut(
     if (!shortcut) return undefined
     const names = JSON.parse(shortcut) as string[]
     function onKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing) return
+      if (event.defaultPrevented || isComposing(event)) return
       if (onlyTypes(event, inField(event.target))) return
       if (!matchesShortcut(event, names, apple)) return
       if (target && outOfReach(target)) return
