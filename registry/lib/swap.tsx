@@ -836,13 +836,23 @@ function SwapIcon({
  * before a change, then, once the change has rendered with a new `key`, the
  * first `[data-focus-target]` in `root` outside what is leaving (which is
  * inert) takes focus. With no argument it follows only when focus was inside
- * `root`, so it never pulls focus in from elsewhere.
+ * `root`, so it never pulls focus in from elsewhere. A change nobody called
+ * it for, such as new data from the page, follows too when focus was on what
+ * leaves, which would otherwise drop it to the page; `false` keeps it where
+ * it is.
  */
 function useSwapFocus(root: RefObject<HTMLElement | null>, key: unknown) {
-  const moving = useRef(false)
+  // Whether the next change follows, when it was asked; null to follow focus that is leaving.
+  const moving = useRef<boolean | null>(null)
   useLayoutEffect(() => {
-    if (!moving.current) return
-    moving.current = false
+    const asked = moving.current
+    moving.current = null
+    const active = document.activeElement
+    const leaving =
+      active !== null &&
+      (root.current?.contains(active) ?? false) &&
+      active.closest('[inert]') !== null
+    if (!(asked ?? leaving)) return
     const targets = root.current?.querySelectorAll<HTMLElement>('[data-focus-target]')
     Array.from(targets ?? [])
       .find((target) => !target.closest('[inert]'))

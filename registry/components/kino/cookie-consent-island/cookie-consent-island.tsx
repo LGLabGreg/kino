@@ -12,6 +12,11 @@ import {
   defaultText,
   useCookieConsent,
 } from '@/registry/lib/cookie-consent-parts'
+import {
+  islandPlaceClassName,
+  islandMotionClassName,
+  islandSurfaceClassName,
+} from '@/registry/lib/island'
 import { panelTitleClassName } from '@/registry/lib/panel'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import { Swap } from '@/registry/lib/swap'
@@ -79,10 +84,7 @@ function CookieConsentIsland<Id extends string>({
   return (
     <div
       data-slot='cookie-consent'
-      className={cn(
-        '@container/cookie-consent pointer-events-none flex w-full justify-center',
-        className,
-      )}
+      className={cn(islandPlaceClassName, className)}
       {...props}
     >
       {model.region}
@@ -94,15 +96,12 @@ function CookieConsentIsland<Id extends string>({
         data-customising={model.customising ? '' : undefined}
         inert={!model.shown}
         className={cn(
+          islandSurfaceClassName,
           cookieConsentStatesClassName,
+          islandMotionClassName,
           cookieConsentFocusClassName,
-          'bg-popover text-popover-foreground pointer-events-auto max-w-full overflow-clip border shadow-lg',
           // One line: its corner wraps the buttons' at its padding, a pill when they are. A card once it opens or wraps.
-          '[--cookie-consent-padding:--spacing(2)] [--cookie-consent-pill:calc(var(--control-height)/2+var(--cookie-consent-padding))]',
-          'rounded-(--surface-radius) @2xl/cookie-consent:rounded-[min(var(--cookie-consent-pill),calc(var(--control-radius)+var(--cookie-consent-padding)))] @2xl/cookie-consent:data-customising:rounded-(--surface-radius)',
-          // Arrives on `enter`, leaves on `exit`, and its corner follows its size on `layout`.
-          '[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),translate_var(--motion-enter-duration)_var(--motion-enter-easing),visibility_0s,border-radius_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing),visibility_0s]',
-          'data-closed:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),translate_var(--motion-exit-duration)_var(--motion-exit-easing),visibility_0s_var(--motion-exit-duration),border-radius_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:data-closed:[transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing),visibility_0s_var(--motion-exit-duration)]',
+          'rounded-(--surface-radius) @2xl/island:rounded-(--island-pill) @2xl/island:data-customising:rounded-(--surface-radius)',
         )}
       >
         <Swap block id={model.customising ? 'panel' : 'pill'}>
@@ -134,12 +133,12 @@ function CookieConsentIsland<Id extends string>({
                   ))}
                 </div>
               </div>
-              <div className='mt-(--surface-gap) flex flex-col gap-2 @xs/cookie-consent:flex-row @xs/cookie-consent:[&>:first-child]:me-auto'>
+              <div className='mt-(--surface-gap) flex flex-col gap-2 @xs/island:flex-row @xs/island:[&>:first-child]:me-auto'>
                 {buttons}
               </div>
             </div>
           ) : (
-            <div className='flex w-[min(28rem,calc(100cqw-2px))] flex-col gap-3 p-(--surface-padding) @2xl/cookie-consent:w-auto @2xl/cookie-consent:flex-row @2xl/cookie-consent:items-center @2xl/cookie-consent:gap-4 @2xl/cookie-consent:py-(--cookie-consent-padding) @2xl/cookie-consent:ps-5 @2xl/cookie-consent:pe-(--cookie-consent-padding)'>
+            <div className='flex w-[min(28rem,calc(100cqw-2px))] flex-col gap-3 p-(--surface-padding) @2xl/island:w-auto @2xl/island:flex-row @2xl/island:items-center @2xl/island:gap-4 @2xl/island:py-(--island-padding) @2xl/island:ps-5 @2xl/island:pe-(--island-padding)'>
               <p className='flex min-w-0 items-center gap-2.5 text-sm'>
                 <IconPlaceholder
                   lucide='CookieIcon'
@@ -165,7 +164,7 @@ function CookieConsentIsland<Id extends string>({
                   ) : null}
                 </span>
               </p>
-              <div className='flex flex-col gap-2 @xs/cookie-consent:flex-row @xs/cookie-consent:[&>:first-child]:me-auto @2xl/cookie-consent:[&>:first-child]:me-0'>
+              <div className='flex flex-col gap-2 @xs/island:flex-row @xs/island:[&>:first-child]:me-auto @2xl/island:[&>:first-child]:me-0'>
                 {buttons}
               </div>
             </div>

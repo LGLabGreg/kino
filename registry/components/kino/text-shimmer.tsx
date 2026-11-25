@@ -63,19 +63,25 @@ const layerVariants = cva('pointer-events-none absolute select-none', {
 })
 
 // The words on top. Under reduced motion nothing travels: in `sweep` and `glow` they
-// breathe in place over the copy underneath; `breathe` holds still.
-const copyVariants = cva('flex', {
-  variants: {
-    variant: {
-      sweep:
-        'absolute inset-y-0 start-[calc(50%+var(--text-shimmer-spread,2em))] w-[calc(50%-var(--text-shimmer-spread,2em)*2)] motion-safe:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-safe:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-reduce:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-reduce:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running] forced-colors:animate-none',
-      glow: 'absolute inset-y-0 start-[calc(50%+var(--text-shimmer-spread,2em))] w-[calc(50%-var(--text-shimmer-spread,2em)*2)] motion-safe:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-safe:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-reduce:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-reduce:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running]',
-      breathe:
-        'min-w-0 flex-1 motion-safe:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running] forced-colors:animate-none',
+// breathe in place over the copy underneath; `breathe` holds still. Their box is
+// worked out from the window's width, which Firefox can round a fraction of a pixel
+// under the words' own: they draw an ellipsis only once they measure cut, or it
+// would eat a letter the copy underneath shows whole ("Failing tes…ts").
+const copyVariants = cva(
+  'flex [&_[data-slot=swap-text]_span]:text-clip [&_[data-slot=swap-text][data-cut=cut]_span]:text-ellipsis',
+  {
+    variants: {
+      variant: {
+        sweep:
+          'absolute inset-y-0 start-[calc(50%+var(--text-shimmer-spread,2em))] w-[calc(50%-var(--text-shimmer-spread,2em)*2)] motion-safe:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-safe:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-reduce:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-reduce:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running] forced-colors:animate-none',
+        glow: 'absolute inset-y-0 start-[calc(50%+var(--text-shimmer-spread,2em))] w-[calc(50%-var(--text-shimmer-spread,2em)*2)] motion-safe:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-sweep-text_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-safe:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_paused] motion-safe:group-data-loading/text-shimmer:group-data-[pass=b]/text-shimmer:animate-[kino-text-shimmer-sweep-text-b_calc(var(--motion-layout-duration)*5)_linear_infinite_running] motion-reduce:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-reduce:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running]',
+        breathe:
+          'min-w-0 flex-1 motion-safe:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_paused] motion-safe:group-data-loading/text-shimmer:animate-[kino-text-shimmer-breathe_calc(var(--motion-layout-duration)*5)_ease-in-out_infinite_running] forced-colors:animate-none',
+      },
     },
+    defaultVariants: { variant: 'sweep' },
   },
-  defaultVariants: { variant: 'sweep' },
-})
+)
 
 function TextShimmer({
   className,

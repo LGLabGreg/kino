@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
   slidingFillClassName,
@@ -158,4 +159,69 @@ function ProgressValue({
   )
 }
 
-export { Progress, ProgressLabel, ProgressValue }
+/**
+ * The progress as a ring, for a line too short for a track, such as an
+ * island's pill: it fills clockwise from the top on `draw`. While the value
+ * is unknown, the Spinner's arc turns in its place, and it fades to the ring
+ * once a value comes. It is 16px, as an icon beside text.
+ */
+function ProgressRing({
+  className,
+  value,
+  min = 0,
+  max = 100,
+  ...props
+}: Omit<ProgressPrimitive.Root.Props, 'className' | 'children'> & {
+  className?: string
+  /** Names a ring that has no label beside it. */
+  'aria-label'?: string
+}) {
+  const percent = valuePercent(value, min, max)
+  return (
+    <ProgressPrimitive.Root
+      data-slot='progress-ring'
+      value={value}
+      min={min}
+      max={max}
+      className={cn(
+        'group/progress-ring text-primary relative inline-grid size-4 shrink-0 forced-colors:text-[Highlight] *:col-start-1 *:row-start-1 *:size-full',
+        className,
+      )}
+      {...props}
+    >
+      <svg
+        aria-hidden
+        viewBox='0 0 16 16'
+        fill='none'
+        className='opacity-100 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-indeterminate/progress-ring:opacity-0'
+      >
+        <circle
+          cx='8'
+          cy='8'
+          r='6'
+          stroke='currentColor'
+          strokeOpacity='0.25'
+          strokeWidth='2'
+        />
+        <circle
+          cx='8'
+          cy='8'
+          r='6'
+          pathLength={100}
+          strokeDasharray='100'
+          strokeDashoffset={100 - percent}
+          strokeWidth='2'
+          strokeLinecap='round'
+          transform='rotate(-90 8 8)'
+          className='stroke-current transition-[stroke-dashoffset] duration-(--motion-draw-duration) ease-(--motion-draw-easing) motion-reduce:transition-none'
+        />
+      </svg>
+      <Spinner
+        aria-hidden
+        className='size-full opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-easing) [animation-play-state:paused] group-data-indeterminate/progress-ring:opacity-100 group-data-indeterminate/progress-ring:[animation-play-state:running]'
+      />
+    </ProgressPrimitive.Root>
+  )
+}
+
+export { Progress, ProgressLabel, ProgressRing, ProgressValue }
