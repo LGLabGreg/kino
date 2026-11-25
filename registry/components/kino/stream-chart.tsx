@@ -30,15 +30,11 @@ import { type CartesianModel, markLayer } from '@/registry/lib/chart-frame'
 import {
   EntranceWipe,
   framePoints,
-  litMaskClassName,
-  litWindow,
-  litWindowClassName,
-  litWindowStyle,
-  masked,
-  maskedFrame,
+  frameTop,
+  LitDots,
   mirror,
+  paintLitDots,
   registerLineProperties,
-  steppedMaskClassName,
   unitFrame,
 } from '@/registry/lib/chart-line'
 import { numberOf, rowValues, stepThrough } from '@/registry/lib/chart-math'
@@ -51,6 +47,7 @@ import {
   type MoveRole,
   plotLayerClassName,
   seriesColor,
+  stepBackInkClassName,
   swatchClassName,
   swatchStyle,
   useFromRest,
@@ -93,9 +90,9 @@ import { cn } from '@/lib/utils'
  * under the pointer, or the one Up and Down reach, stays bright while the
  * rest step back; a guide follows the stop under the pointer or the keys,
  * and the callouts above and below the plot give the stream's total there
- * and the lit layer's value. Without them, the pointer lights the whole
- * stop, as the Area chart does, for the tooltip to read out. A soft glow of
- * the layers' colours sits behind them.
+ * and the lit layer's value. Without them, the pointer
+ * lights the whole stop, as the Area chart does, for the tooltip to read
+ * out, and a dot on each layer's top marks it.
  *
  * Each layer is drawn through its points in fractions of the plot, as the
  * Area chart's are, and moves on the chart's clock: new data on `layout`, a
@@ -126,11 +123,9 @@ interface StreamChartProps extends Omit<CategoryChartProps, 'patterns'> {
    * place.
    */
   entrance?: 'rise' | 'draw' | 'none'
-  /** A soft glow of the layers' colours behind them; on by default. */
-  glow?: boolean
 }
 
-const streamChartKeys = [...cartesianChartKeys, 'offset', 'curve', 'entrance', 'glow']
+const streamChartKeys = [...cartesianChartKeys, 'offset', 'curve', 'entrance']
 
 /** What the stream's own parts read. */
 interface StreamContextValue {
@@ -150,13 +145,16 @@ interface StreamContextValue {
    * chart does, which the tooltip reads out.
    */
   lights: 'layer' | 'stop'
-  /** Writes a layer's points into its fills, its glow and the seam along its top. */
+  /**
+   * Writes a layer's points into its fill and the seam along its top, and
+   * while it is `moving`, carries its lit dot.
+   */
   paint: (
     key: string,
     points: readonly LinePoint[],
-    fills: readonly (SVGPathElement | null)[],
+    fill: SVGPathElement | null,
+    moving: boolean,
   ) => void
-  glows: RefObject<Map<string, SVGPathElement>>
   seams: RefObject<Map<string, SVGPathElement>>
 }
 
@@ -186,7 +184,6 @@ function StreamChart(props: StreamChartProps) {
     offset = 'wiggle',
     curve = 'bump',
     entrance = 'none',
-    glow = true,
     description,
     empty,
     className,
@@ -212,9 +209,10 @@ function StreamChart(props: StreamChartProps) {
   // The order, worked out from the first rows the chart draws and held, so new rows or a hidden
   // layer never swap layers; again only for new series, which have no place in the old one. A
   // stream that starts on zero keeps the config's order, as stacked areas do.
-  const [held, setHeld] = useState<{ keys: string; order: readonly string[] } | null>(
-    null,
-  )
+  const [held, setHeld] = useState<{
+    keys: string
+    order: readonly string[]
+  } | null>(null)
   let order = held?.keys === keyList ? held.order : null
   if (order === null && data.length > 0) {
     order = offset === 'zero' ? keys : streamOrder(data.length, rowValues(data), keys)
@@ -232,7 +230,12 @@ function StreamChart(props: StreamChartProps) {
   const { model, placeholder, phase } = made
   // A new offset morphs the layers, until new data or a hidden layer moves them again.
   const hiddenList = made.chart.hidden.join('\u0000')
-  const [shape, setShape] = useState({ offset, data, hidden: hiddenList, morph: false })
+  const [shape, setShape] = useState({
+    offset,
+    data,
+    hidden: hiddenList,
+    morph: false,
+  })
   if (shape.offset !== offset) {
     setShape({ offset, data, hidden: hiddenList, morph: true })
   } else if (shape.morph && (shape.data !== data || shape.hidden !== hiddenList)) {
@@ -241,7 +244,7 @@ function StreamChart(props: StreamChartProps) {
   // A layer's fill is one colour on a unit frame, which a pattern's tiles would stretch.
   const chart = { ...made.chart, patternOf: () => 'solid' as const }
   const shown = chart.series.filter((key) => !chart.hidden.includes(key))
-  const glows = useRef(new Map<string, SVGPathElement>())
+  const litDots = useRef(new Map<string, HTMLElement>())
   const seams = useRef(new Map<string, SVGPathElement>())
   const scale = model.y.value
   const centreOf = (index: number) =>
@@ -265,13 +268,12 @@ function StreamChart(props: StreamChartProps) {
     pointsOf,
     totalOf,
     lights,
-    paint: (key, points, fills) => {
+    paint: (key, points, fill, moving) => {
       const area = areaPathThrough(points, curve, 1, 1)
-      for (const fill of fills) fill?.setAttribute('d', area)
-      glows.current.get(key)?.setAttribute('d', area)
+      fill?.setAttribute('d', area)
       seams.current.get(key)?.setAttribute('d', pathThrough(points, curve, 1, 1))
+      paintLitDots([litDots.current.get(key), undefined], points, moving)
     },
-    glows,
     seams,
   }
   // Top first, as they read on the screen.
@@ -321,13 +323,16 @@ function StreamChart(props: StreamChartProps) {
       }),
     },
   }
-  // Beside the guide, at the lit layer's middle, or the stream's, so it covers neither callout.
+  // Beside the guide, at the lit layer's middle, or the stream's, so it covers neither callout
+  // nor the axis: the middle of the layers, even when they stack up from zero.
   const anchor = (stop: CartesianStop, series: string | null): ChartPoint => {
     const centre = bandCentre(stop.band)
     const span = series === null ? null : (model.spans[series]?.[stop.index] ?? null)
     return {
       x: chart.direction === 'rtl' ? 1 - centre : centre,
-      y: span ? 1 - scale.place((span[0] + span[1]) / 2) : centreOf(stop.index),
+      y: span
+        ? 1 - scale.place((span[0] + span[1]) / 2)
+        : streamCentre(model, stop.index),
       side: 'inline-end',
     }
   }
@@ -366,10 +371,19 @@ function StreamChart(props: StreamChartProps) {
         ref={ref}
         {...figureProps(props, streamChartKeys)}
       >
-        {glow && <StreamGlow />}
         {children}
         <StreamSeams />
-        {lights === 'layer' && <StreamGuide />}
+        {/* With callouts, a guide that they sit on; without, a dot on each layer's top, as the
+          Area chart's. */}
+        {lights === 'layer' ? (
+          <StreamGuide />
+        ) : (
+          <LitDots
+            slot='stream-chart-lit'
+            dots={litDots}
+            topOf={(key, stop) => frameTop(model, key, stop)}
+          />
+        )}
       </CartesianChartFrame>
     </StreamContext>
   )
@@ -446,11 +460,6 @@ function pointsSignature(points: readonly LinePoint[]) {
     .join('|')
 }
 
-/** How softly the window around a lit stop fades into what steps back, for the shared window's masks. */
-const windowFade = {
-  '--trace-fade': 'var(--stream-chart-window-fade, 1.5rem)',
-} as CSSProperties
-
 /** The placeholder's swell while the data loads, as fractions of the plot's height. */
 const PLACEHOLDER_SWELL = [0.36, 0.56, 0.5, 0.76, 0.62, 0.86, 0.7] as const
 
@@ -472,18 +481,14 @@ type StreamLayerProps = Omit<ComponentProps<'div'>, 'children' | 'color'> & {
 
 /**
  * One series' layer of the stream, in its colour, from where the layer under
- * it ends. While another layer is brought forward, it steps back; while a
- * stop is lit, it steps back all but a soft window around the stop, as the
- * Area chart's do. A hidden layer thins to nothing where it sits.
+ * it ends. While another layer is brought forward, it steps back. A hidden
+ * layer thins to nothing where it sits.
  */
 function StreamLayer({ dataKey, className, style, ...props }: StreamLayerProps) {
   useDeclared('StreamLayer', StreamLayer.declare({ dataKey }), cartesianSignature)
   const chart = useCartesian()
   const stream = useStream()
   const fill = useRef<SVGPathElement>(null)
-  const litFill = useRef<SVGPathElement>(null)
-  const { spotlit } = useChartActive()
-  const fromRest = useFromRest(spotlit)
   const hidden = chart.hidden.includes(dataKey)
   const rising = !chart.entered && stream.entrance === 'rise'
   // While the chart loads, the layer folds into the placeholder's centre line and fades, and
@@ -501,7 +506,7 @@ function StreamLayer({ dataKey, className, style, ...props }: StreamLayerProps) 
   usePointsMove(stream.role, to, signature, start, stream.curve, {
     align: (from, next) => alignLines(from, next, stream.curve),
     at: pointsAt,
-    draw: (points) => stream.paint(dataKey, points, [fill.current, litFill.current]),
+    draw: (points, moving) => stream.paint(dataKey, points, fill.current, moving),
   })
   // Drawn as it renders, so the server and the first frame show it; moves write it after.
   const area = useMemo(
@@ -512,18 +517,7 @@ function StreamLayer({ dataKey, className, style, ...props }: StreamLayerProps) 
   )
   if (!drawn && !loading) return null
   const slot = chart.series.indexOf(dataKey)
-  const emphasised = chart.emphasis === dataKey
-  const otherEmphasised = chart.emphasis !== null && !emphasised
-  // Lighting a stop, the layer steps back all but a bright copy in a soft window around it, as
-  // the Area chart's do; it steps back whole while another layer is brought forward.
-  const windowAt = stream.lights === 'stop' && !emphasised ? spotlit : null
-  const stepsBack = windowAt !== null || otherEmphasised
-  const window = litWindow(chart, windowAt, false)
-  const shape = (ref: RefObject<SVGPathElement | null>) => (
-    <g transform={mirror(chart.direction)}>
-      <path ref={ref} d={area} className='fill-current' />
-    </g>
-  )
+  const stepsBack = chart.emphasis !== null && chart.emphasis !== dataKey
   return (
     <div
       data-slot='stream-chart-layer'
@@ -536,51 +530,23 @@ function StreamLayer({ dataKey, className, style, ...props }: StreamLayerProps) 
         'transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-hidden:opacity-0',
         className,
       )}
-      style={
-        {
-          '--line-color': seriesColor(dataKey),
-          ...windowFade,
-          ...style,
-        } as CSSProperties
-      }
+      style={{ '--mark-color': seriesColor(dataKey), ...style } as CSSProperties}
       {...props}
     >
       <EntranceWipe draws={stream.entrance === 'draw'}>
-        {/* The window around the lit stop, which glides from stop to stop, and how much it shows. */}
-        <div
-          data-snap={fromRest ? '' : undefined}
-          className={litWindowClassName}
-          style={litWindowStyle(window, !otherEmphasised)}
+        <svg
+          {...unitFrame}
+          data-dim={stepsBack ? '' : undefined}
+          className={cn(
+            'absolute inset-0 size-full overflow-visible text-(--mark-ink) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing)',
+            stepBackInkClassName,
+            forcedSeriesTextColor(slot),
+          )}
         >
-          {/* The layer stepped back, seen everywhere but through the window. */}
-          <div className={cn(masked(false), steppedMaskClassName)}>
-            <svg
-              {...unitFrame}
-              data-dim={stepsBack ? '' : undefined}
-              // A layer that steps back loses colour and fades, so the lit one reads in front.
-              className={cn(
-                maskedFrame(false),
-                'overflow-visible text-(--line-color) transition-[color,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--stream-chart-dim,0.3))_h)] data-dim:opacity-60',
-                forcedSeriesTextColor(slot),
-              )}
-            >
-              {shape(fill)}
-            </svg>
-          </div>
-          {/* The layer again in its own colour, seen only through the window. */}
-          <div
-            className={cn(
-              masked(false),
-              forcedSeriesTextColor(slot),
-              'text-(--line-color)',
-              litMaskClassName,
-            )}
-          >
-            <svg {...unitFrame} className={cn(maskedFrame(false), 'overflow-visible')}>
-              {shape(litFill)}
-            </svg>
-          </div>
-        </div>
+          <g transform={mirror(chart.direction)}>
+            <path ref={fill} d={area} className='fill-current' />
+          </g>
+        </svg>
       </EntranceWipe>
     </div>
   )
@@ -601,67 +567,6 @@ function keep(map: RefObject<Map<string, SVGPathElement>>, key: string) {
       if (map.current.get(key) === element) map.current.delete(key)
     }
   }
-}
-
-/**
- * The glow: every layer again, in its colour, blurred once behind the
- * stream. A layer that steps back takes its glow with it, so the lit one
- * glows alone, and a lit stop keeps the glow only around it. It fades in
- * once the layers have arrived; its blur never moves. Forced colours leave
- * it out.
- */
-function StreamGlow() {
-  const chart = useCartesian()
-  const stream = useStream()
-  const { spotlit } = useChartActive()
-  const fromRest = useFromRest(spotlit)
-  // Lighting a stop, the glow stays only around it, as the layers' colour does.
-  const window = litWindow(chart, stream.lights === 'stop' ? spotlit : null, false)
-  // Kept while the data loads, so it fades as the layers fold away, rather than going at once.
-  if (
-    chart.status !== 'ready' &&
-    chart.status !== 'hidden' &&
-    chart.status !== 'loading'
-  ) {
-    return null
-  }
-  const rising = !chart.entered && stream.entrance === 'rise'
-  return (
-    <div
-      aria-hidden
-      data-slot='stream-chart-glow'
-      data-waiting={chart.entered && chart.status !== 'loading' ? undefined : ''}
-      className={cn(
-        plotLayerClassName,
-        'z-4 opacity-(--stream-chart-glow,0.4) blur-(--stream-chart-glow-blur,1.5rem) transition-opacity duration-(--motion-draw-duration) ease-(--motion-draw-fade-easing) group-data-mounted/chart:starting:opacity-0 data-waiting:opacity-0 forced-colors:hidden dark:opacity-(--stream-chart-glow,0.55)',
-      )}
-    >
-      <div
-        data-snap={fromRest ? '' : undefined}
-        className={litWindowClassName}
-        style={{ ...litWindowStyle(window, true), ...windowFade }}
-      >
-        <div className={cn(masked(false), litMaskClassName)}>
-          <svg {...unitFrame} className={cn(maskedFrame(false), 'overflow-visible')}>
-            <g transform={mirror(chart.direction)}>
-              {stream.order.map((key) => (
-                <path
-                  key={key}
-                  ref={keep(stream.glows, key)}
-                  d={areaPathThrough(stream.pointsOf(key, rising), stream.curve, 1, 1)}
-                  data-dim={
-                    chart.emphasis !== null && chart.emphasis !== key ? '' : undefined
-                  }
-                  className='transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-dim:opacity-0'
-                  style={{ fill: seriesColor(key) }}
-                />
-              ))}
-            </g>
-          </svg>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 /**

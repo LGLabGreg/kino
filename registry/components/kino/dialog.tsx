@@ -149,6 +149,24 @@ function DialogContent({
   )
 }
 
+/**
+ * The bare box, laid out by its own classes, for a dialog that isn't centred
+ * over the page, such as a chat window in a corner. It goes in a
+ * `DialogPortal`; `DialogContent` is the centred dialog with its overlay.
+ */
+function DialogPopup({
+  className,
+  ...props
+}: Omit<DialogPrimitive.Popup.Props, 'className'> & { className?: string }) {
+  return (
+    <DialogPrimitive.Popup
+      data-slot='dialog-popup'
+      className={cn('focus-visible:outline-hidden', className)}
+      {...props}
+    />
+  )
+}
+
 function DialogHeader({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
@@ -243,6 +261,7 @@ export {
   DialogFooter,
   DialogHeader,
   DialogOverlay,
+  DialogPopup,
   DialogPortal,
   DialogTitle,
   DialogTrigger,

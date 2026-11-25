@@ -391,26 +391,9 @@ function heightAt(
   return nearer.defined ? nearer.y : null
 }
 
-/** The stretch the lit category keeps bright, from its neighbour before to its neighbour after, as fractions from the reading start; null for none. */
-function litSpan(
-  centres: readonly number[],
-  at: number,
-): readonly [number, number] | null {
-  const centre = centres[at]
-  if (centre === undefined) return null
-  return [centres[at - 1] ?? centre, centres[at + 1] ?? centre]
-}
-
-/** The points the lit category keeps bright, by place: it and its neighbours; null when nothing steps back. */
-function brightSpan(at: number | null, count: number): readonly [number, number] | null {
-  if (at === null) return null
-  return [Math.max(0, at - 1), Math.min(count - 1, at + 1)]
-}
-
 export {
   type AlignedPoint,
   alignLines,
-  brightSpan,
   bridgesThrough,
   curves,
   heightAt,
@@ -418,7 +401,6 @@ export {
   type LineCurve,
   type LinePoint,
   type LineSampler,
-  litSpan,
   lonePointsThrough,
   monotoneSlopes,
   pathThrough,

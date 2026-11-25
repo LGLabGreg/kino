@@ -48,8 +48,6 @@ import { markerAt, type PlacedPoint, PointSeries } from '@/registry/lib/chart-po
 import type { BandGaps } from '@/registry/lib/chart-scale'
 import type { ComponentProps } from 'react'
 
-import { cn } from '@/lib/utils'
-
 /*
  * The Composed chart: bars, lines, areas and points on one plot, each series
  * drawn as its config says and read against the value axis it names, up to
@@ -221,8 +219,7 @@ function ComposedChart(props: ComposedChartProps) {
             <LinePlaceholder name='composed-chart' fill={marks.includes('area')} />
           ))
         }
-        // The bars step back as far as the lines, by the chart's own variable.
-        className={cn('[--bar-chart-dim:var(--composed-chart-dim,0.3)]', className)}
+        className={className}
         ref={ref}
         {...figureProps(props, composedChartKeys)}
       >

@@ -37,6 +37,7 @@ import {
   forcedSeriesTextColor,
   labelOnClassName,
   plotLayerClassName,
+  stepBackInkClassName,
   swatchClassName,
   useChartFocus,
   useChartRootValue,
@@ -355,7 +356,13 @@ function SunburstChart(props: SunburstChartProps) {
                       share: shareOf(arc.node.value, wholeValue),
                     },
                   ]
-                : [{ label: null, value, share: shareOf(arc.node.value, wholeValue) }]
+                : [
+                    {
+                      label: null,
+                      value,
+                      share: shareOf(arc.node.value, wholeValue),
+                    },
+                  ]
             }
             swatch={
               <span
@@ -594,7 +601,11 @@ function SunburstArcs({
     to,
     pointsSignature(to),
     // With none drawn yet, such as after the placeholder, each grows from its middle.
-    to.map((point) => ({ ...point, start: middleTurn(point), end: middleTurn(point) })),
+    to.map((point) => ({
+      ...point,
+      start: middleTurn(point),
+      end: middleTurn(point),
+    })),
     `${round(room.hole)}:${round(room.edge)}`,
     {
       align: (from, next) => {
@@ -701,7 +712,12 @@ function SunburstArcs({
 
 /** An arc's place alone, without what else a point or an arc carries. */
 function placeOf(place: ArcPlace): ArcPlace {
-  return { start: place.start, end: place.end, inner: place.inner, outer: place.outer }
+  return {
+    start: place.start,
+    end: place.end,
+    inner: place.inner,
+    outer: place.outer,
+  }
 }
 
 /**
@@ -754,16 +770,19 @@ const SunburstArc = memo(function SunburstArc({
       data-leaving={leaving ? '' : undefined}
       data-entering={entering ? '' : undefined}
       className={cn(
-        '[--arc-dim:1] text-[oklch(from_var(--arc-color)_l_calc(c*var(--arc-dim))_h)] transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing)] group-data-mounted/chart:transition-[color,opacity] group-data-mounted/chart:starting:opacity-0 data-dim:[--arc-dim:var(--sunburst-chart-dim,0.3)] data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-[var(--motion-exit-fade-easing),var(--motion-exit-fade-easing)] data-entering:duration-(--motion-draw-duration)',
+        'text-(--mark-ink) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing)] group-data-mounted/chart:transition-[color,opacity] group-data-mounted/chart:starting:opacity-0 data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-[var(--motion-exit-fade-easing),var(--motion-exit-fade-easing)] data-entering:duration-(--motion-draw-duration)',
+        stepBackInkClassName,
         forcedSeriesTextColor(slot),
       )}
-      style={{ '--arc-color': color } as CSSProperties}
+      style={{ '--mark-color': color } as CSSProperties}
     >
       {pattern !== 'solid' && <ChartSvgPattern id={patternId} pattern={pattern} />}
       <path
         ref={(element) => register(key, 'path', element)}
         d={d}
-        style={{ fill: pattern === 'solid' ? 'currentColor' : `url(#${patternId})` }}
+        style={{
+          fill: pattern === 'solid' ? 'currentColor' : `url(#${patternId})`,
+        }}
       />
       {labelled && (
         <text

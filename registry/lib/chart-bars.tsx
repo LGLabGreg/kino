@@ -16,6 +16,7 @@ import {
   type ChartRootState,
   forcedSeriesColor,
   plotLayerClassName,
+  stepBackInkClassName,
 } from '@/registry/lib/chart-root'
 import { type Band, bandAt } from '@/registry/lib/chart-scale'
 import {
@@ -216,12 +217,13 @@ const BarShape = memo(function BarShape({
         data-entering={entering ? '' : undefined}
         data-dim={dim ? '' : undefined}
         className={cn(
-          'absolute inset-0 bg-(--bar-fill) transition-none [--bar-fill:var(--bar-color)] group-data-mounted/chart:transition-[background-color,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:var(--bar-clip)] group-data-mounted/chart:starting:[clip-path:var(--bar-from)] data-dim:[--bar-fill:oklch(from_var(--bar-color)_l_calc(c*var(--bar-chart-dim,0.3))_h)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color] motion-reduce:ease-(--motion-layout-fade-easing)',
+          'absolute inset-0 bg-(--mark-ink) transition-none group-data-mounted/chart:transition-[background-color,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:var(--bar-clip)] group-data-mounted/chart:starting:[clip-path:var(--bar-from)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color] motion-reduce:ease-(--motion-layout-fade-easing)',
+          stepBackInkClassName,
           forced,
         )}
         style={
           {
-            '--bar-color': color,
+            '--mark-color': color,
             '--bar-from': from,
             // A variable, not `clipPath`, so the class's starting shape isn't overruled by an inline style.
             '--bar-clip': clip,

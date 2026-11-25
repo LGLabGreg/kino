@@ -613,12 +613,39 @@ const forcedMarkerFills = [
 ] as const
 
 /**
+ * How much of its colour a mark keeps while it steps back for one that is
+ * lit, from 0 to 1: a buyer's `--chart-dim`, set on a chart or anywhere
+ * above it, resolved once where the chart starts.
+ */
+const stepBackScopeClassName = '[--chart-step-back:var(--chart-dim,0.65)]'
+
+/**
+ * A mark that steps back: it paints with `--mark-ink`, its `--mark-color`
+ * with less colour, the same lightness and hue. It steps back while
+ * `data-dim`, or as far as a `--mark-step` from 0 to 1 that it inherits says,
+ * which a part such as a gradient's stop takes from the mark around it. In
+ * forced colours its system colour stays.
+ */
+const stepBackInkClassName =
+  '[--mark-ink:oklch(from_var(--mark-color)_l_calc(c*(1-var(--mark-step,0)*(1-var(--chart-step-back))))_h)] not-forced-colors:data-dim:[--mark-step:1]'
+
+/**
+ * A layer of many marks that steps back as one while `data-dim`, with a
+ * filter the compositor runs, never a colour on each mark (motion.md, rule
+ * 7): all the way, or as far as its own `--mark-step` from 0 to 1 says.
+ */
+const stepBackLayerClassName =
+  'transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(calc(1-var(--mark-step,1)*(1-var(--chart-step-back))))]'
+
+/**
  * The chart's frame: an optional legend above and below, an axis on each
  * side of the plot, and the plot. Every part takes its own area, and the
  * plot's layers share one.
  */
-const chartFrameClassName =
-  'group/chart @container/chart relative isolate grid h-72 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] [grid-template-areas:"top_top_top"_"._top-axis_."_"start-axis_plot_end-axis"_"._bottom-axis_."_"bottom_bottom_bottom"] text-xs'
+const chartFrameClassName = cn(
+  'group/chart @container/chart relative isolate grid h-72 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] [grid-template-areas:"top_top_top"_"._top-axis_."_"start-axis_plot_end-axis"_"._bottom-axis_."_"bottom_bottom_bottom"] text-xs',
+  stepBackScopeClassName,
+)
 
 /** A tooltip row's quieter text, in full colour on the row of the series brought forward. */
 const tooltipQuietClassName =
@@ -1023,7 +1050,13 @@ function createChartMoves(figure: RefObject<HTMLElement | null>): ChartMoves {
       return new Promise((resolve) => run.ends.push({ resolve, travels }))
     },
     follow: (role, draw, share) => {
-      const follower: Follower = { role, share, draw, clock: null, stopped: false }
+      const follower: Follower = {
+        role,
+        share,
+        draw,
+        clock: null,
+        stopped: false,
+      }
       queue().followers.push(follower)
       return {
         run: {
@@ -1076,7 +1109,10 @@ function createChartMoves(figure: RefObject<HTMLElement | null>): ChartMoves {
         clocks.set(
           key,
           timing &&
-            playClock(element, { ...timing, duration: timing.duration * follower.share }),
+            playClock(element, {
+              ...timing,
+              duration: timing.duration * follower.share,
+            }),
         )
       }
       follower.clock = clocks.get(key) ?? null
@@ -1996,6 +2032,9 @@ export {
   type PlotPoint,
   type PointsMove,
   seriesColor,
+  stepBackInkClassName,
+  stepBackLayerClassName,
+  stepBackScopeClassName,
   swatchClassName,
   swatchStyle,
   tooltipQuietClassName,

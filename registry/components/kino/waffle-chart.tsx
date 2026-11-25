@@ -28,6 +28,7 @@ import {
   forcedSeriesColor,
   patternImage,
   plotLayerClassName,
+  stepBackLayerClassName,
   swatchClassName,
   useChartRoot,
   useChartRootValue,
@@ -488,10 +489,7 @@ const SquareLayer = memo(function SquareLayer({
       data-slot='waffle-chart-squares'
       data-dim={dim ? '' : undefined}
       aria-hidden
-      className={cn(
-        plotLayerClassName,
-        'z-10 transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(var(--cells-dim))]',
-      )}
+      className={cn(plotLayerClassName, 'z-10', stepBackLayerClassName)}
       style={cellLayerVariables('waffle-chart')}
     >
       <div className={waffleBoxClassName} style={waffleBoxStyle(columns, rows)}>
@@ -529,7 +527,10 @@ const SquareLayer = memo(function SquareLayer({
 const OWNER_SEPARATOR = '\u0001'
 
 /** A square of a lit share's copy that its share no longer holds: clear, in forced colours too. */
-const CLEAR: SquareLook = { color: 'transparent', forced: 'forced-colors:bg-transparent' }
+const CLEAR: SquareLook = {
+  color: 'transparent',
+  forced: 'forced-colors:bg-transparent',
+}
 
 /**
  * One share's squares, bright over the rest, shown while it is lit and
@@ -650,7 +651,10 @@ function waffleCellAt(
   if (fill === 'columns') {
     return { column: Math.floor(order / rows), row: rows - 1 - (order % rows) }
   }
-  return { column: order % columns, row: rows - 1 - Math.floor(order / columns) }
+  return {
+    column: order % columns,
+    row: rows - 1 - Math.floor(order / columns),
+  }
 }
 
 /** The place in the fill of the square at `column` and `row`, the reverse of `waffleCellAt`. */
@@ -743,12 +747,20 @@ function waffleAnchor(
       fill,
     )
     const middle = (at.column + 0.5) / columns
-    return { x: direction === 'rtl' ? 1 - middle : middle, y: at.row / rows, side: 'top' }
+    return {
+      x: direction === 'rtl' ? 1 - middle : middle,
+      y: at.row / rows,
+      side: 'top',
+    }
   }
   const top = Math.min(...own.map((square) => square.row))
   const across = own.filter((square) => square.row === top).map((square) => square.column)
   const middle = (Math.min(...across) + Math.max(...across) + 1) / 2 / columns
-  return { x: direction === 'rtl' ? 1 - middle : middle, y: top / rows, side: 'top' }
+  return {
+    x: direction === 'rtl' ? 1 - middle : middle,
+    y: top / rows,
+    side: 'top',
+  }
 }
 
 export {

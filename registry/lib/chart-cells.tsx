@@ -48,6 +48,7 @@ import {
   type PlotPoint,
   plotLayerClassName,
   seriesColor,
+  stepBackLayerClassName,
   useChartRoot,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
@@ -638,7 +639,10 @@ interface CellLabels {
 }
 
 /** No values written on the cells: one object, so what compares it sees no change. */
-const NO_LABELS: CellLabels = { textOf: new Map(), room: { width: 0, height: 0 } }
+const NO_LABELS: CellLabels = {
+  textOf: new Map(),
+  room: { width: 0, height: 0 },
+}
 
 /** The values the cells write on themselves, while `on`, worked out once for the grid. */
 function useCellLabels(on: boolean): CellLabels {
@@ -653,7 +657,10 @@ function useCellLabels(on: boolean): CellLabels {
         if (number !== null) textOf.set(stop.key, valueText(number))
       }
       const widest = Math.max(0, ...[...new Set(textOf.values())].map(textWidth))
-      return { textOf, room: labelRoom(shape, widest + 2 * LABEL_PAD, LABEL_HEIGHT) }
+      return {
+        textOf,
+        room: labelRoom(shape, widest + 2 * LABEL_PAD, LABEL_HEIGHT),
+      }
     },
     // `valueText` is made from `locale` and `format` on every render of the root.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -678,16 +685,16 @@ function labelRoomVariables({ room }: CellLabels) {
  * rings that step back less the nearer they are, a filter each. Pointing
  * at a step of the legend brings its cells forward the same way. When the
  * pointer leaves, the copies fade as the layer comes back, so nothing
- * blinks. With `label`, each cell writes its value where it fits; with
- * `glow`, the top step's cells glow onto their neighbours.
+ * blinks. With `label`, each cell writes its value where it fits.
  */
 function CellGridCells({
   label = false,
-  glow = false,
   className,
   style,
   ...props
-}: Omit<ComponentProps<'div'>, 'children'> & { label?: boolean; glow?: boolean }) {
+}: Omit<ComponentProps<'div'>, 'children'> & {
+  label?: boolean
+}) {
   const { status, direction } = useChartRootValue()
   const grid = useCells()
   const valueOf = useCellValue()
@@ -721,7 +728,6 @@ function CellGridCells({
       <CellLayer
         dim={dim}
         labels={labels}
-        glow={glow}
         className={className}
         style={style}
         {...props}
@@ -734,18 +740,19 @@ function CellGridCells({
               key={at}
               data-slot={`${grid.slot}-ring`}
               data-off={lit === undefined ? '' : undefined}
+              data-dim=''
               aria-hidden
               className={cn(
                 plotLayerClassName,
+                stepBackLayerClassName,
                 'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) starting:opacity-0 data-off:opacity-0',
-                // Each ring keeps more of its colour the nearer it is, between the lit cell's and the rest's.
-                'not-forced-colors:[filter:saturate(calc(var(--cells-dim)+(1-var(--cells-dim))*var(--cells-ring)))]',
               )}
               style={
                 {
                   ...cellLayerVariables(grid.slot),
                   ...labelRoomVariables(labels),
-                  '--cells-ring': (SPOTLIGHT_RINGS - at - 1) / SPOTLIGHT_RINGS,
+                  // Each ring keeps more of its colour the nearer it is, between the lit cell's and the rest's.
+                  '--mark-step': (at + 1) / SPOTLIGHT_RINGS,
                 } as CSSProperties
               }
             >
@@ -769,7 +776,10 @@ function CellGridCells({
           plotLayerClassName,
           'z-11 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-off:opacity-0',
         )}
-        style={{ ...cellLayerVariables(grid.slot), ...labelRoomVariables(labels) }}
+        style={{
+          ...cellLayerVariables(grid.slot),
+          ...labelRoomVariables(labels),
+        }}
       >
         {brought.map((stop) => (
           <CellGridCell
@@ -809,54 +819,41 @@ function cellProps(grid: CellsContextValue, stop: GridStop, labels: CellLabels) 
 }
 
 /**
- * How far the rest steps back, how much of the `draw` role the wave waits,
- * the room between cells and how strong a glow is: the chart's own
- * variables, such as `--heatmap-chart-dim`, `--heatmap-chart-wave`,
- * `--heatmap-chart-gap` and `--heatmap-chart-glow`, set on its layer of
- * cells for the cells inside, with a hexagon's outline.
+ * How much of the `draw` role the wave waits and the room between cells:
+ * the chart's own variables, such as `--heatmap-chart-wave` and
+ * `--heatmap-chart-gap`, set on its layer of cells for the cells inside,
+ * with a hexagon's outline.
  */
 function cellLayerVariables(slot: string) {
   return {
-    '--cells-dim': `var(--${slot}-dim, 0.3)`,
     '--cells-wave': `var(--${slot}-wave, 0.6)`,
     '--cells-gap': `var(--${slot}-gap, 2px)`,
-    '--cells-glow': `var(--${slot}-glow, 0.45)`,
     '--hex-sharp': HEX_SHARP,
     '--hex-round': HEX_ROUND,
   } as CSSProperties
 }
 
 /**
- * The layer of every cell, which steps back as one while `dim`, with the
- * glow over them. Memoised, so moving from cell to cell redraws none of
- * it.
+ * The layer of every cell, which steps back as one while `dim`. Memoised,
+ * so moving from cell to cell redraws none of it.
  */
 const CellLayer = memo(function CellLayer({
   dim,
   labels,
-  glow,
   className,
   style,
   ...props
 }: Omit<ComponentProps<'div'>, 'children'> & {
   dim: boolean
   labels: CellLabels
-  glow: boolean
 }) {
   const grid = useCells()
-  const valueOf = useCellValue()
-  const top = grid.edges.length - 2
-  const box = cellBox(grid.shape, { column: 0, row: 0 }, grid.columns, grid.rows)
   return (
     <div
       data-slot={`${grid.slot}-cells`}
       data-dim={dim ? '' : undefined}
       aria-hidden
-      className={cn(
-        plotLayerClassName,
-        'z-10 transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(var(--cells-dim))]',
-        className,
-      )}
+      className={cn(plotLayerClassName, 'z-10', stepBackLayerClassName, className)}
       style={
         {
           ...cellLayerVariables(grid.slot),
@@ -873,29 +870,6 @@ const CellLayer = memo(function CellLayer({
           leaving={stop.leaving}
         />
       ))}
-      {glow && (
-        // The top step's cells, blurred a third of a cell wide over the rest, so their light
-        // spills onto their neighbours: lighter on a dark page, deeper on a light one. Still, gone
-        // while a cell is lit, so the lit one reads brightest, and gone in forced colours.
-        <div
-          data-slot={`${grid.slot}-glow`}
-          className='absolute inset-0 z-2 opacity-(--cells-glow) mix-blend-multiply transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) in-data-dim:opacity-0 forced-colors:hidden dark:mix-blend-plus-lighter'
-          style={{ filter: `blur(${box.width * 30}cqw)` }}
-        >
-          {grid.drawn.map((stop) => {
-            const hot = stepOf(valueOf(stop), grid.edges) === top
-            return (
-              <CellGridCell
-                key={stop.key}
-                {...cellProps(grid, stop, NO_LABELS)}
-                // A cell that cools fades out of the glow on its wave, as its colour turns.
-                color={hot ? (grid.fillOf(stop)?.color ?? null) : 'transparent'}
-                leaving={stop.leaving}
-              />
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 })
@@ -1008,11 +982,15 @@ function CellText({
   return (
     <span
       className='absolute start-0 top-0 h-full overflow-hidden'
-      style={{ width: 'clamp(0px, (100% - var(--cells-label-width)) * 1000, 100%)' }}
+      style={{
+        width: 'clamp(0px, (100% - var(--cells-label-width)) * 1000, 100%)',
+      }}
     >
       <span
         className='absolute inset-x-0 top-0 flex items-center justify-center overflow-hidden'
-        style={{ height: 'clamp(0px, (100% - var(--cells-label-height)) * 1000, 100%)' }}
+        style={{
+          height: 'clamp(0px, (100% - var(--cells-label-height)) * 1000, 100%)',
+        }}
       >
         <span
           key={text}
@@ -1078,7 +1056,9 @@ const CellGridCell = memo(function CellGridCell({
 }) {
   const along = given ?? (columns <= 1 ? 0 : column / (columns - 1))
   // The pattern shown before this one, kept while it fades out as the new one fades in.
-  const [patterns, setPatterns] = useState<{ now?: string; was?: string }>({ now: image })
+  const [patterns, setPatterns] = useState<{ now?: string; was?: string }>({
+    now: image,
+  })
   if (patterns.now !== image) setPatterns({ now: image, was: patterns.now })
   const shown =
     color === null ? [] : [patterns.was, image].filter((one) => one !== undefined)

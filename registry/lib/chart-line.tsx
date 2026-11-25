@@ -17,11 +17,7 @@ import {
 } from '@/registry/lib/chart-cartesian'
 import { type CartesianModel, markLayer } from '@/registry/lib/chart-frame'
 import { seriesPoints } from '@/registry/lib/chart-line-marks'
-import {
-  type ChartLive,
-  ChartLiveLayer,
-  LIVE_SPAN,
-} from '@/registry/lib/chart-live-clock'
+import { type ChartLive, ChartLiveLayer } from '@/registry/lib/chart-live-clock'
 import type { ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
 import {
   forcedSeriesColor,
@@ -29,6 +25,7 @@ import {
   plotLayerClassName,
   type MoveRole,
   seriesColor,
+  stepBackInkClassName,
   useFromRest,
   usePointsMove,
 } from '@/registry/lib/chart-root'
@@ -36,11 +33,9 @@ import { bandCentre } from '@/registry/lib/chart-scale'
 import {
   alignLines,
   holdArrivals,
-  brightSpan,
   bridgesThrough,
   type LineCurve,
   type LinePoint,
-  litSpan,
   lonePointsThrough,
   pathThrough,
   type PathCurve,
@@ -78,10 +73,9 @@ import { cn } from '@/lib/utils'
  * their width, so the server draws the lines the browser does and a plot
  * that changes size never redraws them.
  *
- * When a category is lit, every series steps back but for a window around
- * it, which glides with the axis's pill, and a dot on each series marks it.
- * A series brought forward, from the legend or the Bump chart's pointer,
- * stays bright end to end while every other one steps back whole.
+ * When a category is lit, a dot on each series marks it, gliding with the
+ * axis's pill. A series brought forward, from the legend or the Bump
+ * chart's pointer, stays as it is while every other one steps back whole.
  *
  * Each chart names the variables a buyer tunes after itself
  * (`--line-chart-width`, `--area-chart-width`): the root of each series reads
@@ -168,8 +162,6 @@ function frameRest(model: CartesianModel, key: string): number {
 function traceVariables(name: LineFamilyName) {
   return {
     '--trace-width': `var(--${name}-width, 2px)`,
-    '--trace-dim': `var(--${name}-dim, 0.3)`,
-    '--trace-fade': `var(--${name}-window-fade, 1.5rem)`,
     '--trace-fill-top': `var(--${name}-fill-top, 0.32)`,
     '--trace-fill-bottom': `var(--${name}-fill-bottom, 0.04)`,
   } as CSSProperties
@@ -212,20 +204,13 @@ function LineFamilyFrame({
 /** The properties the series move on, so their transitions can run them. Once per page. */
 function registerLineProperties() {
   registerProperties([
-    ...(['--line-window-from', '--line-window-to'] as const).map((name, at) => ({
-      name,
-      syntax: '<length-percentage>',
-      inherits: true,
-      initialValue: at === 0 ? '0%' : '100%',
-    })),
-    // How much the window shows its bright copy, 0 while the legend brings another series forward,
-    // and where the lit dots sit across the plot, as a fraction: both move as the window does.
-    ...(['--line-window-shown', '--line-lit-x'] as const).map((name) => ({
-      name,
+    // Where the lit dots sit across the plot, as a fraction, so they glide between categories.
+    {
+      name: '--lit-dot-x',
       syntax: '<number>',
       inherits: true,
-      initialValue: name === '--line-lit-x' ? '0' : '1',
-    })),
+      initialValue: '0',
+    },
   ])
 }
 
@@ -272,10 +257,10 @@ const unitFrame = { viewBox: '0 0 1 1', preserveAspectRatio: 'none' } as const
 interface LineElements {
   paths: RefObject<(SVGPathElement | null)[]>
   bridges: RefObject<SVGPathElement | null>
-  lone: RefObject<(SVGPathElement | null)[]>
+  lone: RefObject<SVGPathElement | null>
   splits: RefObject<(SVGRectElement | null)[]>
-  /** The fill's path and gradient in each copy of the series: stepped back, and bright. */
-  fills: readonly AreaFillElements[]
+  /** The fill's path and gradient, for an area. */
+  fill: AreaFillElements
   dots: RefObject<Map<string, HTMLElement>>
   /** The series' dots on the lit category, if they show: on its top, and on the bottom of a range. */
   litDots: () => readonly [HTMLElement | undefined, HTMLElement | undefined]
@@ -300,8 +285,8 @@ function paint(
 ) {
   for (const path of elements.paths.current) path?.setAttribute('d', drawing.line)
   elements.bridges.current?.setAttribute('d', drawing.bridges)
-  for (const path of elements.lone.current) path?.setAttribute('d', drawing.lone)
-  for (const fill of elements.fills) paintFill(fill, drawing.area, drawing.peak)
+  elements.lone.current?.setAttribute('d', drawing.lone)
+  paintFill(elements.fill, drawing.area, drawing.peak)
   const [solid, dashed] = elements.splits.current
   if (drawing.split !== null) {
     solid?.setAttribute('width', String(Math.max(0, drawing.split + SPLIT_BLEED)))
@@ -320,7 +305,19 @@ function paint(
     if (tip) tip.style.translate = `100cqw ${newest.y * 100}cqh`
     paintFill(elements.holdFill, drawing.area && holdArea(newest), drawing.peak)
   }
-  const [top, bottom] = elements.litDots()
+  paintLitDots(elements.litDots(), points, moving)
+}
+
+/**
+ * Carries a series' lit dots, on its top and on the bottom of a range, with
+ * its points while it is `moving`; after, they go back to where the chart
+ * places them.
+ */
+function paintLitDots(
+  [top, bottom]: readonly [HTMLElement | undefined, HTMLElement | undefined],
+  points: readonly LinePoint[],
+  moving: boolean,
+) {
   for (const [litDot, heightOf] of [
     [top, (point: LinePoint) => point.y],
     [bottom, (point: LinePoint) => point.base],
@@ -332,10 +329,10 @@ function paint(
     const height = lit && heightOf(lit)
     if (height !== undefined) {
       litDot.dataset.moving = ''
-      litDot.style.setProperty('--line-lit-y', `${height * 100}cqh`)
+      litDot.style.setProperty('--lit-dot-y', `${height * 100}cqh`)
     } else {
       delete litDot.dataset.moving
-      litDot.style.removeProperty('--line-lit-y')
+      litDot.style.removeProperty('--lit-dot-y')
     }
   }
 }
@@ -414,8 +411,7 @@ interface LineSeriesProps extends Omit<ComponentProps<'div'>, 'children' | 'colo
 /**
  * One series, in the series' colour: a layer of the plot holding its fill
  * for an area, its line, a dashed bridge over each missing value, and a dot
- * on each point. When a category is lit, the series steps back, leaving it
- * bright around the category, a window that glides with the axis's pill.
+ * on each point. It steps back while another series is brought forward.
  */
 function LineSeries({
   dataKey,
@@ -436,10 +432,7 @@ function LineSeries({
   fill?: boolean
 }) {
   const chart = useCartesian()
-  const { spotlit } = useChartActive()
   const family = useLineFamily()
-  const spot = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(spotlit)
   const id = useId().replaceAll(':', '')
   const hidden = chart.hidden.includes(dataKey)
   const rising = !chart.entered && family.entrance === 'rise'
@@ -460,16 +453,13 @@ function LineSeries({
   const allForecast = first === 0
   const paths = useRef<(SVGPathElement | null)[]>([])
   const bridges = useRef<SVGPathElement>(null)
-  const lone = useRef<(SVGPathElement | null)[]>([])
+  const lone = useRef<SVGPathElement>(null)
   const splits = useRef<(SVGRectElement | null)[]>([])
-  // The fill in the stepped-back copy of the series, and in the bright one. Each ref is its own
-  // call: the React Compiler keeps an object it builds once, skipping hooks written inside it.
-  const steppedFillPath = useRef<SVGPathElement>(null)
-  const steppedFillGradient = useRef<SVGLinearGradientElement>(null)
-  const litFillPath = useRef<SVGPathElement>(null)
-  const litFillGradient = useRef<SVGLinearGradientElement>(null)
-  const steppedFill = { path: steppedFillPath, gradient: steppedFillGradient }
-  const litFill = { path: litFillPath, gradient: litFillGradient }
+  // Each ref is its own call: the React Compiler keeps an object it builds once, skipping hooks
+  // written inside it.
+  const fillPath = useRef<SVGPathElement>(null)
+  const fillGradient = useRef<SVGLinearGradientElement>(null)
+  const fillElements = { path: fillPath, gradient: fillGradient }
   const dotElements = useRef(new Map<string, HTMLElement>())
   const hold = useRef<HTMLSpanElement>(null)
   const tip = useRef<HTMLSpanElement>(null)
@@ -497,7 +487,7 @@ function LineSeries({
       bridges,
       lone,
       splits,
-      fills: [steppedFill, litFill],
+      fill: fillElements,
       dots: dotElements,
       litDots: () => [
         family.litDots.current.get(dataKey),
@@ -521,52 +511,10 @@ function LineSeries({
   )
   if (!drawn) return null
   const slot = chart.series.indexOf(dataKey)
-  const emphasised = chart.emphasis === dataKey
-  const otherEmphasised = chart.emphasis !== null && !emphasised
-  // The series steps back while a category is lit, all but its bright copy, or whole while
-  // another series is brought forward. Brought forward itself, it stays bright end to end.
-  const windowAt = emphasised ? null : spotlit
-  const stepsBack = windowAt !== null || otherEmphasised
-  const window = litWindow(chart, windowAt, live !== null)
-  const bright = brightSpan(windowAt, to.length)
+  // The series steps back, whole, while another is brought forward.
+  const stepsBack = chart.emphasis !== null && chart.emphasis !== dataKey
   const pathClass =
     'fill-none stroke-current [stroke-width:calc(var(--trace-width)*var(--trace-weight,1))] [stroke-linecap:round] [stroke-linejoin:round] [vector-effect:non-scaling-stroke]'
-  const strokes = (bright: boolean) => (
-    <>
-      {connectNulls && !bright && (
-        <path
-          ref={bridges}
-          d={drawing.bridges}
-          className={cn(pathClass, 'opacity-60 [stroke-dasharray:2_4]')}
-        />
-      )}
-      <path
-        ref={(element) => {
-          paths.current[bright ? 1 : 0] = element
-        }}
-        d={drawing.line}
-        clipPath={splitKey ? `url(#${id}-solid)` : undefined}
-        className={cn(pathClass, (dashed || allForecast) && '[stroke-dasharray:6_5]')}
-      />
-      <path
-        ref={(element) => {
-          lone.current[bright ? 1 : 0] = element
-        }}
-        d={drawing.lone}
-        className='fill-none stroke-current [stroke-width:calc(var(--trace-width)*3)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]'
-      />
-      {splitKey && (
-        <path
-          ref={(element) => {
-            paths.current[bright ? 3 : 2] = element
-          }}
-          d={drawing.line}
-          clipPath={`url(#${id}-dashed)`}
-          className={cn(pathClass, '[stroke-dasharray:6_5]')}
-        />
-      )}
-    </>
-  )
   const splitAt = drawing.split ?? 0
   return (
     <div
@@ -583,7 +531,7 @@ function LineSeries({
       )}
       style={
         {
-          '--line-color': seriesColor(dataKey),
+          '--mark-color': seriesColor(dataKey),
           ...traceVariables(family.name),
           ...style,
         } as CSSProperties
@@ -593,107 +541,87 @@ function LineSeries({
       {/* Rows past the plot's end, as arrive while it is held, wait out of sight. */}
       <ChartLiveLayer live={live} direction={chart.direction} reach='plot'>
         <EntranceWipe draws={family.entrance === 'draw'}>
-          {/* The window around the lit category, which the fill and the bright copy of the line
-            share, so they glide as one, and how much it shows, which fades both ways. */}
-          <div
-            ref={spot}
-            data-snap={fromRest ? '' : undefined}
-            className={litWindowClassName}
-            style={litWindowStyle(window, !otherEmphasised)}
-          >
-            {/* The fill, stepped back, seen everywhere but through the window, so the bright copy's
-              fill there never lies over it. With another series brought forward, it is whole. */}
-            {fill && (
-              <div className={cn(masked(live !== null), steppedMaskClassName)}>
-                <svg
-                  {...unitFrame}
-                  data-dim={stepsBack ? '' : undefined}
-                  // A wash steps back in strength as well as colour, or it reads as strong as the lit one.
-                  className={cn(
-                    maskedFrame(live !== null),
-                    'overflow-visible text-(--line-color) transition-[color,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] data-dim:opacity-60',
-                    forcedSeriesTextColor(slot),
-                  )}
-                >
-                  <g transform={mirror(chart.direction)}>
-                    <AreaFill
-                      id={`${id}-fill`}
-                      path={drawing.area}
-                      peak={drawing.peak}
-                      height={1}
-                      elements={steppedFill}
-                    />
-                  </g>
-                </svg>
-              </div>
+          <svg
+            {...unitFrame}
+            data-entering={family.phase === 'entering' ? '' : undefined}
+            data-dim={stepsBack ? '' : undefined}
+            className={cn(
+              'absolute inset-0 size-full overflow-visible text-(--mark-ink) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) forced-colors:data-dim:[--trace-weight:0.5] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
+              stepBackInkClassName,
+              forcedSeriesTextColor(slot),
             )}
-            <svg
-              {...unitFrame}
-              data-entering={family.phase === 'entering' ? '' : undefined}
-              data-dim={stepsBack ? '' : undefined}
-              className={cn(
-                'absolute inset-0 size-full overflow-visible text-(--line-color) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] forced-colors:data-dim:[--trace-weight:0.5] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
-                forcedSeriesTextColor(slot),
+          >
+            {splitKey && (
+              <defs>
+                <clipPath id={`${id}-solid`}>
+                  <rect
+                    ref={(element) => {
+                      splits.current[0] = element
+                    }}
+                    x={-SPLIT_BLEED}
+                    y={-SPLIT_BLEED}
+                    width={splitAt + SPLIT_BLEED}
+                    height={1 + SPLIT_BLEED * 2}
+                  />
+                </clipPath>
+                <clipPath id={`${id}-dashed`}>
+                  <rect
+                    ref={(element) => {
+                      splits.current[1] = element
+                    }}
+                    x={splitAt}
+                    y={-SPLIT_BLEED}
+                    width={1 + SPLIT_BLEED}
+                    height={1 + SPLIT_BLEED * 2}
+                  />
+                </clipPath>
+              </defs>
+            )}
+            <g transform={mirror(chart.direction)}>
+              {fill && (
+                <AreaFill
+                  id={`${id}-fill`}
+                  path={drawing.area}
+                  peak={drawing.peak}
+                  height={1}
+                  elements={fillElements}
+                />
               )}
-            >
+              {connectNulls && (
+                <path
+                  ref={bridges}
+                  d={drawing.bridges}
+                  className={cn(pathClass, 'opacity-60 [stroke-dasharray:2_4]')}
+                />
+              )}
+              <path
+                ref={(element) => {
+                  paths.current[0] = element
+                }}
+                d={drawing.line}
+                clipPath={splitKey ? `url(#${id}-solid)` : undefined}
+                className={cn(
+                  pathClass,
+                  (dashed || allForecast) && '[stroke-dasharray:6_5]',
+                )}
+              />
+              <path
+                ref={lone}
+                d={drawing.lone}
+                className='fill-none stroke-current [stroke-width:calc(var(--trace-width)*3)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]'
+              />
               {splitKey && (
-                <defs>
-                  <clipPath id={`${id}-solid`}>
-                    <rect
-                      ref={(element) => {
-                        splits.current[0] = element
-                      }}
-                      x={-SPLIT_BLEED}
-                      y={-SPLIT_BLEED}
-                      width={splitAt + SPLIT_BLEED}
-                      height={1 + SPLIT_BLEED * 2}
-                    />
-                  </clipPath>
-                  <clipPath id={`${id}-dashed`}>
-                    <rect
-                      ref={(element) => {
-                        splits.current[1] = element
-                      }}
-                      x={splitAt}
-                      y={-SPLIT_BLEED}
-                      width={1 + SPLIT_BLEED}
-                      height={1 + SPLIT_BLEED * 2}
-                    />
-                  </clipPath>
-                </defs>
+                <path
+                  ref={(element) => {
+                    paths.current[1] = element
+                  }}
+                  d={drawing.line}
+                  clipPath={`url(#${id}-dashed)`}
+                  className={cn(pathClass, '[stroke-dasharray:6_5]')}
+                />
               )}
-              <g transform={mirror(chart.direction)}>{strokes(false)}</g>
-            </svg>
-            {/* The line again in its own colour, seen only through the window around the lit
-              category, while the rest of the line steps back. */}
-            <div
-              aria-hidden
-              className={cn(
-                forcedSeriesTextColor(slot),
-                masked(live !== null),
-                'text-(--line-color)',
-                litMaskClassName,
-              )}
-            >
-              <svg
-                {...unitFrame}
-                className={cn(maskedFrame(live !== null), 'overflow-visible')}
-              >
-                <g transform={mirror(chart.direction)}>
-                  {fill && (
-                    <AreaFill
-                      id={`${id}-fill-lit`}
-                      path={drawing.area}
-                      peak={drawing.peak}
-                      height={1}
-                      elements={litFill}
-                    />
-                  )}
-                  {strokes(true)}
-                </g>
-              </svg>
-            </div>
-          </div>
+            </g>
+          </svg>
           {dots && chart.status === 'ready' && !hidden && (
             <LineDots
               dataKey={dataKey}
@@ -701,9 +629,7 @@ function LineSeries({
               dots={dotElements}
               last={dots === 'last'}
               slot={slot}
-              dimmed={otherEmphasised}
-              brightFrom={bright?.[0] ?? null}
-              brightTo={bright?.[1] ?? null}
+              dimmed={stepsBack}
             />
           )}
         </EntranceWipe>
@@ -768,16 +694,14 @@ function LineHold({
       data-dim={dimmed ? '' : undefined}
       className={cn(
         forcedSeriesTextColor(slot),
-        'pointer-events-none absolute inset-0 text-(--line-color) opacity-0 transition-[color,opacity] duration-(--motion-exit-duration) ease-(--motion-exit-fade-easing) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)] data-shown:opacity-100 data-shown:duration-(--motion-enter-duration) data-shown:ease-(--motion-enter-fade-easing)',
+        'pointer-events-none absolute inset-0 text-(--mark-ink) opacity-0 transition-[color,opacity] duration-(--motion-exit-duration) ease-(--motion-exit-fade-easing) data-shown:opacity-100 data-shown:duration-(--motion-enter-duration) data-shown:ease-(--motion-enter-fade-easing)',
+        stepBackInkClassName,
       )}
     >
       <ChartLiveLayer live={live} direction={direction} reach='plot'>
         <div className={cn('absolute inset-0', flip)}>
           {fill && (
-            <svg
-              {...unitFrame}
-              className='absolute inset-0 size-full overflow-visible transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) in-data-dim:opacity-60'
-            >
+            <svg {...unitFrame} className='absolute inset-0 size-full overflow-visible'>
               <AreaFill
                 id={id}
                 path={holdArea(newest)}
@@ -820,66 +744,6 @@ function mirror(direction: ReadingDirection) {
 }
 
 /**
- * Where the bright copy of the series shows, as the start and end of its
- * window in the plot's left-to-right order: around the lit category, from
- * the point before it to the point after. With nothing lit, it opens past
- * both ends, since the whole series is bright. On a live plot, in the
- * masked box three plots wide that its layer draws in.
- */
-function litWindow(
-  chart: Pick<CartesianChartValue, 'current' | 'direction'>,
-  at: number | null,
-  live: boolean,
-): { from: string; to: string } {
-  const centres = chart.current.map((category) => bandCentre(category.band))
-  const window = at === null ? null : litSpan(centres, at)
-  if (!window) return { from: '-100%', to: '200%' }
-  const [from, to] = window
-  // In right to left, the plot's reading start is its right edge.
-  const left = chart.direction === 'rtl' ? 1 - to : from
-  const right = chart.direction === 'rtl' ? 1 - from : to
-  // The box runs on past the plot's end: to the right, or in right to left, to the left.
-  const share = (place: number) =>
-    live ? (place + (chart.direction === 'rtl' ? LIVE_SPAN - 1 : 0)) / LIVE_SPAN : place
-  return { from: `${share(left) * 100}%`, to: `${share(right) * 100}%` }
-}
-
-/**
- * The window around a lit category that a series steps back outside of: its
- * box, which glides between categories on `layout` and appears in place
- * from rest (`data-snap`), with `litWindowStyle` on it.
- */
-const litWindowClassName =
-  'absolute inset-0 transition-[--line-window-from,--line-window-to,--line-window-shown] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-[--line-window-shown] motion-reduce:transition-[--line-window-shown]'
-
-/** What steps back: seen everywhere but through the window, the fade `--trace-fade` wide at each side. */
-const steppedMaskClassName =
-  '[mask-image:linear-gradient(to_right,black_calc(var(--line-window-from)-var(--trace-fade)),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-from),rgb(0_0_0/calc(1-var(--line-window-shown)))_var(--line-window-to),black_calc(var(--line-window-to)+var(--trace-fade)))]'
-
-/** The bright copy: seen only through the window, and not while another series is brought forward. */
-const litMaskClassName =
-  '[mask-image:linear-gradient(to_right,transparent_calc(var(--line-window-from)-var(--trace-fade)),black_var(--line-window-from),black_var(--line-window-to),transparent_calc(var(--line-window-to)+var(--trace-fade)))] opacity-(--line-window-shown)'
-
-/** The window's place, from `litWindow`, and whether its bright copy shows. */
-function litWindowStyle(window: { from: string; to: string }, shown: boolean) {
-  return {
-    '--line-window-from': window.from,
-    '--line-window-to': window.to,
-    '--line-window-shown': shown ? 1 : 0,
-  } as CSSProperties
-}
-
-/** A masked part of a series: the plot, or on a live plot, `LIVE_SPAN` plots on from its start. */
-function masked(live: boolean) {
-  return live ? 'absolute inset-y-0 start-0 w-[300%]' : 'absolute inset-0'
-}
-
-/** The series' unit frame inside a masked part: the plot again. */
-function maskedFrame(live: boolean) {
-  return live ? 'absolute inset-y-0 start-0 h-full w-1/3' : 'absolute inset-0 size-full'
-}
-
-/**
  * The chart's first appearance with `entrance='draw'`, when it `draws`: the
  * marks are wiped in from the reading start on `draw`, and stay whole from
  * then on.
@@ -913,8 +777,6 @@ const LineDots = memo(function LineDots({
   last,
   slot,
   dimmed,
-  brightFrom,
-  brightTo,
 }: {
   dataKey: string
   points: readonly LinePoint[]
@@ -923,9 +785,6 @@ const LineDots = memo(function LineDots({
   slot: number
   /** Every dot steps back, while another series is brought forward. */
   dimmed: boolean
-  /** The first and last points that stay bright while the rest step back, by place; null when none step back. */
-  brightFrom: number | null
-  brightTo: number | null
 }) {
   const { direction } = useCartesian()
   const final = points.findLastIndex((point) => point.defined)
@@ -943,18 +802,12 @@ const LineDots = memo(function LineDots({
                   dots.current.delete(point.key)
               }
             }}
-            data-dim={
-              dimmed ||
-              (brightFrom !== null &&
-                brightTo !== null &&
-                (at < brightFrom || at > brightTo))
-                ? ''
-                : undefined
-            }
+            data-dim={dimmed ? '' : undefined}
             data-series={dataKey}
             className={cn(
               forcedSeriesTextColor(slot),
-              'absolute top-0 left-0 size-0 transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) text-(--line-color) not-forced-colors:data-dim:text-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)]',
+              'absolute top-0 left-0 size-0 transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) text-(--mark-ink)',
+              stepBackInkClassName,
             )}
             style={{ translate: `${point.x * 100}cqw ${point.y * 100}cqh` }}
           >
@@ -973,15 +826,42 @@ const LineDots = memo(function LineDots({
   )
 })
 
-/**
- * What marks the lit category: a dot on each shown series where it crosses
- * the category. They glide from category to category with the tooltip,
- * appear in place after a rest, and fade where they are when the pointer
- * leaves.
- */
+/** The lit dots of a line family's series, which its series' moves carry. */
 function LineLitMarks() {
-  const chart = useCartesian()
   const family = useLineFamily()
+  return (
+    <LitDots
+      slot={`${family.name}-lit`}
+      dots={family.litDots}
+      topOf={family.topOf}
+      bottomOf={family.bottomOf}
+      style={traceVariables(family.name)}
+    />
+  )
+}
+
+/**
+ * What marks the lit category on a chart of lines or layers: a dot on each
+ * shown series where it crosses the category, on its top, and on the bottom
+ * of a range. They glide from category to category with the tooltip, appear
+ * in place after a rest, and fade where they are when the pointer leaves.
+ * Each is kept in `dots` under its series' key, so the series' move carries
+ * it (`paintLitDots`).
+ */
+function LitDots({
+  slot,
+  dots,
+  topOf,
+  bottomOf,
+  style,
+}: {
+  slot: string
+  dots: RefObject<Map<string, HTMLElement>>
+  topOf: (key: string, stop: CartesianStop) => number | null
+  bottomOf?: (key: string, stop: CartesianStop) => number | null
+  style?: CSSProperties
+}) {
+  const chart = useCartesian()
   const at = useChartActive().spotlit
   const marks = useRef<HTMLDivElement>(null)
   const fromRest = useFromRest(at)
@@ -1001,52 +881,51 @@ function LineLitMarks() {
     <div
       ref={marks}
       aria-hidden
-      data-slot={`${family.name}-lit`}
+      data-slot={slot}
       data-hidden={at === null ? '' : undefined}
       className={cn(
         plotLayerClassName,
         'z-20 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-hidden:opacity-0 data-hidden:duration-(--motion-exit-duration) data-hidden:ease-(--motion-exit-easing)',
       )}
-      style={traceVariables(family.name)}
+      style={style}
     >
       <ChartLiveLayer live={chart.frame.live} direction={chart.direction}>
-        {/* Across the plot, the dots move on a property, as the window does, so the two retarget
-          alike when a glide changes course. */}
+        {/* Across the plot, the dots move on a property, so they turn back smoothly when a glide
+          changes course. */}
         <div
           data-snap={snap}
-          className='absolute inset-0 transition-[--line-lit-x] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-none motion-reduce:transition-none'
-          style={{ '--line-lit-x': x } as CSSProperties}
+          className='absolute inset-0 transition-[--lit-dot-x] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-snap:transition-none motion-reduce:transition-none'
+          style={{ '--lit-dot-x': x } as CSSProperties}
         >
           {shown.flatMap((key) => {
             // A series with no row here marks its nearest own row, as the tooltip reads it.
             const near = chart.nearOf(key, category)
-            const top = near && family.topOf(key, near)
-            const bottom = (near && family.bottomOf?.(key, near)) ?? null
+            const top = near && topOf(key, near)
+            const bottom = (near && bottomOf?.(key, near)) ?? null
             if (!near || top === null) return []
             const shift = bandCentre(near.band) - centre
             const dx = chart.direction === 'rtl' ? -shift : shift
             const dot = (name: string, y: number) => (
               <span
                 key={name}
-                className='absolute top-0 left-0 size-0 [translate:calc(var(--line-lit-x)*100cqw)_0]'
+                className='absolute top-0 left-0 size-0 [translate:calc(var(--lit-dot-x)*100cqw)_0]'
               >
                 <span
                   ref={(element) => {
                     if (!element) return
-                    family.litDots.current.set(name, element)
+                    dots.current.set(name, element)
                     return () => {
-                      if (family.litDots.current.get(name) === element)
-                        family.litDots.current.delete(name)
+                      if (dots.current.get(name) === element) dots.current.delete(name)
                     }
                   }}
                   data-key={near.key}
                   data-snap={snap}
-                  // While the series moves, it carries the dot on `--line-lit-y`, frame by frame.
+                  // While the series moves, it carries the dot on `--lit-dot-y`, frame by frame.
                   className={cn(move, 'size-0 data-moving:transition-none')}
                   style={
                     {
-                      translate: `${dx * 100}cqw var(--line-lit-y, ${y * 100}cqh)`,
-                      '--line-color': seriesColor(key),
+                      translate: `${dx * 100}cqw var(--lit-dot-y, ${y * 100}cqh)`,
+                      '--mark-color': seriesColor(key),
                     } as CSSProperties
                   }
                 >
@@ -1056,7 +935,8 @@ function LineLitMarks() {
                       chart.emphasis !== null && chart.emphasis !== key ? '' : undefined
                     }
                     className={cn(
-                      'bg-(--line-color) ring-background absolute -top-1 -left-1 size-2 rounded-full ring-2 transition-[background-color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:bg-[oklch(from_var(--line-color)_l_calc(c*var(--trace-dim))_h)]',
+                      'bg-(--mark-ink) ring-background absolute -top-1 -left-1 size-2 rounded-full ring-2 transition-[background-color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing)',
+                      stepBackInkClassName,
                       forcedSeriesColor(chart.series.indexOf(key)),
                     )}
                   />
@@ -1136,15 +1016,8 @@ function LinePlaceholder({ name, fill }: { name: LineFamilyName; fill: boolean }
 
 export {
   framePoints,
-  litMaskClassName,
-  litWindow,
-  litWindowClassName,
-  litWindowStyle,
-  masked,
-  maskedFrame,
   mirror,
   registerLineProperties,
-  steppedMaskClassName,
   unitFrame,
   frameRest,
   frameTop,
@@ -1154,6 +1027,8 @@ export {
   type LineFamilyValue,
   LinePlaceholder,
   LineSeries,
+  LitDots,
+  paintLitDots,
   type LineSeriesProps,
   useLineFamily,
 }

@@ -43,6 +43,7 @@ import {
   ChartSvgPattern,
   forcedSeriesTextColor,
   plotLayerClassName,
+  stepBackInkClassName,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
 import { linearScale } from '@/registry/lib/chart-scale'
@@ -813,7 +814,8 @@ const RingShape = memo(function RingShape({
       data-leaving={leaving ? '' : undefined}
       data-entering={entering ? '' : undefined}
       className={cn(
-        '[--radial-value:var(--radial-to)] [--ring-ink:var(--ring-color)] [--ring-r:var(--ring-r-to)] [--ring-t:var(--ring-t-to)] text-(--ring-ink) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing),var(--motion-layout-easing),var(--motion-layout-easing),var(--motion-layout-easing)] group-data-mounted/chart:transition-[color,opacity,--radial-value,--ring-r,--ring-t] group-data-mounted/chart:starting:[--radial-value:0] group-data-mounted/chart:starting:[--ring-t:0px] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing),var(--motion-draw-easing),var(--motion-layout-easing),var(--motion-layout-easing)] data-leaving:opacity-0 data-warn:[--ring-ink:var(--destructive)] not-forced-colors:data-dim:text-[oklch(from_var(--ring-ink)_l_calc(c*var(--radial-chart-dim,0.3))_h)] motion-reduce:group-data-mounted/chart:transition-[color,opacity]',
+        '[--radial-value:var(--radial-to)] [--mark-color:var(--ring-color)] [--ring-r:var(--ring-r-to)] [--ring-t:var(--ring-t-to)] text-(--mark-ink) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing),var(--motion-layout-easing),var(--motion-layout-easing),var(--motion-layout-easing)] group-data-mounted/chart:transition-[color,opacity,--radial-value,--ring-r,--ring-t] group-data-mounted/chart:starting:[--radial-value:0] group-data-mounted/chart:starting:[--ring-t:0px] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-layout-fade-easing),var(--motion-layout-fade-easing),var(--motion-draw-easing),var(--motion-layout-easing),var(--motion-layout-easing)] data-leaving:opacity-0 data-warn:[--mark-color:var(--destructive)] motion-reduce:group-data-mounted/chart:transition-[color,opacity]',
+        stepBackInkClassName,
         forcedSeriesTextColor(slot),
       )}
       style={

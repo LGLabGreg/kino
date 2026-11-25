@@ -6,6 +6,7 @@ import {
   forcedSeriesTextColor,
   plotLayerClassName,
   seriesColor,
+  stepBackLayerClassName,
 } from '@/registry/lib/chart-root'
 import {
   type ComponentProps,
@@ -120,8 +121,7 @@ interface PlacedPoint {
  * brought forward, the layer steps back as one, with a filter the
  * compositor runs, and the lit point shows bright above it, kept while its
  * copy fades as the series comes back, so it never blinks. `name` is the
- * chart's, which names its slots and the variable a buyer tunes the step
- * back with (`--scatter-chart-dim`). `around` holds the marks in each layer,
+ * chart's, which names its slots. `around` holds the marks in each layer,
  * as a live chart's layer that moves with the clock does.
  */
 function PointSeries({
@@ -153,7 +153,6 @@ function PointSeries({
   const shownLit = lit ?? points.find((point) => point.key === held && !point.leaving)
   const colours = {
     '--point-color': seriesColor(dataKey),
-    '--point-dim': `var(--${name}-dim, 0.3)`,
   } as CSSProperties
   return (
     <>
@@ -165,7 +164,7 @@ function PointSeries({
         className={cn(
           plotLayerClassName,
           markLayer.point,
-          'transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(var(--point-dim))]',
+          stepBackLayerClassName,
           className,
         )}
         style={{ ...colours, ...style }}

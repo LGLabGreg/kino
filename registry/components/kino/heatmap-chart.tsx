@@ -390,8 +390,6 @@ function Heatmap(
   props: Omit<ComponentProps<'div'>, 'children'> & {
     /** Each cell writes its value on itself where it fits. */
     label?: boolean
-    /** The cells in the colour’s top step glow onto their neighbours. */
-    glow?: boolean
   },
 ) {
   return <CellGridCells {...props} />

@@ -7,7 +7,6 @@ import type { CategoryChartProps } from '@/registry/lib/chart-base'
 import { type ChartDatum, numberOf, rangeOf } from '@/registry/lib/chart-math'
 import type { DomainEnd } from '@/registry/lib/chart-scale'
 import type { LineCurve } from '@/registry/lib/line-path'
-import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -133,24 +132,19 @@ function fittedDomain(
   return [low, high]
 }
 
-/** The charts' own variables, read from the sparkline's, so one name tunes every variant. */
-const sparklineVariables = {
+/** The line charts' own variables, read from the sparkline's, so one name tunes both variants. */
+const sparklineVariables: Partial<
+  Record<SparklineVariant, Record<`--${string}`, string>>
+> = {
   line: {
     '--line-chart-width': 'var(--sparkline-width, 1.5px)',
-    '--line-chart-dim': 'var(--sparkline-dim, 0.3)',
-    '--line-chart-window-fade': 'var(--sparkline-window-fade, 0.75rem)',
   },
   area: {
     '--area-chart-width': 'var(--sparkline-width, 1.5px)',
-    '--area-chart-dim': 'var(--sparkline-dim, 0.3)',
-    '--area-chart-window-fade': 'var(--sparkline-window-fade, 0.75rem)',
     '--area-chart-fill-top': 'var(--sparkline-fill-top, 0.32)',
     '--area-chart-fill-bottom': 'var(--sparkline-fill-bottom, 0.04)',
   },
-  bar: {
-    '--bar-chart-dim': 'var(--sparkline-dim, 0.3)',
-  },
-} as const
+}
 
 /**
  * A sparkline: one or more series drawn small, with no axes, in a
@@ -185,7 +179,7 @@ function Sparkline({
       'h-10 grid-cols-[minmax(0.375rem,auto)_minmax(0,1fr)_minmax(0.375rem,auto)] py-1 [&_[data-slot=chart-status]]:flex-row [&_[data-slot=chart-status]]:gap-1.5 [&_[data-slot=chart-status]]:p-0 [&_[data-slot=chart-status]_p]:text-xs',
       className,
     ),
-    style: { ...sparklineVariables[variant], ...style } as CSSProperties,
+    style: { ...sparklineVariables[variant], ...style },
   }
   if (variant === 'bar') {
     return (

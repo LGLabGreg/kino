@@ -28,6 +28,7 @@ import {
   type ChartReader,
   type ChartRootValue,
   seriesColor,
+  stepBackInkClassName,
   useChartRoot,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
@@ -565,10 +566,10 @@ const BarListRow = memo(function BarListRow({
         data-slot='bar-list-bar'
         data-dim={dim ? '' : undefined}
         data-entering={entering ? '' : undefined}
-        className={barClassName}
+        className={cn(barClassName, stepBackInkClassName)}
         style={
           {
-            '--bar-color': color,
+            '--mark-color': color,
             '--bar-from': from,
             // A variable, not `clipPath`, so the class's starting shape isn't overruled by an inline style.
             '--bar-clip': clip,
@@ -735,7 +736,7 @@ function BarListPlaceholder({ count }: { count: number }) {
  * colours, a line under the row's text.
  */
 const barClassName =
-  'pointer-events-none absolute inset-0 -z-10 rounded-(--item-radius) bg-(--bar-fill) [--bar-fill:color-mix(in_oklab,var(--bar-color)_var(--bar-list-tint,22%),transparent)] data-dim:[--bar-fill:color-mix(in_oklab,oklch(from_var(--bar-color)_l_calc(c*var(--bar-list-dim,0.3))_h)_var(--bar-list-tint,22%),transparent)] [clip-path:var(--bar-clip)] transition-none group-data-mounted/chart:transition-[background-color,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] group-data-mounted/chart:starting:[clip-path:var(--bar-from)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color] motion-reduce:ease-(--motion-layout-fade-easing) forced-colors:top-auto forced-colors:h-1 forced-colors:bg-[CanvasText]! forced-colors:data-dim:bg-[GrayText]!'
+  'pointer-events-none absolute inset-0 -z-10 rounded-(--item-radius) bg-[color-mix(in_oklab,var(--mark-ink)_var(--bar-list-tint,22%),transparent)] [clip-path:var(--bar-clip)] transition-none group-data-mounted/chart:transition-[background-color,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] group-data-mounted/chart:starting:[clip-path:var(--bar-from)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color] motion-reduce:ease-(--motion-layout-fade-easing) forced-colors:top-auto forced-colors:h-1 forced-colors:bg-[CanvasText]! forced-colors:data-dim:bg-[GrayText]!'
 
 /**
  * A row's name: cut short (`truncate`) with the rest of it in a tooltip. It

@@ -92,6 +92,7 @@ import {
   patternImage,
   plotLayerClassName,
   seriesColor,
+  stepBackInkClassName,
   swatchClassName,
   tooltipQuietClassName,
   useBefore,
@@ -621,7 +622,10 @@ function BarRibbons({ layout }: { layout: RibbonLayout }) {
     setArrival({ ready, count: arrival.count + (ready ? 1 : 0) })
   }
   const ribbons = ready
-    ? ribbonsAt(chart, bar).map((ribbon) => ({ ...ribbon, arrival: arrival.count }))
+    ? ribbonsAt(chart, bar).map((ribbon) => ({
+        ...ribbon,
+        arrival: arrival.count,
+      }))
     : NO_RIBBONS
   // In key order, current and leaving alike, so no ribbon's element moves in the page, which
   // would restart its wipe and drop its fade.
@@ -656,8 +660,11 @@ function BarRibbons({ layout }: { layout: RibbonLayout }) {
             data-series={series}
             data-lit={lit ? '' : undefined}
             data-dim={chart.emphasis !== null && !lit ? '' : undefined}
-            className='absolute inset-0 opacity-(--bar-chart-ribbon,0.24) transition-none [--ribbon-fill:var(--bar-color)] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-mounted/chart:transition-opacity data-dim:opacity-[calc(var(--bar-chart-ribbon,0.24)*0.6)] data-dim:[--ribbon-fill:oklch(from_var(--bar-color)_l_calc(c*var(--bar-chart-dim,0.3))_h)] data-lit:opacity-[calc(var(--bar-chart-ribbon,0.24)*2)]'
-            style={{ '--bar-color': seriesColor(series) } as CSSProperties}
+            className={cn(
+              'absolute inset-0 opacity-(--bar-chart-ribbon,0.24) transition-none duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-mounted/chart:transition-opacity data-lit:opacity-[calc(var(--bar-chart-ribbon,0.24)*2)]',
+              stepBackInkClassName,
+            )}
+            style={{ '--mark-color': seriesColor(series) } as CSSProperties}
           >
             {own.map((ribbon) => {
               const fresh = !stood.includes(ribbon.from) || !stood.includes(ribbon.to)
@@ -691,7 +698,7 @@ function BarRibbons({ layout }: { layout: RibbonLayout }) {
                 >
                   <div
                     data-entering={bar.phase === 'entering' ? '' : undefined}
-                    className='absolute inset-0 bg-(--ribbon-fill) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:var(--ribbon-clip)] group-data-mounted/chart:transition-[background-color,clip-path] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:group-data-mounted/chart:transition-[background-color] forced-colors:bg-[GrayText]'
+                    className='absolute inset-0 bg-(--mark-ink) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:var(--ribbon-clip)] group-data-mounted/chart:transition-[background-color,clip-path] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:group-data-mounted/chart:transition-[background-color] forced-colors:bg-[GrayText]'
                     style={
                       {
                         // A variable, as the bars' clip is, so the two read alike.
@@ -1076,7 +1083,7 @@ function Bar(props: BarProps) {
   const pattern = patternImage(chart.patternOf(dataKey))
   const gradient =
     fill === 'gradient'
-      ? `linear-gradient(${orientation === 'vertical' ? 'to top' : chart.direction === 'rtl' ? 'to left' : 'to right'}, color-mix(in oklab, var(--bar-fill) 35%, transparent), var(--bar-fill))`
+      ? `linear-gradient(${orientation === 'vertical' ? 'to top' : chart.direction === 'rtl' ? 'to left' : 'to right'}, color-mix(in oklab, var(--mark-ink) 35%, transparent), var(--mark-ink))`
       : undefined
   const images = [pattern, gradient].filter(Boolean).join(', ')
   const live = chart.frame.live

@@ -39,6 +39,7 @@ import {
   type ChartRootValue,
   drawingSize,
   isMeasured,
+  stepBackInkClassName,
   swatchClassName,
   useChartRoot,
   useChartRootValue,
@@ -799,13 +800,15 @@ const SankeyLink = memo(function SankeyLink({
 }) {
   const stopClassName = cn(
     fadeClassName,
-    '[stop-color:var(--stop-ink)] [--stop-ink:var(--stop-color)] in-data-dim:[--stop-ink:oklch(from_var(--stop-color)_l_calc(c*var(--sankey-chart-dim,0.3))_h)] forced-colors:[stop-color:GrayText]',
+    '[stop-color:var(--mark-ink)] forced-colors:[stop-color:GrayText]',
+    stepBackInkClassName,
   )
   return (
     <g
       data-flow={flowKey}
       data-dim={dim ? '' : undefined}
       data-leaving={leaving ? '' : undefined}
+      className={stepBackInkClassName}
     >
       {mode === 'gradient' && (
         <linearGradient
@@ -819,12 +822,12 @@ const SankeyLink = memo(function SankeyLink({
           <stop
             offset='0%'
             className={stopClassName}
-            style={{ '--stop-color': from } as CSSProperties}
+            style={{ '--mark-color': from } as CSSProperties}
           />
           <stop
             offset='100%'
             className={stopClassName}
-            style={{ '--stop-color': to } as CSSProperties}
+            style={{ '--mark-color': to } as CSSProperties}
           />
         </linearGradient>
       )}
@@ -836,12 +839,12 @@ const SankeyLink = memo(function SankeyLink({
           'fill-none [stroke-opacity:var(--sankey-chart-flow-opacity,0.4)] [stroke-dasharray:1] [stroke-dashoffset:0]',
           mode === 'gradient'
             ? '[stroke:var(--flow-paint)]'
-            : '[stroke:var(--flow-ink)] [--flow-ink:var(--flow-color)] in-data-dim:[--flow-ink:oklch(from_var(--flow-color)_l_calc(c*var(--sankey-chart-dim,0.3))_h)]',
+            : cn('[stroke:var(--mark-ink)]', stepBackInkClassName),
           'transition-none group-data-mounted/chart:[transition:stroke_var(--motion-layout-duration)_var(--motion-layout-fade-easing),stroke-dashoffset_var(--motion-draw-duration)_var(--motion-draw-easing),opacity_var(--motion-exit-duration)_var(--motion-exit-fade-easing)] group-data-mounted/chart:starting:[stroke-dashoffset:1] in-data-waiting:[stroke-dashoffset:1] in-data-leaving:opacity-0 motion-reduce:group-data-mounted/chart:[transition:stroke_var(--motion-layout-duration)_var(--motion-layout-fade-easing),opacity_var(--motion-exit-duration)_var(--motion-exit-fade-easing)] motion-reduce:group-data-mounted/chart:starting:opacity-0 motion-reduce:in-data-waiting:opacity-0 motion-reduce:[stroke-dashoffset:0]! forced-colors:[stroke:GrayText] forced-colors:in-data-dim:[stroke-opacity:0.15]',
         )}
         style={
           {
-            '--flow-color': mode === 'target' ? to : from,
+            '--mark-color': mode === 'target' ? to : from,
             '--flow-paint': `url(#${id})`,
           } as CSSProperties
         }
@@ -894,6 +897,7 @@ const SankeyNode = memo(function SankeyNode({
       data-leaving={leaving ? '' : undefined}
       className={cn(
         fadeClassName,
+        stepBackInkClassName,
         'opacity-100 group-data-mounted/chart:starting:opacity-0 in-data-waiting:opacity-0 data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-(--motion-exit-fade-easing) in-data-entering:duration-(--motion-draw-duration)',
       )}
     >
@@ -905,9 +909,10 @@ const SankeyNode = memo(function SankeyNode({
         rx={1.5}
         className={cn(
           fadeClassName,
-          '[fill:var(--node-ink)] [--node-ink:var(--node-color)] in-data-dim:[--node-ink:oklch(from_var(--node-color)_l_calc(c*var(--sankey-chart-dim,0.3))_h)] forced-colors:[fill:CanvasText] forced-colors:in-data-dim:[fill:GrayText]',
+          '[fill:var(--mark-ink)] forced-colors:[fill:CanvasText] forced-colors:in-data-dim:[fill:GrayText]',
+          stepBackInkClassName,
         )}
-        style={{ '--node-color': color } as CSSProperties}
+        style={{ '--mark-color': color } as CSSProperties}
       />
       {name !== null && (
         <g

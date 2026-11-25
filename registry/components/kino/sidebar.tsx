@@ -33,6 +33,7 @@ import { ariaShortcut, useApplePlatform, useShortcut } from '@/registry/lib/keys
 import { HOVER_DELAY } from '@/registry/lib/popup'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { collapseClassName, transitionsSettled } from '@/registry/lib/resize'
+import { narrowerThan, useNarrowerThan } from '@/registry/lib/roomy'
 import { SwapTextTitleContext } from '@/registry/lib/swap'
 import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible'
 import { mergeProps } from '@base-ui/react/merge-props'
@@ -104,7 +105,7 @@ const SurfaceContext = createContext({ collapsed: false, rail: false })
 
 /** Whether a provider `width` px wide, with `rem` px to a rem, is a phone's screen. */
 function showsSheet(width: number, rem: number) {
-  return width < SHEET_BELOW_REM * rem
+  return narrowerThan(width, SHEET_BELOW_REM, rem)
 }
 
 /**
@@ -130,31 +131,18 @@ function SidebarProvider({
   shortcut?: readonly string[] | null
 }) {
   const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange)
-  const [sheet, setSheet] = useState(false)
-  const [sheetOpen, setSheetOpen] = useState(false)
   const [box, setBox] = useState<HTMLDivElement | null>(null)
+  // Before the first paint: the container query has already hidden the
+  // docked sidebar on a phone, and this only decides what its triggers open.
+  const sheet = useNarrowerThan(box, SHEET_BELOW_REM)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  if (!sheet && sheetOpen) setSheetOpen(false)
   const id = useId()
 
   const toggle = () => {
     if (sheet) setSheetOpen(!sheetOpen)
     else setOpen(!open)
   }
-
-  // Before the first paint: the container query has already hidden the
-  // docked sidebar on a phone, and this only decides what its triggers open.
-  useLayoutEffect(() => {
-    if (!box) return
-    const measure = () => {
-      const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
-      const narrow = showsSheet(box.getBoundingClientRect().width, rem)
-      setSheet(narrow)
-      if (!narrow) setSheetOpen(false)
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(box)
-    return () => observer.disconnect()
-  }, [box])
 
   useShortcut(shortcut ?? undefined, toggle, box)
   const boxRef = useMemo(() => mergeRefs(setBox, ref), [ref])
@@ -532,11 +520,14 @@ function SidebarGroup({ className, children, ...props }: ComponentProps<'div'>) 
 }
 
 /**
- * The width a row's content keeps whatever the sidebar's own width, less
- * `indent`: the sidebar's, inside its gutters and the row's padding.
+ * The width a row's content keeps in a docked sidebar whatever the sidebar's
+ * own width, so nothing is laid out again as it folds to its rail: the
+ * sidebar's, inside its gutters and the row's padding. Anywhere else (its
+ * Sheet, or a list drawn with its rows in a popover or a window) nothing
+ * folds, so the content fits its row.
  */
 const contentWidth =
-  'w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem))]'
+  'w-full in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem))]'
 
 /**
  * A group's heading. In the rail its words fade and a short line takes its
@@ -710,10 +701,8 @@ const sidebarRowVariants = cva(
   },
 )
 
-/** The row's content, which keeps the sidebar's whole width. Its icons sit muted, and full strength on the current page. */
+/** The row's content, which keeps a docked sidebar's whole width (`contentWidth`). Its icons sit muted, and full strength on the current page. */
 const rowContentClassName = cn(
-  // In the Sheet nothing narrows it, so it fits the row, which may leave room for the close button.
-  'in-data-[slot=sheet-content]:w-full',
   'flex shrink-0 items-start gap-2 [&>svg]:mt-0.5 [&>svg]:text-muted-foreground group-aria-[current=page]/sidebar-row:[&>svg]:text-sidebar-foreground',
   // A label too long for the row is cut short; its tooltip shows it whole.
   // A span leading another, such as a workspace's logo before its name, is a picture: it keeps its size.
@@ -724,11 +713,23 @@ const rowContentClassName = cn(
   'group-has-data-[slot=sidebar-menu-action]/sidebar-item:pe-[calc(var(--control-height-xs)+--spacing(1))]',
 )
 
+/**
+ * Closes the Sheet the sidebar shows in a narrow container, when it is one.
+ * Outside a SidebarProvider there is no Sheet, so it does nothing: a list
+ * drawn with the sidebar's rows works in a popover or a panel too.
+ */
+function useCloseSheet() {
+  const context = use(SidebarContext)
+  return () => {
+    if (context?.sheet) context.setSheetOpen(false)
+  }
+}
+
 /** Closes the Sheet when a link inside it is pressed, since the page it opens is under it. */
 function useCloseOnNavigate() {
-  const { sheet, setSheetOpen } = useSidebar()
+  const closeSheet = useCloseSheet()
   return (event: MouseEvent<HTMLElement>) => {
-    if (sheet && event.currentTarget.closest('a[href]')) setSheetOpen(false)
+    if (event.currentTarget.closest('a[href]')) closeSheet()
   }
 }
 
@@ -809,7 +810,7 @@ function SidebarMenuButton({
               rowContentClassName,
               contentWidth,
               size === 'lg' && [
-                'w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height-lg)-var(--control-height-sm)))] items-center',
+                'in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height-lg)-var(--control-height-sm)))] items-center',
                 // In the rail the row is as wide as an icon's: the picture glides back to its middle, where the icons above sit.
                 '[&>:first-child]:transition-transform [&>:first-child]:duration-(--motion-layout-duration) [&>:first-child]:ease-(--motion-layout-easing) motion-reduce:[&>:first-child]:transition-none',
                 'group-data-[state=collapsed]/sidebar:[&>:first-child]:-translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)] rtl:group-data-[state=collapsed]/sidebar:[&>:first-child]:translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)]',
@@ -1043,7 +1044,8 @@ function SidebarMenuSubButton({
           <span
             className={cn(
               rowContentClassName,
-              'w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem)-1.5rem)]',
+              // A sub-row's content: the row's width, less its indent.
+              'w-full in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem)-1.5rem)]',
             )}
           >
             {children}
@@ -1441,6 +1443,7 @@ export {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
+  useCloseSheet,
   useSidebar,
   showsSheet,
   type SidebarCollapsible,

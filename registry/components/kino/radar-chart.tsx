@@ -51,6 +51,7 @@ import {
   type MoveRole,
   plotLayerClassName,
   seriesColor,
+  stepBackInkClassName,
   useChartRootValue,
   useFromRest,
   usePointsMove,
@@ -65,7 +66,6 @@ import {
   placeholderBreatheClassName,
   placeholderInkClassName,
 } from '@/registry/lib/placeholder'
-import { registerProperties } from '@/registry/lib/run-progress'
 import {
   type ComponentProps,
   createContext,
@@ -88,10 +88,10 @@ import { cn } from '@/lib/utils'
  * the feel, reduced motion and a slowed playback time it as they time
  * everything else.
  *
- * The axis under the pointer or the keys stays bright in a wedge that
- * glides round with the axis's pill, while the rest of every shape steps
- * back; a series whose outline the pointer is on, or the Up and Down arrows
- * reach, or its legend entry, comes forward whole.
+ * A dot on each shape marks the axis under the pointer or the keys, turning
+ * round with the axis's pill; a series whose outline the pointer is on, or
+ * the Up and Down arrows reach, or its legend entry, comes forward while the
+ * rest step back.
  */
 
 interface RadarChartProps extends Omit<CategoryChartProps, 'ordered'> {
@@ -232,26 +232,6 @@ const PLACEHOLDER_OUTLINE: readonly RadarVertex[] = PLACEHOLDER_SHAPE.map((r, at
 
 const PLACEHOLDER_RINGS = [1 / 3, 2 / 3, 1]
 
-/** The properties the chart moves on, so their transitions can run them. Once per page. */
-function registerRadarProperties() {
-  registerProperties([
-    // Where the lit wedge points and how wide it is: the whole turn while nothing is lit.
-    ...(['--radar-window-turn', '--radar-window-span'] as const).map((name) => ({
-      name,
-      syntax: '<angle>',
-      inherits: true,
-      initialValue: '0deg',
-    })),
-    // How much the wedge shows its bright copy: 0 while another series is brought forward.
-    {
-      name: '--radar-window-shown',
-      syntax: '<number>',
-      inherits: true,
-      initialValue: '1',
-    },
-  ])
-}
-
 /** The lowest and highest the shown series reach, from zero: a radar's centre is zero. */
 function radarExtent(rows: readonly ChartDatum[], keys: readonly string[]): Span {
   let high = 0
@@ -318,7 +298,6 @@ function RadarChart(props: RadarChartProps) {
     children,
     ref,
   } = props
-  registerRadarProperties()
   const ownScales = maxKey !== undefined
   const chart = useListChart(props, {
     entrance: entrance !== 'none',
@@ -400,7 +379,7 @@ function RadarChart(props: RadarChartProps) {
   const reader = listReader({
     current,
     walk: { kind: 'round' },
-    // With one series shown there is none to bring forward, so the lit axis's wedge stays.
+    // With one series shown there is none to bring forward, so the axis stays lit.
     series: {
       kind: 'step',
       step: (at, from, step) => {
@@ -545,7 +524,7 @@ function useAxisRotations(
 
 /**
  * Where the lit axis points, in turns that keep counting past a whole turn,
- * so the wedge, the dots and the spoke glide the short way round from the
+ * so the dots and the spoke glide the short way round from the
  * last axis to the first. Kept where it was while nothing is lit.
  */
 function useLitTurn() {
@@ -596,9 +575,8 @@ interface RadarProps extends Omit<ComponentProps<'div'>, 'children' | 'color'> {
 
 /**
  * One series' shape, in its colour: a light fill and an outline through its
- * value on each axis, and a dot on each point with `dots`. While an axis is
- * lit, the shape steps back but for a wedge round that axis, which glides
- * round with the axis's pill.
+ * value on each axis, and a dot on each point with `dots`. It steps back
+ * while another series is brought forward.
  */
 function Radar({
   dataKey,
@@ -611,10 +589,6 @@ function Radar({
 }: RadarProps) {
   const chart = useChartRootValue()
   const radar = useRadar()
-  const { spotlit } = useChartActive()
-  const lit = useLitTurn()
-  const spot = useRef<HTMLDivElement>(null)
-  const fromRest = useFromRest(spotlit)
   const id = useId().replaceAll(':', '')
   const hidden = chart.hidden.includes(dataKey)
   const rising = !radar.entered && radar.entrance === 'rise'
@@ -629,7 +603,7 @@ function Radar({
       : []
   const start = to.map((vertex) => ({ ...vertex, r: 0 }))
   const outlines = useRef<(SVGPathElement | null)[]>([])
-  const marks = useRef<(SVGGElement | null)[]>([])
+  const marks = useRef<SVGGElement>(null)
   const { edge, centre } = radar
   useOutlineMove(
     // The entrance grows the outline out of the centre; every change after moves it.
@@ -637,15 +611,13 @@ function Radar({
     (outline) => {
       const d = outlinePath(outline, centre.x, centre.y, edge)
       for (const path of outlines.current) path?.setAttribute('d', d)
-      for (const group of marks.current) {
-        if (!group) continue
-        for (const dot of group.querySelectorAll<SVGCircleElement>('[data-key]')) {
-          const vertex = outline.find((point) => point.key === dot.dataset.key)
-          if (!vertex) continue
-          const [x, y] = pointOf(vertex, centre.x, centre.y, edge)
-          dot.setAttribute('cx', String(round(x)))
-          dot.setAttribute('cy', String(round(y)))
-        }
+      for (const dot of marks.current?.querySelectorAll<SVGCircleElement>('[data-key]') ??
+        []) {
+        const vertex = outline.find((point) => point.key === dot.dataset.key)
+        if (!vertex) continue
+        const [x, y] = pointOf(vertex, centre.x, centre.y, edge)
+        dot.setAttribute('cx', String(round(x)))
+        dot.setAttribute('cy', String(round(y)))
       }
     },
     to,
@@ -656,43 +628,60 @@ function Radar({
   const slot = chart.series.indexOf(dataKey)
   const pattern = chart.patternOf(dataKey)
   const emphasised = chart.emphasis === dataKey
-  const otherEmphasised = chart.emphasis !== null && !emphasised
-  // The shape steps back while an axis is lit, all but its bright wedge, or whole while another
-  // series is brought forward. Brought forward itself, it stays bright all round.
-  const windowAt = emphasised ? null : spotlit
-  const stepsBack = windowAt !== null || otherEmphasised
-  const count = Math.max(1, radar.current.length)
+  // The shape steps back, whole, while another series is brought forward.
+  const stepsBack = chart.emphasis !== null && !emphasised
   const { width, height } = drawingSize(chart.plotSize)
   const frame = drawingFrame(chart.plotSize, 'xMidYMid meet')
   const viewBox = `0 0 ${round(width)} ${round(height)}`
   const d = outlinePath(to, centre.x, centre.y, edge)
   const points = chart.status === 'ready' && !hidden && dots ? radar.current : []
+  const patternId = `${id}-pattern`
 
-  const shape = (copy: 'stepped' | 'bright', part: 'fill' | 'outline') => {
-    const at = (copy === 'bright' ? 1 : 0) + (part === 'fill' ? 2 : 0)
-    const patternId = `${id}-${copy}-pattern`
-    if (part === 'fill') {
-      return (
-        <>
-          {pattern !== 'solid' && <ChartSvgPattern id={patternId} pattern={pattern} />}
-          <path
-            ref={(element) => {
-              outlines.current[at] = element
-            }}
-            d={d}
-            className='stroke-none [fill-opacity:var(--radar-chart-fill,0.24)]'
-            style={{
-              fill: pattern === 'solid' ? 'currentColor' : `url(#${patternId})`,
-            }}
-          />
-        </>
-      )
-    }
-    return (
-      <>
+  return (
+    <div
+      data-slot='radar-chart-series'
+      data-series={dataKey}
+      data-hidden={hidden || loading ? '' : undefined}
+      data-forward={emphasised ? '' : undefined}
+      aria-hidden
+      className={cn(
+        plotLayerClassName,
+        // The series brought forward paints over the rest, under the lit marks' z-20.
+        'z-10 data-forward:z-15 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-hidden:opacity-0',
+        className,
+      )}
+      style={{ '--mark-color': seriesColor(dataKey), ...style } as CSSProperties}
+      {...props}
+    >
+      <svg
+        viewBox={viewBox}
+        {...frame}
+        data-entering={radar.entering ? '' : undefined}
+        data-dim={stepsBack ? '' : undefined}
+        className={cn(
+          'absolute inset-0 size-full overflow-visible text-(--mark-ink) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) forced-colors:data-dim:[--radar-chart-width:1px] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
+          stepBackInkClassName,
+          forcedSeriesTextColor(slot),
+        )}
+      >
+        {fill && (
+          <>
+            {pattern !== 'solid' && <ChartSvgPattern id={patternId} pattern={pattern} />}
+            <path
+              ref={(element) => {
+                outlines.current[1] = element
+              }}
+              d={d}
+              className='stroke-none [fill-opacity:var(--radar-chart-fill,0.24)]'
+              style={{
+                fill: pattern === 'solid' ? 'currentColor' : `url(#${patternId})`,
+              }}
+            />
+          </>
+        )}
         <path
           ref={(element) => {
-            outlines.current[at] = element
+            outlines.current[0] = element
           }}
           d={d}
           className={cn(
@@ -701,11 +690,7 @@ function Radar({
           )}
         />
         {points.length > 0 && (
-          <g
-            ref={(element) => {
-              marks.current[copy === 'bright' ? 1 : 0] = element
-            }}
-          >
+          <g ref={marks}>
             {points.map((category) => {
               const r = radar.fractionAt(category, dataKey)
               if (r === null) return null
@@ -732,111 +717,14 @@ function Radar({
             })}
           </g>
         )}
-      </>
-    )
-  }
-
-  const svgClass = 'absolute inset-0 size-full overflow-visible'
-  const dimClass =
-    'not-forced-colors:data-dim:text-[oklch(from_var(--radar-color)_l_calc(c*var(--radar-chart-dim,0.3))_h)]'
-  return (
-    <div
-      data-slot='radar-chart-series'
-      data-series={dataKey}
-      data-hidden={hidden || loading ? '' : undefined}
-      data-forward={emphasised ? '' : undefined}
-      aria-hidden
-      className={cn(
-        plotLayerClassName,
-        // The series brought forward paints over the rest, under the lit marks' z-20.
-        'z-10 data-forward:z-15 transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-hidden:opacity-0',
-        className,
-      )}
-      style={
-        {
-          '--radar-color': seriesColor(dataKey),
-          '--radar-fade': 'var(--radar-chart-window-fade, 6deg)',
-          ...style,
-        } as CSSProperties
-      }
-      {...props}
-    >
-      {/* The wedge round the lit axis, which the fill and the bright copy of the outline share,
-          so they glide as one, and how much it shows, which fades both ways. */}
-      <div
-        ref={spot}
-        data-snap={fromRest ? '' : undefined}
-        // Opening as the pointer leaves, it leaves on `exit`, as the dots and the pill do, so all
-        // that marks the axis comes to rest together.
-        data-leaving={windowAt === null ? '' : undefined}
-        className='absolute inset-0 transition-[--radar-window-turn,--radar-window-span,--radar-window-shown] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-leaving:duration-(--motion-exit-duration) data-leaving:ease-(--motion-exit-easing) data-snap:transition-[--radar-window-shown] motion-reduce:transition-[--radar-window-shown]'
-        style={
-          {
-            '--radar-window-turn': `${round(lit.turn * 360)}deg`,
-            // Nothing lit, the wedge opens past a whole turn, so the whole shape is bright.
-            '--radar-window-span':
-              windowAt === null
-                ? 'calc(360deg + 2 * var(--radar-fade))'
-                : `${round(360 / count)}deg`,
-            '--radar-window-shown': otherEmphasised ? 0 : 1,
-          } as CSSProperties
-        }
-      >
-        {/* The fill, stepped back, seen everywhere but through the wedge, so the bright copy's
-            fill there never lies over it. With another series brought forward, it is whole. */}
-        {fill && (
-          <div className='absolute inset-0 [mask-image:conic-gradient(from_calc(var(--radar-window-turn)-var(--radar-window-span)/2),black,rgb(0_0_0/calc(1-var(--radar-window-shown)))_var(--radar-fade),rgb(0_0_0/calc(1-var(--radar-window-shown)))_calc(var(--radar-window-span)-var(--radar-fade)),black_var(--radar-window-span))]'>
-            <svg
-              viewBox={viewBox}
-              {...frame}
-              data-dim={stepsBack ? '' : undefined}
-              // A wash steps back in strength as well as colour, or it reads as strong as the lit one.
-              className={cn(
-                svgClass,
-                'text-(--radar-color) transition-[color,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) data-dim:opacity-60',
-                dimClass,
-                forcedSeriesTextColor(slot),
-              )}
-            >
-              {shape('stepped', 'fill')}
-            </svg>
-          </div>
-        )}
-        <svg
-          viewBox={viewBox}
-          {...frame}
-          data-entering={radar.entering ? '' : undefined}
-          data-dim={stepsBack ? '' : undefined}
-          className={cn(
-            svgClass,
-            'text-(--radar-color) transition-[color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) forced-colors:data-dim:[--radar-chart-width:1px] data-entering:duration-(--motion-draw-duration) data-entering:ease-(--motion-draw-fade-easing)',
-            dimClass,
-            forcedSeriesTextColor(slot),
-          )}
-        >
-          {shape('stepped', 'outline')}
-        </svg>
-        {/* The shape again in its own colour, seen only through the wedge round the lit axis,
-            while the rest of it steps back. */}
-        <div
-          className={cn(
-            forcedSeriesTextColor(slot),
-            'absolute inset-0 text-(--radar-color) [mask-image:conic-gradient(from_calc(var(--radar-window-turn)-var(--radar-window-span)/2),transparent,black_var(--radar-fade),black_calc(var(--radar-window-span)-var(--radar-fade)),transparent_var(--radar-window-span))] opacity-(--radar-window-shown)',
-          )}
-        >
-          <svg viewBox={viewBox} {...frame} className={svgClass}>
-            {fill && shape('bright', 'fill')}
-            {shape('bright', 'outline')}
-          </svg>
-        </div>
-      </div>
+      </svg>
     </div>
   )
 }
 
 /**
  * What marks the lit axis: a dot on each shown series where it crosses the
- * axis. They turn round the centre from axis to axis with the wedge, appear
+ * axis. They turn round the centre from axis to axis with the spoke, appear
  * in place after a rest, and fade where they are when the pointer leaves.
  */
 function RadarLitMarks() {
@@ -879,7 +767,7 @@ function RadarLitMarks() {
               {
                 '--dot-turn': `${round(lit.turn * 360)}deg`,
                 '--dot-out': `${-round(r * radar.edge)}px`,
-                '--radar-color': seriesColor(key),
+                '--mark-color': seriesColor(key),
               } as CSSProperties
             }
           >
@@ -889,7 +777,8 @@ function RadarLitMarks() {
                 chart.emphasis !== null && chart.emphasis !== key ? '' : undefined
               }
               className={cn(
-                'ring-background absolute -top-1 -left-1 size-2 rounded-full bg-(--radar-color) ring-2 transition-[background-color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:bg-[oklch(from_var(--radar-color)_l_calc(c*var(--radar-chart-dim,0.3))_h)]',
+                'ring-background absolute -top-1 -left-1 size-2 rounded-full bg-(--mark-ink) ring-2 transition-[background-color] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing)',
+                stepBackInkClassName,
                 forcedSeriesColor(chart.series.indexOf(key)),
               )}
             />
@@ -905,7 +794,7 @@ function RadarLitMarks() {
  * polygon or as circles, and a spoke out to each axis. Rings grow and
  * shrink to their new place when the range changes, spokes turn to their
  * axis's new place when axes come and go, and the lit axis's spoke stands
- * out, turning with the wedge.
+ * out, turning with the lit dots.
  */
 function RadarGrid({
   shape = 'polygon',
@@ -1017,7 +906,7 @@ function RadarGrid({
                 }
               />
             ))}
-          {/* The lit axis's spoke, turning with the wedge. */}
+          {/* The lit axis's spoke, turning with the lit dots. */}
           <line
             ref={litSpoke}
             data-snap={fromRest ? '' : undefined}

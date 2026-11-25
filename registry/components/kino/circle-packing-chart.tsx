@@ -26,6 +26,7 @@ import {
   labelOnClassName,
   plotLayerClassName,
   type PlotPoint,
+  stepBackLayerClassName,
   swatchClassName,
   useChartRootValue,
   useLeaving,
@@ -781,7 +782,7 @@ function CirclePackingCircles({
         >
           <div
             data-dim={lit.length > 0 ? '' : undefined}
-            className='absolute inset-0 [--pack-dim:var(--circle-packing-chart-dim,0.3)] transition-[filter] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) not-forced-colors:data-dim:[filter:saturate(var(--pack-dim))]'
+            className={cn('absolute inset-0', stepBackLayerClassName)}
           >
             {drawn.map(({ circle, gone }) => (
               <PackCircle
@@ -1085,7 +1086,11 @@ function SizeKey({
   const values = sizeKey(perValue, KEY_RADIUS)
   // Values the format writes the same, such as two that round to 0, say nothing more.
   const written = values
-    .map((value) => ({ value, text: valueText(value), r: Math.sqrt(value) * perValue }))
+    .map((value) => ({
+      value,
+      text: valueText(value),
+      r: Math.sqrt(value) * perValue,
+    }))
     .filter((one, at, all) => all.findIndex((other) => other.text === one.text) === at)
   // The key's box never follows its circles, which follow the plot's size: a box that did
   // would resize the plot beside it, and the plot the key again, every frame.

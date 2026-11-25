@@ -152,7 +152,7 @@ export const popupPositionerProps = {
 
 /** The look of every popup's box. Give it a corner: `--list-radius` for a list, `--surface-radius` for a surface. */
 export const popupSurfaceClassName =
-  'bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10 outline-hidden forced-colors:outline'
+  'bg-popover text-popover-foreground shadow-lg ring-1 ring-foreground/10 outline-hidden forced-colors:outline forced-colors:outline-solid'
 
 /**
  * The popup's box: it grows on `morph` and folds back on `exit`, both turning

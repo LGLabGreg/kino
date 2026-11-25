@@ -325,9 +325,11 @@ function Table({
         ref={scrollerRef}
         data-slot='table-scroller'
         {...region}
-        // Its padding keeps what Tab scrolls to clear of the sticky header.
+        // Its padding keeps what Tab scrolls to clear of the sticky header. Its mask fades
+        // each side with content past it: sideways past the pinned columns, and down
+        // from under the sticky header, which it never fades.
         className={cn(
-          'group/table-scroller min-h-0 flex-auto bg-inherit scroll-pt-[calc(var(--control-height)+5px)] [mask-image:linear-gradient(to_right,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] rtl:[mask-image:linear-gradient(to_left,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent)] has-[[data-sticky=start]]:[--table-fade-start-on:0] has-[[data-sticky=end]]:[--table-fade-end-on:0] focus-visible:outline-hidden',
+          'group/table-scroller min-h-0 flex-auto bg-inherit scroll-pt-[calc(var(--control-height)+5px)] [mask-image:linear-gradient(to_right,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent),linear-gradient(to_bottom,black_calc(var(--control-height)+5px),transparent_calc(var(--control-height)+5px),black_calc(var(--control-height)+5px+var(--table-fade-top,0px)),black_calc(100%-var(--table-fade-bottom,0px)),transparent)] rtl:[mask-image:linear-gradient(to_left,transparent,black_calc(var(--table-fade-start,0px)*var(--table-fade-start-on,1)),black_calc(100%-var(--table-fade-end,0px)*var(--table-fade-end-on,1)),transparent),linear-gradient(to_bottom,black_calc(var(--control-height)+5px),transparent_calc(var(--control-height)+5px),black_calc(var(--control-height)+5px+var(--table-fade-top,0px)),black_calc(100%-var(--table-fade-bottom,0px)),transparent)] [mask-composite:intersect] has-[[data-sticky=start]]:[--table-fade-start-on:0] has-[[data-sticky=end]]:[--table-fade-end-on:0] focus-visible:outline-hidden',
           // Clipped, not scrolled, so the page is what the header sticks to.
           scroll
             ? 'scrollbar-thin overflow-auto overscroll-x-contain'
@@ -754,6 +756,37 @@ function TableSortButton({
   children: ReactNode
 }) {
   const sorted = sort !== 'none'
+  // Always there, so the label never moves when the arrow appears; it turns to
+  // say which way, and shows faintly on hover before a sort. It sits in the
+  // Button's own icon slot: before the label in a column of numbers, so the
+  // label lines up with the figures at the column's end, and after it otherwise.
+  const arrow = (
+    <span
+      aria-hidden
+      data-icon={numeric ? 'inline-start' : 'inline-end'}
+      className='flex items-center gap-0.5 opacity-0 transition-opacity duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/sort:opacity-50 group-focus-visible/sort:opacity-50 group-data-sorted/sort:opacity-100'
+    >
+      <span
+        data-slot='table-sort-arrow'
+        className={cn(
+          'flex transition-[rotate] duration-(--motion-morph-duration) ease-(--motion-morph-easing) motion-reduce:transition-none',
+          sort === 'ascending' && 'rotate-180',
+        )}
+      >
+        <IconPlaceholder
+          lucide='ArrowDownIcon'
+          tabler='IconArrowDown'
+          hugeicons='ArrowDown02Icon'
+          phosphor='ArrowDownIcon'
+          remixicon='RiArrowDownLine'
+          aria-hidden
+        />
+      </span>
+      {sortIndex !== undefined ? (
+        <span className='text-[0.625rem] leading-none tabular-nums'>{sortIndex}</span>
+      ) : null}
+    </span>
+  )
   return (
     // In a column narrowed below it, the label truncates, and shows whole in a tooltip.
     <CutTooltip
@@ -768,46 +801,18 @@ function TableSortButton({
             'group/sort text-muted-foreground -mx-[calc(var(--control-padding)*0.8)] max-w-none data-sorted:text-foreground',
             // In a column narrowed below its label, the label truncates.
             'group-data-resizable/table:max-w-[calc(100%+var(--control-padding)*1.6)]',
-            // A column of numbers lines up at its end: the arrow goes before the label.
-            numeric && 'flex-row-reverse',
           )}
           onClick={(event) => onSort({ shiftKey: event.shiftKey })}
         >
+          {numeric ? arrow : null}
           {children}
-          {/* Always there, so the label never moves when the arrow appears; it
-              turns to say which way, and shows faintly on hover before a sort. */}
-          <span
-            aria-hidden
-            className='flex items-center gap-0.5 opacity-0 transition-opacity duration-(--motion-press-duration) ease-(--motion-press-easing) group-hover/sort:opacity-50 group-focus-visible/sort:opacity-50 group-data-sorted/sort:opacity-100'
-          >
-            <span
-              data-slot='table-sort-arrow'
-              className={cn(
-                'flex transition-[rotate] duration-(--motion-morph-duration) ease-(--motion-morph-easing) motion-reduce:transition-none',
-                sort === 'ascending' && 'rotate-180',
-              )}
-            >
-              <IconPlaceholder
-                lucide='ArrowDownIcon'
-                tabler='IconArrowDown'
-                hugeicons='ArrowDown02Icon'
-                phosphor='ArrowDownIcon'
-                remixicon='RiArrowDownLine'
-                aria-hidden
-              />
-            </span>
-            {sortIndex !== undefined ? (
-              <span className='text-[0.625rem] leading-none tabular-nums'>
-                {sortIndex}
-              </span>
-            ) : null}
-          </span>
           {/* `aria-sort` names only the column sorted first; a later one says its place itself. */}
           {sortIndex !== undefined && sortIndex > 1 && sorted ? (
             <span className='sr-only'>
               , sorted {sort}, {sortIndex} in the order
             </span>
           ) : null}
+          {numeric ? null : arrow}
         </Button>
       }
     />
@@ -993,12 +998,16 @@ function TableSkeleton({
   rows = 5,
   className,
 }: {
-  /** How many columns the table has. */
-  columns: number
+  /**
+   * How many columns the table has, or each column's cell class, for columns
+   * that show only at some widths, so a placeholder hides with its column.
+   */
+  columns: number | readonly string[]
   /** How many rows stand in. */
   rows?: number
   className?: string
 }) {
+  const cells = typeof columns === 'number' ? Array<string>(columns).fill('') : columns
   return Array.from({ length: rows }, (_, row) => (
     <tr
       key={row}
@@ -1010,8 +1019,8 @@ function TableSkeleton({
         className,
       )}
     >
-      {Array.from({ length: columns }, (_, column) => (
-        <td key={column} className={cellClassName}>
+      {cells.map((cell, column) => (
+        <td key={column} className={cn(cellClassName, cell)}>
           <SkeletonText
             className={SKELETON_WIDTHS[(row + column * 2) % SKELETON_WIDTHS.length]}
           />

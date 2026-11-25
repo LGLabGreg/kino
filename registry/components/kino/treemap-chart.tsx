@@ -25,6 +25,7 @@ import {
   patternImage,
   plotLayerClassName,
   type PlotPoint,
+  stepBackInkClassName,
   swatchClassName,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
@@ -597,13 +598,14 @@ const TreemapTile = memo(function TreemapTile({
       data-waiting={waiting ? '' : undefined}
       data-entering={entering ? '' : undefined}
       className={cn(
-        'absolute inset-0 [clip-path:var(--tile-clip)] bg-(--tile-fill) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing),var(--motion-layout-fade-easing)] [--tile-fill:var(--tile-color)] group-data-mounted/chart:transition-[background-color,clip-path,opacity] group-data-mounted/chart:starting:[clip-path:var(--tile-from)] group-data-mounted/chart:starting:opacity-0 data-dim:[--tile-fill:oklch(from_var(--tile-color)_l_calc(c*var(--treemap-chart-dim,0.3))_h)] data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing),var(--motion-draw-fade-easing)] data-waiting:opacity-0 data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-[var(--motion-exit-fade-easing),var(--motion-exit-easing),var(--motion-exit-fade-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color,opacity] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:data-entering:ease-(--motion-draw-fade-easing) motion-reduce:data-leaving:ease-(--motion-exit-fade-easing)',
+        'absolute inset-0 [clip-path:var(--tile-clip)] bg-(--mark-ink) transition-none duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing),var(--motion-layout-fade-easing)] group-data-mounted/chart:transition-[background-color,clip-path,opacity] group-data-mounted/chart:starting:[clip-path:var(--tile-from)] group-data-mounted/chart:starting:opacity-0 data-entering:duration-(--motion-draw-duration) data-entering:ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing),var(--motion-draw-fade-easing)] data-waiting:opacity-0 data-leaving:opacity-0 data-leaving:duration-(--motion-exit-duration) data-leaving:ease-[var(--motion-exit-fade-easing),var(--motion-exit-easing),var(--motion-exit-fade-easing)] motion-reduce:group-data-mounted/chart:transition-[background-color,opacity] motion-reduce:ease-(--motion-layout-fade-easing) motion-reduce:data-entering:ease-(--motion-draw-fade-easing) motion-reduce:data-leaving:ease-(--motion-exit-fade-easing)',
+        stepBackInkClassName,
         forced,
       )}
       style={
         {
           zIndex: layer,
-          '--tile-color': color,
+          '--mark-color': color,
           // Variables, not `clipPath`, so the class's starting shape isn't overruled by an inline style.
           '--tile-clip': clip,
           '--tile-from': from,

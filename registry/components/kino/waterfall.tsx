@@ -17,6 +17,8 @@ import {
   ChartLegendToggles,
   ChartStyle,
   forcedSeriesColor,
+  stepBackInkClassName,
+  stepBackScopeClassName,
   swatchClassName,
   formatterOf,
   seriesColor,
@@ -478,7 +480,10 @@ function WaterfallList({
         {/* While a span is lit, every other bar steps back; the lit row sets it back to 0. */}
         <div
           ref={listRef}
-          className='@container relative min-w-0 [--waterfall-indent:1.5rem] @max-xs:[--waterfall-indent:1rem] data-spotlit:[--waterfall-spot:1]'
+          className={cn(
+            '@container relative min-w-0 [--waterfall-indent:1.5rem] @max-xs:[--waterfall-indent:1rem] data-spotlit:[--mark-step:1]',
+            stepBackScopeClassName,
+          )}
         >
           {!waiting && (hasSpans || loading) && <WaterfallGrid />}
           {waiting ? (
@@ -717,7 +722,10 @@ function WaterfallPlaceholder() {
           name={
             <span
               className={cn('h-2 rounded-full', placeholderFillClassName)}
-              style={{ width: `${name}ch`, marginInlineStart: at === 0 ? 0 : '1.5rem' }}
+              style={{
+                width: `${name}ch`,
+                marginInlineStart: at === 0 ? 0 : '1.5rem',
+              }}
             />
           }
           track={
@@ -726,7 +734,10 @@ function WaterfallPlaceholder() {
                 'absolute top-1/2 h-2.5 -translate-y-1/2 rounded-(--control-radius-xs)',
                 placeholderFillClassName,
               )}
-              style={{ insetInlineStart: `${from * 100}%`, width: `${size * 100}%` }}
+              style={{
+                insetInlineStart: `${from * 100}%`,
+                width: `${size * 100}%`,
+              }}
             />
           }
         />
@@ -788,7 +799,14 @@ function WaterfallSpan({
   }, [])
 
   useEffect(() => {
-    spans.set(value, { label, start, duration, kind, error, bar: barRef.current })
+    spans.set(value, {
+      label,
+      start,
+      duration,
+      kind,
+      error,
+      bar: barRef.current,
+    })
     return () => {
       spans.delete(value)
     }
@@ -802,7 +820,7 @@ function WaterfallSpan({
       value={value}
       icon={icon}
       className={cn(
-        'data-lit:[--waterfall-spot:0] @max-lg/tree:flex-wrap @max-lg/tree:gap-y-0.5',
+        'data-lit:[--mark-step:0] @max-lg/tree:flex-wrap @max-lg/tree:gap-y-0.5',
         className,
       )}
       label={
@@ -851,9 +869,10 @@ function WaterfallSpan({
             className={cn(
               'absolute top-1/2 h-2.5 -translate-y-1/2 opacity-100',
               // Spotlight: a bar keeps its lightness and loses colour while another span is lit.
-              'bg-[oklch(from_var(--bar-color)_l_calc(c*(1-var(--waterfall-spot,0)*(1-var(--waterfall-dim,0.3))))_h)] data-dim:[--waterfall-spot:1]',
+              'bg-(--mark-ink)',
+              stepBackInkClassName,
               // A hidden kind keeps its outline, which forced colours keep too.
-              'data-hidden:bg-transparent data-hidden:outline-[1.5px] data-hidden:-outline-offset-[1.5px] data-hidden:outline-(--bar-color) forced-colors:data-hidden:bg-transparent!',
+              'data-hidden:bg-transparent data-hidden:outline-[1.5px] data-hidden:-outline-offset-[1.5px] data-hidden:outline-(--mark-color) forced-colors:data-hidden:bg-transparent!',
               // It draws from its start on `draw` once the Waterfall is in view, and as its parent opens.
               '[clip-path:inset(0_0_0_0_round_var(--bar-radius))] not-group-data-entered/waterfall:opacity-0 not-group-data-entered/waterfall:[clip-path:inset(0_100%_0_0_round_var(--bar-radius))] rtl:not-group-data-entered/waterfall:[clip-path:inset(0_0_0_100%_round_var(--bar-radius))]',
               'group-data-entered/waterfall:[transition:clip-path_var(--waterfall-span)_var(--motion-draw-easing)_var(--waterfall-delay),opacity_var(--waterfall-span)_var(--motion-draw-easing)_var(--waterfall-delay),background-color_var(--motion-layout-duration)_var(--motion-layout-fade-easing)] motion-reduce:group-data-entered/waterfall:[transition:opacity_var(--motion-draw-duration)_var(--motion-draw-easing),background-color_var(--motion-layout-duration)_var(--motion-layout-fade-easing)] motion-reduce:[clip-path:inset(0_0_0_0_round_var(--bar-radius))]!',
@@ -867,7 +886,7 @@ function WaterfallSpan({
             )}
             style={
               {
-                '--bar-color': failed
+                '--mark-color': failed
                   ? 'var(--destructive)'
                   : kind === undefined
                     ? 'var(--foreground)'

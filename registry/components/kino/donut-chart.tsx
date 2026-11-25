@@ -44,6 +44,7 @@ import {
   forcedSeriesTextColor,
   labelOnClassName,
   plotLayerClassName,
+  stepBackInkClassName,
   useChartRootValue,
 } from '@/registry/lib/chart-root'
 import { numberFormatter } from '@/registry/lib/number-format'
@@ -647,12 +648,13 @@ const SliceShape = memo(function SliceShape({
       data-grown={grown ? '' : undefined}
       className={cn(
         // An SVG element scales with `transform`, which runs off the main thread.
-        'text-(--slice-color) [transform:scale(1)] transition-none group-data-mounted/chart:transition-[color,transform] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] not-forced-colors:data-dim:text-[oklch(from_var(--slice-color)_l_calc(c*var(--donut-chart-dim,0.3))_h)] data-grown:[transform:scale(var(--donut-chart-grow,1.08))] motion-reduce:group-data-mounted/chart:transition-[color]',
+        'text-(--mark-ink) [transform:scale(1)] transition-none group-data-mounted/chart:transition-[color,transform] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] data-grown:[transform:scale(var(--donut-chart-grow,1.08))] motion-reduce:group-data-mounted/chart:transition-[color]',
+        stepBackInkClassName,
         forcedSeriesTextColor(slot),
       )}
       style={
         {
-          '--slice-color': color,
+          '--mark-color': color,
           transformOrigin: `${circle.cx}px ${circle.cy}px`,
         } as CSSProperties
       }
