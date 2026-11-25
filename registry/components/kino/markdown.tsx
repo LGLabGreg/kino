@@ -12,6 +12,13 @@ import {
   TableRow,
 } from '@/registry/components/kino/table'
 import {
+  type LightVia,
+  lightMark,
+  litMark,
+  type MarkLights,
+  NO_LIGHTS,
+} from '@/registry/lib/mark-lights'
+import {
   type MarkdownAlign,
   type MarkdownBlock,
   type MarkdownDocument,
@@ -78,7 +85,7 @@ const inlineCodeClassName =
 /** What every block reads: it changes only with `headingLevel`, so a new chunk renders only the blocks it changed. */
 interface Render {
   headingLevel: number
-  onLight: (index: number | null) => void
+  onLight: (via: LightVia, index: number | null) => void
 }
 
 const RenderContext = createContext<Render | null>(null)
@@ -468,7 +475,7 @@ function TextRun({
         <span
           key={from}
           data-slot='markdown-lit'
-          className='bg-primary/15 rounded-[min(var(--control-radius-xs),0.2em)] [box-decoration-break:clone] forced-colors:bg-[Highlight] forced-colors:text-[HighlightText]'
+          className='bg-primary/15 dark:bg-primary/25 rounded-[min(var(--control-radius-xs),0.2em)] [box-decoration-break:clone] forced-colors:bg-[Highlight]! forced-colors:text-[HighlightText]'
         >
           {text}
         </span>
@@ -490,10 +497,10 @@ function MarkSlot({ placed, scope }: { placed: PlacedMark; scope: Scope }) {
   return (
     <span
       data-slot='markdown-mark'
-      onPointerEnter={() => onLight(placed.index)}
-      onPointerLeave={() => onLight(null)}
-      onFocus={() => onLight(placed.index)}
-      onBlur={() => onLight(null)}
+      onPointerEnter={() => onLight('pointer', placed.index)}
+      onPointerLeave={() => onLight('pointer', null)}
+      onFocus={() => onLight('focus', placed.index)}
+      onBlur={() => onLight('focus', null)}
     >
       {placed.mark.content}
     </span>
@@ -544,9 +551,13 @@ function Markdown({
     setParsed({ text: children, cut, doc })
   }
 
-  const [lit, setLit] = useState<number | null>(null)
+  const [lights, setLights] = useState<MarkLights<number>>(NO_LIGHTS)
+  const lit = litMark(lights)
   const render = useMemo<Render>(
-    () => ({ headingLevel, onLight: setLit }),
+    () => ({
+      headingLevel,
+      onLight: (via, index) => setLights((now) => lightMark(now, via, index)),
+    }),
     [headingLevel],
   )
   const perBlock = useMemo(
