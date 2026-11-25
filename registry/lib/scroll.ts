@@ -81,6 +81,20 @@ export function followEdges(
   name: `--${string}`,
   content: Element | null = scroller.firstElementChild,
 ): () => void {
+  // What was last written, so a scroll that changes nothing restyles nothing.
+  const written = new Map<string, string>()
+  const write = (property: string, value: string) => {
+    if (written.get(property) === value) return
+    written.set(property, value)
+    scroller.style.setProperty(property, value)
+  }
+  // Read when the box is laid out again or a `dir` changes, never on a scroll,
+  // where a style read would restyle the page each frame.
+  let rtl = getComputedStyle(scroller).direction === 'rtl'
+  const reread = () => {
+    rtl = getComputedStyle(scroller).direction === 'rtl'
+    update()
+  }
   const update = () => {
     const { left, right, top, bottom } = boxEdgeFades(
       {
@@ -89,29 +103,35 @@ export function followEdges(
         maxX: scroller.scrollWidth - scroller.clientWidth,
         maxY: scroller.scrollHeight - scroller.clientHeight,
       },
-      getComputedStyle(scroller).direction === 'rtl',
+      rtl,
     )
-    scroller.style.setProperty(`${name}-left`, `${left}px`)
-    scroller.style.setProperty(`${name}-right`, `${right}px`)
-    scroller.style.setProperty(`${name}-top`, `${top}px`)
-    scroller.style.setProperty(`${name}-bottom`, `${bottom}px`)
-    scroller.style.setProperty('--scroller-width', `${scroller.clientWidth}px`)
+    write(`${name}-left`, `${left}px`)
+    write(`${name}-right`, `${right}px`)
+    write(`${name}-top`, `${top}px`)
+    write(`${name}-bottom`, `${bottom}px`)
+    write('--scroller-width', `${scroller.clientWidth}px`)
     scroller.toggleAttribute('data-scrolled', scroller.scrollTop > 0)
     // Which sides hide content past them, for what is pinned to that side to draw an edge.
-    const rtl = getComputedStyle(scroller).direction === 'rtl'
     scroller.toggleAttribute('data-edge-start', (rtl ? right : left) > 0)
     scroller.toggleAttribute('data-edge-end', (rtl ? left : right) > 0)
-    scroller.style.setProperty(`${name}-start`, `${rtl ? right : left}px`)
-    scroller.style.setProperty(`${name}-end`, `${rtl ? left : right}px`)
+    write(`${name}-start`, `${rtl ? right : left}px`)
+    write(`${name}-end`, `${rtl ? left : right}px`)
   }
   update()
   scroller.addEventListener('scroll', update, { passive: true })
-  const resized = new ResizeObserver(update)
+  const resized = new ResizeObserver(reread)
   resized.observe(scroller)
   if (content) resized.observe(content)
+  const turned = new MutationObserver(reread)
+  turned.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['dir'],
+    subtree: true,
+  })
   return () => {
     scroller.removeEventListener('scroll', update)
     resized.disconnect()
+    turned.disconnect()
   }
 }
 
