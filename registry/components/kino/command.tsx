@@ -15,12 +15,14 @@ import {
   FilterListItem,
   FilterListList,
   FilterListSeparator,
+  filterListScrollerClassName,
   FilterListStatus,
 } from '@/registry/lib/filter-list'
 import { leaveAsCopy } from '@/registry/lib/flow'
 import { MenuShortcut } from '@/registry/lib/menu'
 import { panelFooterTint } from '@/registry/lib/panel'
 import { followHeight, withoutTransition } from '@/registry/lib/resize'
+import { useEdgeFades } from '@/registry/lib/scroll'
 import { Swap } from '@/registry/lib/swap'
 import { Autocomplete as CommandPrimitive } from '@base-ui/react/autocomplete'
 import {
@@ -299,14 +301,20 @@ function CommandInput({
  * The rows, with the highlight that glides between them. Give it a function
  * child, called for each group or item that matches the search. It scrolls
  * past 24rem. Inside a dialog the dialog follows the height; on a page the
- * list does.
+ * list does. A page that shows something above its rows, such as an answer
+ * or a preview, gives it as `lead`: the lead scrolls with its rows held
+ * under it, and the page moves as one.
  */
 function CommandList({
   className,
+  lead,
   children,
   ref,
   ...props
-}: ComponentProps<typeof FilterListList>) {
+}: ComponentProps<typeof FilterListList> & {
+  /** What the page shows above its rows. */
+  lead?: ReactNode
+}) {
   const { pages, moved } = useCommand()
   const page = pages.join('\u0000')
   // Which way the last change of page went: on to a deeper page, or back.
@@ -322,6 +330,18 @@ function CommandList({
     if (frame.closest('[data-slot=dialog-content]')) return
     return followHeight(frame, innerRef.current)
   }, [])
+  const list = (
+    <FilterListList
+      ref={ref}
+      className={cn(
+        'group-has-[[data-slot=command-empty]:not(:empty)]/command:hidden',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </FilterListList>
+  )
   return (
     <div
       ref={frameRef}
@@ -331,7 +351,14 @@ function CommandList({
       // a dialog the dialog's own edge clips what leaves.
       className='group/pages relative overflow-x-clip not-in-data-[slot=dialog-content]:overflow-y-clip transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none'
     >
-      <div ref={innerRef} className='flex max-h-[min(24rem,60dvh)] flex-col'>
+      <div
+        ref={innerRef}
+        className={cn(
+          'flex flex-col',
+          // A page that leads with its own content, such as an answer, takes more of the screen.
+          lead ? 'max-h-[min(32rem,70dvh)]' : 'max-h-[min(24rem,60dvh)]',
+        )}
+      >
         {/*
          * A page of its own for each page of commands, around the list that
          * scrolls: it moves without the list scrolling sideways to follow its
@@ -345,16 +372,7 @@ function CommandList({
           data-fresh={moved ? '' : undefined}
           className={pageClassName}
         >
-          <FilterListList
-            ref={ref}
-            className={cn(
-              'group-has-[[data-slot=command-empty]:not(:empty)]/command:hidden',
-              className,
-            )}
-            {...props}
-          >
-            {children}
-          </FilterListList>
+          {lead ? <CommandLead lead={lead}>{list}</CommandLead> : list}
         </div>
       </div>
       <div
@@ -362,6 +380,27 @@ function CommandList({
         aria-hidden
         className='pointer-events-none absolute inset-0 overflow-x-clip not-in-data-[slot=dialog-content]:overflow-y-clip'
       />
+    </div>
+  )
+}
+
+/** A page's lead, which scrolls in the room its rows leave, and its rows under it at their full height. */
+function CommandLead({ lead, children }: { lead: ReactNode; children: ReactNode }) {
+  const fades = useEdgeFades<HTMLDivElement>()
+  return (
+    <div
+      data-slot='command-lead-page'
+      className='flex min-h-0 flex-1 flex-col *:[[role=listbox]]:flex-none *:[[role=listbox]]:not-has-[[role=option]]:hidden'
+    >
+      {/* A highlight that lands on a row never scrolls what the lead shows. */}
+      <div
+        ref={fades}
+        data-slot='command-lead-scroller'
+        className={cn(filterListScrollerClassName, 'relative')}
+      >
+        <div data-slot='command-lead'>{lead}</div>
+      </div>
+      {children}
     </div>
   )
 }
@@ -427,14 +466,15 @@ function pageMotion(layer: { current: HTMLElement | null }, key: string) {
   }
 }
 
+/** What scrolls in a page: its rows, and its lead. */
+const SCROLLERS = '[role=listbox], [data-slot=command-lead-scroller]'
+
 function leavePage(page: HTMLElement, layer: HTMLElement) {
   // Read now, while the page is still laid out: once removed it has no box.
   const box = page.getBoundingClientRect()
   const area = layer.getBoundingClientRect()
   const drawn = drawnNow(page)
-  const scrolled = [...page.querySelectorAll('[role=listbox]')].map(
-    (list) => list.scrollTop,
-  )
+  const scrolled = [...page.querySelectorAll(SCROLLERS)].map((list) => list.scrollTop)
   // A ref let go but kept (React's second look in development), or a menu
   // that closed with its page, has nothing leaving.
   queueMicrotask(() => {
@@ -452,7 +492,7 @@ function leavePage(page: HTMLElement, layer: HTMLElement) {
       },
       from: (copy) => {
         // A copy starts scrolled to the top: put its lists where they were.
-        for (const [index, list] of copy.querySelectorAll('[role=listbox]').entries())
+        for (const [index, list] of copy.querySelectorAll(SCROLLERS).entries())
           list.scrollTo({ top: scrolled[index] ?? 0, behavior: 'instant' })
         return hold(copy, drawn).map((property) => [copy, property] as const)
       },

@@ -30,6 +30,7 @@ import {
   popupSurfaceClassName,
   usePopupGrow,
 } from '@/registry/lib/popup'
+import { mergeRefs } from '@/registry/lib/refs'
 import { followHeight } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import { Combobox as FilterListPrimitive } from '@base-ui/react/combobox'
@@ -40,6 +41,7 @@ import {
   use,
   useEffect,
   useId,
+  useMemo,
   useRef,
 } from 'react'
 
@@ -230,12 +232,14 @@ function FilterListTrigger({
 function FilterListList({
   className,
   children,
+  ref,
   ...props
 }: Omit<FilterListPrimitive.List.Props, 'className'> & { className?: string }) {
   const fades = useEdgeFades<HTMLDivElement>()
+  const listRef = useMemo(() => mergeRefs(ref, fades), [ref, fades])
   return (
     <FilterListPrimitive.List
-      ref={fades}
+      ref={listRef}
       className={cn(filterListScrollerClassName, 'group-data-empty/popup:hidden')}
       {...props}
     >
