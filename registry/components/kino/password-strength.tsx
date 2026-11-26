@@ -1,12 +1,11 @@
 'use client'
 
 import { CheckboxMark } from '@/registry/components/kino/checkbox'
-import { useInField } from '@/registry/components/kino/field'
 import { Meter, MeterLabel, MeterValue } from '@/registry/components/kino/meter'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { choiceMarkBoxClassName } from '@/registry/lib/choice'
 import { graphemes, Swap } from '@/registry/lib/swap'
-import { Field as FieldPrimitive } from '@base-ui/react/field'
+import { FieldDescription, useFieldControl } from '@ui-sdk/react/field'
 import { type ComponentProps, type ReactNode, useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -73,11 +72,8 @@ function PasswordStrength({
     return () => clearTimeout(timer)
   })
 
-  const inField = useInField()
-  const rulesProps = {
-    'data-slot': 'password-strength-rules',
-    className: 'flex flex-col gap-1.5 text-xs',
-  }
+  const inField = useFieldControl() !== null
+  const rulesClassName = 'flex flex-col gap-1.5 text-xs'
   const ruleItems = rules?.map((rule, index) => {
     const met = rule.met(value)
     return (
@@ -132,11 +128,13 @@ function PasswordStrength({
       {rules?.length ? (
         inField ? (
           // In a Field, the rules describe its password box.
-          <FieldPrimitive.Description render={<ul />} {...rulesProps}>
+          <FieldDescription render={<ul />} className={rulesClassName}>
             {ruleItems}
-          </FieldPrimitive.Description>
+          </FieldDescription>
         ) : (
-          <ul {...rulesProps}>{ruleItems}</ul>
+          <ul data-slot='password-strength-rules' className={rulesClassName}>
+            {ruleItems}
+          </ul>
         )
       ) : null}
       {region}

@@ -1,9 +1,9 @@
 'use client'
 
-import { RadioMark } from '@/registry/components/kino/radio-group'
+import { RadioIndicator } from '@/registry/components/kino/radio'
 import {
   ChoiceCardContext,
-  choiceBoxClassName,
+  choiceCardBoxClassName,
   choiceCardClassName,
   choiceCardDescriptionClassName,
   choiceCardFloodClassName,
@@ -11,27 +11,31 @@ import {
   choiceCardTitleClassName,
   choicePressHandlers,
 } from '@/registry/lib/choice'
-import { Radio as RadioPrimitive } from '@base-ui/react/radio'
-import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
-import { type ComponentProps, use, useId } from 'react'
+import {
+  Radio as RadioPrimitive,
+  RadioGroup as RadioGroupPrimitive,
+} from '@ui-sdk/react/radio'
+import { type ComponentProps, type ReactNode, use, useId } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * One of a few options, each a card: a plan, a shipping method. Picked, the
+ * One of a few options, each a card: a plan, a shipping method. The card is
+ * a label around its radio, so a press anywhere on it picks it. Picked, the
  * card's tint spreads out from where it was pressed until it fills the card,
  * as Checkbox cards' does, while the old pick's tint drains away; the picked
  * card's border and its radio answer the press. Arrow keys and Space spread
  * it from the radio.
  */
 
-function RadioCards<Value>({
+function RadioCards<T extends string = string>({
   className,
   ...props
-}: Omit<RadioGroupPrimitive.Props<Value>, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof RadioGroupPrimitive<T>>, 'className'> & {
+  className?: string
+}) {
   return (
-    <RadioGroupPrimitive
-      data-slot='radio-cards'
+    <RadioGroupPrimitive<T>
       className={cn(
         // Columns at least 14rem wide, as many as fit, so the cards wrap from a phone to a wide page.
         'relative isolate grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3',
@@ -42,60 +46,57 @@ function RadioCards<Value>({
   )
 }
 
+type RadioProps = ComponentProps<typeof RadioPrimitive>
+
+/** One option's card. Its props go to its radio, the `RadioCardIndicator` inside it, and `className` to the card. */
 function RadioCard({
   className,
   children,
-  onPointerDown,
-  onFocus,
-  onKeyDown,
-  onKeyUp,
-  onBlur,
   ...props
-}: Omit<RadioPrimitive.Root.Props, 'className' | 'nativeButton' | 'render'> & {
+}: Omit<RadioProps, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
 }) {
   const id = useId()
-  const ids = { title: `${id}-title`, description: `${id}-description` }
-  const press = choicePressHandlers({ onKeyDown, onKeyUp, onBlur })
   return (
-    <RadioPrimitive.Root
+    <label
       data-slot='radio-card'
       data-choice-card=''
-      render={<div />}
-      aria-labelledby={ids.title}
-      aria-describedby={ids.description}
       className={cn(choiceCardClassName, className)}
-      {...press}
-      {...choiceCardFloodHandlers({ onPointerDown, onFocus, onKeyDown: press.onKeyDown })}
-      {...props}
+      {...choiceCardFloodHandlers}
     >
       <span
         aria-hidden
         data-slot='radio-card-flood'
         className={choiceCardFloodClassName}
       />
-      <ChoiceCardContext value={ids}>{children}</ChoiceCardContext>
-    </RadioPrimitive.Root>
+      <ChoiceCardContext
+        value={{ title: `${id}-title`, description: `${id}-description`, control: props }}
+      >
+        {children}
+      </ChoiceCardContext>
+    </label>
   )
 }
 
-/** The card's radio, which shows the pick as a disc that wipes in. */
-function RadioCardIndicator({
-  className,
-  ...props
-}: Omit<RadioPrimitive.Indicator.Props, 'className' | 'keepMounted'> & {
-  className?: string
-}) {
+/** The card's radio, named by the card's title and described by its description, which shows the pick as a disc that wipes in. */
+function RadioCardIndicator({ className }: { className?: string }) {
+  const { title, description, control } = use(ChoiceCardContext)
+  const { onKeyDown, onKeyUp, onBlur, ...props } = control as RadioProps
   return (
-    <RadioPrimitive.Indicator
-      data-slot='radio-card-indicator'
-      keepMounted
-      aria-hidden
-      className={cn(choiceBoxClassName, 'relative inline-flex rounded-full', className)}
+    <RadioPrimitive
+      aria-labelledby={title}
+      aria-describedby={description}
+      className={cn(
+        choiceCardBoxClassName,
+        'relative inline-flex rounded-full',
+        className,
+      )}
+      {...choicePressHandlers({ onKeyDown, onKeyUp, onBlur })}
       {...props}
     >
-      <RadioMark />
-    </RadioPrimitive.Indicator>
+      <RadioIndicator />
+    </RadioPrimitive>
   )
 }
 

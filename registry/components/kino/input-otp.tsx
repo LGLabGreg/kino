@@ -2,9 +2,10 @@
 
 import { inputBoxClassName } from '@/registry/components/kino/input'
 import { separatorVariants } from '@/registry/components/kino/separator'
+import { useFieldProps } from '@/registry/lib/field-control'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { OTPField as OTPFieldPrimitive } from '@base-ui/react/otp-field'
-import { useMemo } from 'react'
+import { createContext, use, useMemo } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -13,28 +14,52 @@ import { cn } from '@/lib/utils'
  * it's typed or pasted, and an empty box that has focus shows a caret.
  */
 
+/** What the group's Field gives it that every box takes too. */
+const SHARED = ['aria-describedby']
+const LABEL = 'aria-labelledby'
+
+/** Whether the group's Field shows it as invalid, so every box is marked from the first paint. */
+const InvalidContext = createContext(false)
+
 /**
- * Gives every box the description and error that Base UI gives only the
- * group around them, so a screen reader says why a code is wrong in
- * whichever box has focus. Kept outside the component: the React Compiler
- * can drop side effects written inside one.
+ * Gives every box the label and the description that the Field gives the
+ * group around them, so a screen reader says what the code is for
+ * and why it is wrong in whichever box has focus. A box keeps Base UI's own
+ * label, its position, after the Field's. Kept outside the component: the
+ * React Compiler can drop side effects written inside one.
  */
 function describeSlots(root: HTMLDivElement | null) {
   if (!root) return undefined
+  // The group's label as last copied, so a label that changes leaves no stale id.
+  let copied: string[] = []
   const copy = () => {
-    const ids = root.getAttribute('aria-describedby')
+    const label = root.getAttribute(LABEL)?.split(' ').filter(Boolean) ?? []
     for (const input of root.querySelectorAll('input')) {
-      // Only on a change, or the observer would hear its own write.
-      if (input.getAttribute('aria-describedby') === ids) continue
-      if (ids) input.setAttribute('aria-describedby', ids)
-      else input.removeAttribute('aria-describedby')
+      const current = input.getAttribute(LABEL) ?? ''
+      const own = current
+        .split(' ')
+        .filter((id) => id && !copied.includes(id) && !label.includes(id))
+      const value = [...label, ...own].join(' ')
+      if (current === value) continue
+      if (value) input.setAttribute(LABEL, value)
+      else input.removeAttribute(LABEL)
+    }
+    copied = label
+    for (const name of SHARED) {
+      const value = root.getAttribute(name)
+      for (const input of root.querySelectorAll('input')) {
+        // Only on a change, or the observer would hear its own write.
+        if (input.getAttribute(name) === value) continue
+        if (value) input.setAttribute(name, value)
+        else input.removeAttribute(name)
+      }
     }
   }
   copy()
   const observer = new MutationObserver(copy)
   observer.observe(root, {
     attributes: true,
-    attributeFilter: ['aria-describedby'],
+    attributeFilter: [...SHARED, LABEL],
     childList: true,
     subtree: true,
   })
@@ -44,18 +69,27 @@ function describeSlots(root: HTMLDivElement | null) {
 function InputOTP({
   className,
   ref,
+  name,
+  disabled,
   ...props
 }: Omit<OTPFieldPrimitive.Root.Props, 'className'> & {
   className?: string
 }) {
-  const refs = useMemo(() => mergeRefs(ref, describeSlots), [ref])
+  // The group is its Field's control: a press on the label focuses the first box.
+  const { field, invalid, props: fieldProps } = useFieldProps(props)
+  const fieldRef = fieldProps.ref
+  const refs = useMemo(() => mergeRefs(ref, describeSlots, fieldRef), [ref, fieldRef])
   return (
-    <OTPFieldPrimitive.Root
-      ref={refs}
-      data-slot='input-otp'
-      className={cn('flex min-w-0 items-center gap-2', className)}
-      {...props}
-    />
+    <InvalidContext value={invalid}>
+      <OTPFieldPrimitive.Root
+        data-slot='input-otp'
+        className={cn('flex min-w-0 items-center gap-2', className)}
+        name={name ?? field?.name}
+        disabled={disabled || field?.disabled}
+        {...fieldProps}
+        ref={refs}
+      />
+    </InvalidContext>
   )
 }
 
@@ -65,6 +99,7 @@ function InputOTPSlot({
 }: Omit<OTPFieldPrimitive.Input.Props, 'className'> & {
   className?: string
 }) {
+  const invalid = use(InvalidContext)
   return (
     <OTPFieldPrimitive.Input
       data-slot='input-otp-slot'
@@ -80,6 +115,7 @@ function InputOTPSlot({
         >
           <input
             {...inputProps}
+            aria-invalid={invalid || inputProps['aria-invalid'] || undefined}
             // Base UI names every slot after the field's label; each after the
             // first also says where it is.
             {...(state.index > 0 && !inputProps['aria-label'] && inputProps.id

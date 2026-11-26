@@ -23,8 +23,15 @@ import {
   ImageCropperRotate,
   ImageCropperZoom,
 } from '@/registry/components/kino/image-cropper'
-import { FieldWiring, OutsideField } from '@/registry/lib/field-control'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { FieldCheck, OutsideField, useFieldProps } from '@/registry/lib/field-control'
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -33,7 +40,7 @@ import { cn } from '@/lib/utils'
  * Upload and Remove beside it. An upload opens the Image cropper in a
  * dialog, round, and the crop it keeps shows at once and waits for Save as
  * any other change does; Discard brings the old photo back. What Save sends
- * under `name` is the cropped image as a File, `null` once removed, or the
+ * under `name` is the cropped image as a File, an empty value once removed, or the
  * photo's address when it hasn't changed.
  */
 
@@ -73,7 +80,7 @@ function SettingsPhoto({
   return (
     <Field
       name={name}
-      data-slot='settings-photo'
+      data-settings-photo=''
       className={cn(
         "grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 p-(--surface-padding) [grid-template-areas:'picture_label'_'picture_message'_'control_control'] @md:grid-cols-[auto_minmax(0,1fr)_auto] @md:[grid-template-areas:'picture_label_control'_'picture_message_control']",
         className,
@@ -119,8 +126,17 @@ function PhotoControl({
   const [crop, setCrop] = useState<Crop | null>(null)
   const [cropping, setCropping] = useState(false)
   const [failed, setFailed] = useState(false)
+  const { props: control } = useFieldProps({})
+  // The new image, in a file input, so the form sends it as a File.
+  const fileRef = useRef<HTMLInputElement>(null)
+  useLayoutEffect(() => {
+    const input = fileRef.current
+    if (!input || !(value instanceof File) || typeof DataTransfer === 'undefined') return
+    const transfer = new DataTransfer()
+    transfer.items.add(value)
+    input.files = transfer.files
+  }, [value])
 
-  // FieldWiring takes each new value as the person's edit.
   const change = (next: SettingsPhotoValue) => setValue(next)
 
   const keep = async () => {
@@ -151,22 +167,17 @@ function PhotoControl({
       {description ? (
         <FieldDescription className='self-start pt-0.5'>{description}</FieldDescription>
       ) : null}
-      <FieldWiring value={value} filled={value !== null} disabled={false} name={name}>
-        {({ control }) => (
-          // What the label points at and the form's checks read: focus that reaches it goes on to the upload.
-          <input
-            {...control}
-            type='text'
-            tabIndex={-1}
-            aria-hidden
-            name={name}
-            value={typeof value === 'string' ? value : value ? value.name : ''}
-            onChange={() => {}}
-            onFocus={() => upload?.focus()}
-            className='sr-only'
-          />
-        )}
-      </FieldWiring>
+      {/* What the label points at: focus that reaches it goes on to the upload. */}
+      <FieldCheck
+        control={control}
+        value={typeof value === 'string' ? value : value ? value.name : ''}
+        onFocus={() => upload?.focus()}
+      />
+      {value instanceof File ? (
+        <input ref={fileRef} type='file' name={name} hidden tabIndex={-1} aria-hidden />
+      ) : (
+        <input type='hidden' name={name} value={value ?? ''} />
+      )}
       <div className='flex flex-wrap items-center gap-2 pt-3 [grid-area:control] @md:justify-end @md:pt-0'>
         <OutsideField>
           <FileInput
@@ -182,7 +193,12 @@ function PhotoControl({
               setOpen(true)
             }}
           >
-            <FileInputTrigger ref={setUpload} size='sm'>
+            <FileInputTrigger
+              ref={setUpload}
+              size='sm'
+              // The Field's description and error, which the upload takes in its place.
+              aria-describedby={control['aria-describedby']}
+            >
               {value === null ? 'Upload photo' : 'Change photo'}
             </FileInputTrigger>
           </FileInput>

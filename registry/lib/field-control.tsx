@@ -1,45 +1,226 @@
 'use client'
 
 import { mergeRefs } from '@/registry/lib/refs'
+import { useFieldControl } from '@ui-sdk/react/field'
 import {
-  DEFAULT_FIELD_ROOT_STATE,
-  DEFAULT_VALIDITY_STATE,
-} from '@base-ui/react/internals/field-constants'
-import { useRegisterFieldControl } from '@base-ui/react/internals/field-register-control'
-import {
-  FieldRootContext,
-  type FieldRootContextType,
-  useFieldRootContext,
-} from '@base-ui/react/internals/field-root-context'
-import { useFormContext } from '@base-ui/react/internals/form-context'
-import {
-  LabelableProvider,
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
-import {
+  createContext,
   type ReactNode,
+  type Ref,
+  type RefCallback,
   type RefObject,
+  use,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react'
 
 /*
- * What a control that isn't an input needs to sit in a Field like one: a
- * press on the Field's label focuses it, and its values go with a form as
- * hidden inputs. The Listbox's and the Calendar's. A control that keeps its
- * value in one hidden input or textarea, as the Segment field and the Token
- * input do, takes `useFieldControl` for all of that and the Field's state.
- * One whose own input holds something else, as the File input's does,
- * takes `FieldWiring`.
- * `OutsideField` keeps a Base UI part inside a control from being taken as
- * the Field's control.
+ * What a control that isn't one of ui-sdk's needs to sit in its Field like
+ * one: a Base UI part, such as the Select's trigger, or a control of our own,
+ * such as the Listbox. `useFieldProps` puts the Field's id, label,
+ * description and check on the element its label names; `FieldCheck` gives
+ * the Field a native input to check when the control keeps no value of its
+ * own in one; `FieldValues` sends its values with the form; `useLabelFocus`
+ * hands a press on the label to the part that takes focus.
  */
 
-/** Focuses the control with `focus` when its Field's label, by `labelId`, is pressed, as a label does for an input. */
+/** Whether the parts inside sit outside the Field around them. */
+const OutsideContext = createContext(false)
+
+/**
+ * Parts inside a control that aren't its Field's control, such as a phone
+ * number's country picker: outside this, they would take the Field's label,
+ * description and name as the control does.
+ */
+function OutsideField({ children }: { children: ReactNode }) {
+  return <OutsideContext value>{children}</OutsideContext>
+}
+
+/**
+ * The Field around a control, from ui-sdk's `useFieldControl`: its name,
+ * whether it is off, and `props` for its control. Null outside a Field, and
+ * inside an `OutsideField`.
+ */
+function useField(own?: { id?: string }) {
+  const outside = use(OutsideContext)
+  const field = useFieldControl(own)
+  return outside ? null : field
+}
+
+/** What a Field puts on the element its label names. */
+interface FieldAttributes {
+  id?: string
+  'aria-labelledby'?: string
+  'aria-describedby'?: string
+  /** Set while the Field shows its check failing. */
+  'aria-invalid'?: 'true'
+}
+
+/**
+ * The Field around a control, and `props` with the Field's merged in for the
+ * element its label names: the id, `aria-labelledby`, `aria-describedby` and
+ * `aria-invalid` while its check fails, and its ref. `field` is null outside
+ * a Field, with `props` as given; `invalid` says whether the Field shows its
+ * control as invalid. A control whose component makes the id it renders
+ * passes that id as `own`.
+ */
+function useFieldProps<P extends object>(props: P, own?: { id?: string }) {
+  const field = useField(own)
+  const { ref, ...rest } = props as P & { ref?: Ref<Element> }
+  const merged = (field ? field.props(rest) : rest) as FieldAttributes & {
+    ref?: Ref<Element>
+    'data-slot'?: string
+  }
+  // ui-sdk hands back the slot it was given, undefined too, which would wipe a slot set before the spread.
+  if (merged['data-slot'] === undefined) delete merged['data-slot']
+  const fieldRef = merged.ref
+  const refs = useMemo(() => mergeRefs(ref, fieldRef), [ref, fieldRef])
+  return {
+    field,
+    invalid: merged['aria-invalid'] === 'true',
+    props: { ...merged, ref: refs } as Omit<P, 'ref'> &
+      FieldAttributes & { ref: RefCallback<RefTarget<P>> },
+  }
+}
+
+/** The element a control's `ref` takes. */
+type RefTarget<P> = P extends { ref?: Ref<infer E> } ? E : Element
+
+/**
+ * Whether a form's reset leaves a control as it is: a controlled one with no
+ * default value, so its owner's state stays the only source of its value, as
+ * ui-sdk's controls do. Any other goes back to its default value.
+ */
+function keptOnReset(value: unknown, defaultValue: unknown) {
+  return value !== undefined && defaultValue === undefined
+}
+
+/**
+ * Each of `values` as a hidden input under `name`, sent with the form, or with
+ * the form `form` names.
+ */
+function FieldValues({
+  name,
+  form,
+  values,
+  many = false,
+}: {
+  name: string | undefined
+  form?: string
+  values: readonly string[]
+  /** Whether the control takes several values, so a Form's values hold a list under `name` even with one. */
+  many?: boolean
+}) {
+  if (!name) return null
+  // By place: two values can be the same.
+  return values.map((value, index) => (
+    <input
+      // oxlint-disable-next-line react/no-array-index-key -- the inputs hold no state, and two values may match
+      key={index}
+      type='hidden'
+      name={name}
+      form={form}
+      value={value}
+      data-many={many ? '' : undefined}
+    />
+  ))
+}
+
+/** The style ui-sdk gives the native input behind a checkbox: in the page, unseen and out of the way. */
+const checkStyle = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  border: 0,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+  opacity: 0,
+  pointerEvents: 'none',
+} as const
+
+/**
+ * A native input, unseen, that holds a control's check for its Field and the
+ * form: empty while the control is, so `required` turns an empty one down,
+ * and failing with `message` while there is one. It sends nothing unless it
+ * has a `name`. The form's own check focuses it when it fails, and it hands
+ * focus to `onFocus`, the control's own part. Each change to `value` or
+ * `message` tells the Field, as typing in an input does, so it checks again
+ * and a server's error for it goes. A Field's `validate` checks it, and
+ * `onReset` puts the control back when the form is reset.
+ */
+function FieldCheck({
+  value,
+  name,
+  required,
+  readOnly,
+  message = '',
+  disabled,
+  form,
+  onFocus,
+  onReset,
+  control,
+}: {
+  /** What the control holds, as text: empty while it holds nothing. */
+  value: string
+  name?: string
+  required?: boolean
+  readOnly?: boolean
+  /** Why it fails, beyond `required`; empty while it passes. */
+  message?: string
+  disabled?: boolean
+  form?: string
+  onFocus: () => void
+  /** Puts the control back to its default when its form is reset, as a native control goes back. */
+  onReset?: (event: Event) => void
+  /** The Field's props from `useFieldProps`, when this input is the element its label names. */
+  control?: FieldAttributes & { ref?: Ref<HTMLInputElement> }
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const controlRef = control?.ref
+  const refs = useMemo(() => mergeRefs(input, controlRef), [controlRef])
+  useFormReset(input, (event) => onReset?.(event), form)
+  useLayoutEffect(() => {
+    input.current?.setCustomValidity(disabled ? '' : message)
+  }, [message, disabled])
+  const told = useRef({ value, message })
+  useEffect(() => {
+    const last = told.current
+    told.current = { value, message }
+    if (last.value === value && last.message === message) return
+    input.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [value, message])
+  return (
+    <input
+      {...control}
+      ref={refs}
+      // Its own message, which a Field's `validate` keeps ahead of its own.
+      data-field-check={disabled ? '' : message}
+      aria-hidden
+      tabIndex={-1}
+      name={name}
+      form={form}
+      value={value}
+      required={required}
+      readOnly={readOnly}
+      disabled={disabled}
+      // Its value comes from the control; nothing types into it.
+      onChange={() => {}}
+      onFocus={onFocus}
+      style={checkStyle}
+    />
+  )
+}
+
+/**
+ * Focuses the control with `focus` when its Field's label, by `labelId`, is
+ * pressed, as a label does for an input, for a control whose focus goes to a
+ * part inside it, such as a Calendar's day.
+ */
 function useLabelFocus(
   labelId: string | undefined,
   disabled: boolean,
@@ -53,218 +234,45 @@ function useLabelFocus(
   }, [labelId, disabled, focus])
 }
 
-/** Each of `values` as a hidden input under `name`, sent with the form, or with the form `form` names. */
-function FieldValues({
-  name,
-  form,
-  values,
-}: {
-  name: string | undefined
-  form?: string
-  values: readonly string[]
-}) {
-  if (!name) return null
-  // By place: two values can be the same.
-  return values.map((value, index) => (
-    // oxlint-disable-next-line react/no-array-index-key -- the inputs hold no state, and two values may match
-    <input key={index} type='hidden' name={name} form={form} value={value} />
-  ))
-}
-
 /**
- * Wires a control Base UI's Field doesn't know into the Field around it, as
- * Field.Control does for an input: a field of segments, an editable text.
- * The control keeps its value in a hidden input or textarea, which takes
- * `hiddenProps` and is what the form and the browser's checks read; the
- * Field's label points at it by `id`, and it hands focus on.
- *
- * Call `edited` with the new value when the person changes it (never for a
- * value set from outside), `focused` and `left` when focus comes and goes.
- * The field validates after the render that puts the new value in the hidden
- * control, so a layout effect that sets its custom validity goes before this
- * hook.
+ * Calls `reset` when the form around `element`, or the one `form` names, is
+ * reset, so a control that keeps its value in its own state goes back to its
+ * default as a native one does.
  */
-function useFieldControl<Value>({
-  control,
-  id,
-  value,
-  filled,
-  disabled,
-  name,
-}: {
-  /** The element the form focuses when the field fails its check. */
-  control: RefObject<HTMLElement | null>
-  /** The Field's labelable id, from `useLabelableId`. */
-  id: string | undefined
-  value: Value
-  /** Whether the field holds anything: the Field's `data-filled`. */
-  filled: boolean
-  disabled: boolean
-  /** The control's own `name` prop; the Field's name wins over it. */
-  name: string | undefined
-}) {
-  const field = useFieldRootContext()
-  const { clearErrors } = useFormContext()
-  useRegisterFieldControl(control, id, value, undefined, !disabled, name)
-  const { setFilled } = field
-  useLayoutEffect(() => {
-    setFilled(filled)
-  }, [filled, setFilled])
-  const validate = useRef<'change' | 'commit' | null>(null)
-  useLayoutEffect(() => {
-    const when = validate.current
-    if (!when) return
-    validate.current = null
-    if (when === 'change') field.validation.change(value)
-    else void field.validation.commit(value)
-  })
-
-  return {
-    /** Whether the Field is invalid, or failed its last check (such as a required value left empty at submit). */
-    invalid: field.invalid === true || field.state.valid === false,
-    edited: (after: Value) => {
-      clearErrors(field.name ?? name)
-      field.setDirty(after !== field.validityData.initialValue)
-      validate.current = 'change'
-    },
-    /** Checks the field again, after something outside its own edits changed what it holds or why it fails. */
-    recheck: () => field.validation.change(value),
-    focused: () => field.setFocused(true),
-    left: () => {
-      field.setTouched(true)
-      field.setFocused(false)
-      if (field.validationMode === 'onBlur') validate.current = 'commit'
-    },
-    /** Props for the hidden input or textarea; focus that reaches it goes to `onFocus`. */
-    hiddenProps: (onFocus: () => void) => ({
-      ...field.validation.getValidationProps(disabled, { onFocus }),
-      ref: field.validation.inputRef,
-    }),
-  }
+function useFormReset(
+  element: RefObject<Element | null>,
+  reset: (event: Event) => void,
+  form?: string,
+) {
+  const onReset = useEffectEvent(reset)
+  useEffect(() => {
+    const own = element.current
+    const owner = form
+      ? own?.ownerDocument.getElementById(form)
+      : (own?.closest('form') ?? null)
+    if (!owner) return
+    const listener = (event: Event) => onReset(event)
+    owner.addEventListener('reset', listener)
+    return () => owner.removeEventListener('reset', listener)
+  }, [element, form])
 }
 
-const noop = () => {}
-
-/** What Base UI's parts read when they sit in no Field. */
-const noField: FieldRootContextType = {
-  invalid: undefined,
-  name: undefined,
-  validityData: {
-    state: DEFAULT_VALIDITY_STATE,
-    errors: [],
-    error: '',
-    value: '',
-    initialValue: null,
-  },
-  setValidityData: noop,
-  disabled: undefined,
-  setTouched: noop,
-  setDirty: noop,
-  setFilled: noop,
-  setFocused: noop,
-  focusOwnerRef: { current: undefined },
-  validationMode: 'onSubmit',
-  shouldValidateOnChange: () => false,
-  state: DEFAULT_FIELD_ROOT_STATE,
-  registerFieldControl: noop,
-  validation: {
-    getValidationProps: (_disabled, props = {}) => props,
-    inputRef: { current: null },
-    registeredInputs: new Map(),
-    registerInput: noop,
-    getInputControl: () => null,
-    commit: async () => {},
-    change: noop,
-  },
+/** Focuses a radio group's picked radio, or its first one that can be picked, as a press on its label does. */
+function focusPicked(group: HTMLElement | null) {
+  const radio =
+    group?.querySelector<HTMLElement>('[role=radio][aria-checked=true]') ??
+    group?.querySelector<HTMLElement>('[role=radio]:not([data-disabled])')
+  radio?.focus()
 }
 
-/**
- * Base UI parts inside a control that aren't its field's control, such as a
- * phone number's country picker: outside this, the Field would take them as
- * its control, point its label at them and send their value with its name.
- */
-function OutsideField({ children }: { children: ReactNode }) {
-  return (
-    <FieldRootContext value={noField}>
-      <LabelableProvider>{children}</LabelableProvider>
-    </FieldRootContext>
-  )
+export {
+  FieldCheck,
+  FieldValues,
+  focusPicked,
+  keptOnReset,
+  OutsideField,
+  useField,
+  useFieldProps,
+  useFormReset,
+  useLabelFocus,
 }
-
-interface FieldWiringProps {
-  /** Props for the input the Field's label and checks point at. */
-  control: {
-    id: string | undefined
-    'aria-labelledby': string | undefined
-    'aria-describedby': string | undefined
-    /** Set while the field fails its check. */
-    'aria-invalid': true | undefined
-    ref: (node: HTMLInputElement | null) => void
-  }
-  /** Call with the new value when the person changes it. */
-  edited: (value: unknown) => void
-}
-
-/**
- * Puts a value in the Field around it, as Field.Control does for an input,
- * for a control whose own input holds something else: what the form sends,
- * the label, the description and the checks all point at the input given
- * `control`. The File input's: its native input sits in an `OutsideField`,
- * and the field takes its files, or the ids their uploads gave back.
- */
-function FieldWiring({
-  value,
-  filled,
-  disabled,
-  name,
-  invalidMessage = '',
-  children,
-}: {
-  /** What the form's values give the field. Each new value counts as the person's edit. */
-  value: unknown
-  filled: boolean
-  disabled: boolean
-  name: string | undefined
-  /** Why the field fails its check, beyond what the input's own validity says; empty when it doesn't. */
-  invalidMessage?: string
-  children: (wiring: FieldWiringProps) => ReactNode
-}) {
-  const { labelId, getDescriptionProps } = useLabelableContext()
-  const id = useLabelableId({ id: undefined })
-  const [input, setInput] = useState<HTMLInputElement | null>(null)
-  const control = useMemo(() => ({ current: input }), [input])
-  // Before the field's own hook, so its checks read the message.
-  useLayoutEffect(() => {
-    input?.setCustomValidity(disabled ? '' : invalidMessage)
-  }, [input, invalidMessage, disabled])
-  const field = useFieldControl({ control, id, value, filled, disabled, name })
-  const { edited, recheck } = field
-  // A new value is the person's edit; a new reason to fail is checked again.
-  const shown = useRef({ value, invalidMessage })
-  useLayoutEffect(() => {
-    const last = shown.current
-    shown.current = { value, invalidMessage }
-    if (disabled) return
-    if (last.value !== value) edited(value)
-    else if (last.invalidMessage !== invalidMessage) recheck()
-  })
-  const hidden = field.hiddenProps(() => {})
-  const validityRef = hidden.ref as RefObject<HTMLInputElement | null>
-  const ref = useMemo(() => mergeRefs(setInput, validityRef), [validityRef])
-  return children({
-    control: {
-      id,
-      'aria-labelledby': labelId,
-      'aria-describedby': getDescriptionProps({})['aria-describedby'] as
-        | string
-        | undefined,
-      'aria-invalid': field.invalid || undefined,
-      ref,
-    },
-    edited,
-  })
-}
-
-export { FieldValues, FieldWiring, OutsideField, useFieldControl, useLabelFocus }
-
-export type { FieldWiringProps }

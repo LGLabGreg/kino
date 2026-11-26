@@ -9,7 +9,7 @@ import { Progress } from '@/registry/components/kino/progress'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useLocale } from '@/registry/lib/dates'
-import { FieldValues, FieldWiring, OutsideField } from '@/registry/lib/field-control'
+import { FieldValues, useField, useFieldProps } from '@/registry/lib/field-control'
 import { useFlow } from '@/registry/lib/flow'
 import { formatFileSize } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
@@ -27,8 +27,6 @@ import {
   type UploadSummary,
   useUploads,
 } from '@/registry/lib/uploads'
-import { Field as FieldPrimitive } from '@base-ui/react/field'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
 import type { VariantProps } from 'class-variance-authority'
@@ -41,9 +39,11 @@ import {
   type ReactNode,
   type RefObject,
   use,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -431,8 +431,8 @@ function FileInput({
 }: FileInputProps) {
   // The server writes sizes in en-US, then the visitor's own once the page has loaded.
   const locale = useLocale(localeProp)
-  const field = useFieldRootContext()
-  const disabled = disabledProp || field.disabled === true
+  const field = useField()
+  const disabled = disabledProp || field?.disabled === true
   // A saved file stands in the list as a File that holds no bytes.
   const [defaults] = useState(() =>
     (defaultValue ?? []).map((entry) =>
@@ -617,13 +617,11 @@ function putFiles(input: HTMLInputElement, files: readonly File[]) {
 }
 
 type FileInputTriggerProps = Omit<
-  FieldPrimitive.Control.Props,
+  ComponentProps<'input'>,
   | 'className'
   | 'type'
   | 'value'
   | 'defaultValue'
-  | 'onValueChange'
-  | 'render'
   | 'size'
   | 'accept'
   | 'multiple'
@@ -662,8 +660,8 @@ function FileInputTrigger({
     values,
     summary,
   } = useFileInput()
-  const field = useFieldRootContext()
-  const name = field.name ?? nameProp
+  const field = useField()
+  const name = nameProp ?? field?.name
   const ownRef = useRef<HTMLInputElement>(null)
   const heldRef = useRef<HTMLInputElement>(null)
   const textId = useId()
@@ -680,20 +678,32 @@ function FileInputTrigger({
       if (inputRef.current === own) inputRef.current = null
     }
   }, [inputRef])
+  // The owner is its Field's control: its label's target, and the input the
+  // Field checks, which holds every file.
+  const { props: wired } = useFieldProps({
+    'aria-describedby': props['aria-describedby'],
+  })
+  // The first trigger claims the files as it mounts, in its ref, so the
+  // Field never takes the label around it for its control in the meantime.
+  const fieldRef = wired.ref
+  const claimRef = useCallback(
+    (own: HTMLInputElement | null) => {
+      if (!own || (inputRef.current && inputRef.current !== own)) return undefined
+      inputRef.current = own
+      const release = fieldRef(own)
+      return typeof release === 'function'
+        ? release
+        : () => {
+            fieldRef(null)
+          }
+    },
+    [inputRef, fieldRef],
+  )
+  const refs = useMemo(() => mergeRefs(ownRef, ref, claimRef), [ref, claimRef])
 
   // The files that go with the form themselves: none when they upload, and
   // never a saved file's stand-in, whose value goes in its place.
   const held = uploading ? [] : files.filter((file) => savedValueOf(file) === undefined)
-  // What the form's values give the field: what the uploads gave back, or
-  // the files themselves. A new array only when what it holds changes.
-  const valueOf = () => [...values, ...held]
-  const [formValue, setFormValue] = useState(valueOf)
-  const now = valueOf()
-  if (
-    formValue.length !== now.length ||
-    formValue.some((entry, index) => entry !== now[index])
-  )
-    setFormValue(now)
 
   // After every change, so the inputs hold the files it made: the control
   // all of them, for the field's checks, and the named one those that go
@@ -703,6 +713,20 @@ function FileInputTrigger({
     if (ownRef.current) putFiles(ownRef.current, files)
     if (heldRef.current) putFiles(heldRef.current, held)
   })
+
+  // A file that failed to upload holds the form back, as an invalid field
+  // does; the Field checks again whenever the files or the failure change.
+  const failure = owner && summary.failed > 0 ? failedMessage(summary.failed) : ''
+  useLayoutEffect(() => {
+    ownRef.current?.setCustomValidity(disabled ? '' : failure)
+  }, [failure, disabled])
+  const told = useRef({ files, failure })
+  useEffect(() => {
+    const last = told.current
+    told.current = { files, failure }
+    if (!owner || (last.files === files && last.failure === failure)) return
+    ownRef.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  }, [owner, files, failure])
 
   // A form that is reset goes back to the files it started with, as its
   // other controls do.
@@ -724,106 +748,83 @@ function FileInputTrigger({
   }, [owner, reset])
 
   return (
-    <FieldWiring
-      value={formValue}
-      filled={files.length > 0}
-      disabled={disabled || !owner}
-      name={name}
-      // A file that failed to upload holds the form back, as an invalid field does.
-      invalidMessage={summary.failed > 0 ? failedMessage(summary.failed) : ''}
-    >
-      {(wiring) => (
-        <>
-          <label
-            data-slot='file-input-trigger'
-            className={cn(
-              buttonVariants({ variant, size }),
-              'has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 forced-colors:has-focus-visible:outline-2 forced-colors:has-focus-visible:outline-offset-2',
-              // Space held on the input presses it, as on a Button.
-              'has-[input:active]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:has-[input:active]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--button-press-depth,1))]',
-              // In a box, the box's ring shows the focus, as a text field's does,
-              // and a disabled box fades once, not twice.
-              'in-data-[slot=file-input-box]:has-focus-visible:border-transparent in-data-[slot=file-input-box]:has-focus-visible:ring-0 in-data-[slot=file-input-box]:has-disabled:opacity-100 in-data-[slot=file-input-dropzone]:has-disabled:opacity-100',
-              className,
-            )}
-          >
-            {/* Read as part of the input's name, after the Field's label, so what
-                it says is what it is called ("Receipts, Choose files"). */}
-            <span
-              id={textId}
-              aria-hidden
-              className='inline-flex items-center gap-[inherit]'
-            >
-              {children}
-            </span>
-            {/* The Field takes the files, or what their uploads gave back, from
-                FieldWiring; this input is its label's target and holds the files
-                for its checks, and sends nothing itself. */}
-            <OutsideField>
-              <FieldPrimitive.Control
-                {...props}
-                ref={mergeRefs(ownRef, ref, owner ? wiring.control.ref : undefined)}
-                id={owner ? wiring.control.id : undefined}
-                aria-invalid={
-                  props['aria-invalid'] ??
-                  (owner ? wiring.control['aria-invalid'] : undefined)
-                }
-                aria-describedby={
-                  [props['aria-describedby'], owner && wiring.control['aria-describedby']]
-                    .filter(Boolean)
-                    .join(' ') || undefined
-                }
-                render={(controlProps) => (
-                  <input
-                    {...controlProps}
-                    type='file'
-                    aria-labelledby={[
-                      controlProps['aria-labelledby'],
-                      owner ? wiring.control['aria-labelledby'] : undefined,
-                      textId,
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  />
-                )}
-                data-slot='file-input-control'
-                accept={accept}
-                multiple={multiple && maxFiles !== 1}
-                disabled={disabled}
-                className='sr-only'
-                onChange={(event) => {
-                  // The picker puts only what was just picked in the input; the
-                  // field's files go back in once they are added.
-                  const picked = [...(event.currentTarget.files ?? [])]
-                  if (picked.length > 0) add(picked)
-                  putFiles(event.currentTarget, owner ? files : [])
+    <>
+      <label
+        data-slot='file-input-trigger'
+        className={cn(
+          buttonVariants({ variant, size }),
+          'has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-disabled:pointer-events-none has-disabled:opacity-50 forced-colors:has-focus-visible:outline-2 forced-colors:has-focus-visible:outline-offset-2',
+          // Space held on the input presses it, as on a Button.
+          'has-[input:active]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:has-[input:active]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--button-press-depth,1))]',
+          // In a box, the box's ring shows the focus, as a text field's does,
+          // and a disabled box fades once, not twice.
+          'in-data-[slot=file-input-box]:has-focus-visible:border-transparent in-data-[slot=file-input-box]:has-focus-visible:ring-0 in-data-[slot=file-input-box]:has-disabled:opacity-100 in-data-[slot=file-input-dropzone]:has-disabled:opacity-100',
+          className,
+        )}
+      >
+        {/* Read as part of the input's name, after the Field's label, so what
+            it says is what it is called ("Receipts, Choose files"). */}
+        <span id={textId} aria-hidden className='inline-flex items-center gap-[inherit]'>
+          {children}
+        </span>
+        {/* The label's target, holding every file for the Field's checks; it
+            sends nothing itself. */}
+        <input
+          {...props}
+          ref={refs}
+          id={owner ? wired.id : props.id}
+          aria-invalid={
+            props['aria-invalid'] ?? (owner ? wired['aria-invalid'] : undefined)
+          }
+          aria-describedby={owner ? wired['aria-describedby'] : props['aria-describedby']}
+          aria-labelledby={[
+            props['aria-labelledby'],
+            owner ? wired['aria-labelledby'] : undefined,
+            textId,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          type='file'
+          data-slot='file-input-control'
+          accept={accept}
+          multiple={multiple && maxFiles !== 1}
+          disabled={disabled}
+          required={owner ? props.required : undefined}
+          className='sr-only'
+          onChange={(event) => {
+            // The picker puts only what was just picked in the input; the
+            // field's files go back in once they are added.
+            const picked = [...(event.currentTarget.files ?? [])]
+            if (picked.length > 0) add(picked)
+            putFiles(event.currentTarget, owner ? files : [])
 
-                  onChange?.(event)
-                }}
-              />
-            </OutsideField>
-          </label>
-          {owner ? (
-            <>
-              {/* A disabled field sends nothing, as a disabled input doesn't. */}
-              <FieldValues name={disabled ? undefined : name} values={values} />
-              {name && !uploading ? (
-                <input
-                  ref={heldRef}
-                  type='file'
-                  name={name}
-                  multiple
-                  hidden
-                  disabled={disabled}
-                  tabIndex={-1}
-                  aria-hidden
-                />
-              ) : null}
-            </>
+            onChange?.(event)
+          }}
+        />
+      </label>
+      {owner ? (
+        <>
+          {/* A disabled field sends nothing, as a disabled input doesn't. */}
+          <FieldValues
+            name={disabled ? undefined : name}
+            values={values}
+            many={multiple && maxFiles !== 1}
+          />
+          {name && !uploading ? (
+            <input
+              ref={heldRef}
+              type='file'
+              name={name}
+              multiple
+              hidden
+              disabled={disabled}
+              tabIndex={-1}
+              aria-hidden
+            />
           ) : null}
         </>
-      )}
-    </FieldWiring>
+      ) : null}
+    </>
   )
 }
 

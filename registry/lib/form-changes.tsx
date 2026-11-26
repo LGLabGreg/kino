@@ -1,12 +1,15 @@
 'use client'
 
-import { type FormStatus, useFormSubmission } from '@/registry/components/kino/field'
+import {
+  type FormStatus,
+  formValues,
+  useFormSubmission,
+} from '@/registry/components/kino/field'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { isComposing, matchesShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { refuse } from '@/registry/lib/refuse'
 import { transitionsQuiet } from '@/registry/lib/resize'
 import { revealBehavior } from '@/registry/lib/scroll'
-import { useFormContext } from '@base-ui/react/internals/form-context'
 import {
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -19,11 +22,11 @@ import {
 } from 'react'
 
 /*
- * What a form has changed since it was last saved, read from Base UI's Form:
- * every Field with a name registers its value there, which is what the form
- * submits. The values the form starts with, and those of each save that
- * works, are the baseline; a Field that appears later joins it as it is.
- * The Save bar's.
+ * What a form has changed since it was last saved, read from what it sends:
+ * its FormData, with every named control it holds, so a box that is off
+ * still counts. The values the form starts with, and those of each save
+ * that works, are the baseline; a control that appears later joins it as it
+ * is. The Save bar's.
  */
 
 type Values = Map<string, unknown>
@@ -37,8 +40,33 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isBlank(value: unknown) {
-  return value === undefined || value === null || value === ''
+  return (
+    value === undefined ||
+    value === null ||
+    value === '' ||
+    // What an empty file input sends: a new one each time it is read.
+    (typeof File !== 'undefined' && value instanceof File && !value.name && !value.size)
+  )
 }
+
+/**
+ * What a form sends, by name, in the order it holds its controls: a named
+ * control that sends nothing, such as a box that is off, is blank.
+ */
+export function formState(form: HTMLFormElement): Values {
+  const values: Values = new Map()
+  for (const control of form.elements) {
+    const name = control.getAttribute('name')
+    if (name && !values.has(name)) values.set(name, '')
+  }
+  for (const [name, value] of Object.entries(formValues(form))) {
+    values.set(name, value)
+  }
+  return values
+}
+
+/** Where a hook outside a Kino Form reads its form from: nowhere. */
+const noForm: RefObject<HTMLFormElement | null> = { current: null }
 
 /** Whether two field values are the same: equal, both blank, or arrays and plain objects whose items are. */
 export function sameValue(a: unknown, b: unknown): boolean {
@@ -104,13 +132,12 @@ export function leavesPage(
 /**
  * The names of the fields whose value differs from the last save, or from
  * where the form started, and whether they have been read since the last save
- * that worked: until then, they are the old ones. Inside a Base UI Form; a
- * Kino Form also moves the baseline on each save that works, and reads again
- * after a reset.
+ * that worked: until then, they are the old ones. Inside a Kino Form, which
+ * moves the baseline on each save that works, and reads again after a reset.
  */
 export function useFormChanges() {
-  const { formRef, elementRef } = useFormContext()
   const submission = useFormSubmission()
+  const elementRef = submission?.formRef ?? noForm
   const baseline = useRef<Values>(new Map())
   const [changed, setChanged] = useState<string[]>([])
   const read = useRef(() => {})
@@ -124,11 +151,7 @@ export function useFormChanges() {
     let frame = 0
     const readNow = () => {
       frame = 0
-      const values: Values = new Map()
-      for (const field of formRef.current.fields.values()) {
-        if (field.name) values.set(field.name, field.getValue())
-      }
-      const next = changedNames(baseline.current, values)
+      const next = changedNames(baseline.current, formState(form))
       setChanged((last) => (sameNames(last, next) ? last : next))
       setSavesRead(savesTaken.current)
     }
@@ -154,12 +177,16 @@ export function useFormChanges() {
       form.removeEventListener('change', schedule, true)
       observer.disconnect()
     }
-  }, [elementRef, formRef])
+  }, [elementRef])
 
   // What a save sent is the new baseline, even if the person typed on meanwhile.
   const saved = submission?.saved
   useEffect(() => {
     if (!saved) return
+    // A name the save didn't send, such as a box that is off, was sent blank.
+    for (const name of baseline.current.keys()) {
+      baseline.current.set(name, saved.values[name] ?? '')
+    }
     for (const [name, value] of Object.entries(saved.values)) {
       baseline.current.set(name, value)
     }
@@ -358,8 +385,8 @@ export function useSaveBar({
   /** Where the bar renders, in place of the end of the page. */
   container?: HTMLElement | null
 }) {
-  const { elementRef } = useFormContext()
   const submission = useFormSubmission()
+  const elementRef = submission?.formRef ?? noForm
   // The bar's element, which says no, and which focus leaves as it goes. As
   // state too: it mounts after its form, outside it, once the page has loaded.
   const bar = useRef<HTMLElement | null>(null)

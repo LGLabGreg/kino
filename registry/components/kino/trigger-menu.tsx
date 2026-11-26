@@ -521,7 +521,7 @@ function TriggerMenuTextarea({ ref, ...props }: ComponentProps<typeof Textarea>)
   const attachField = useAttachField()
   // One callback for the field's life, so React doesn't hand it the element again each render.
   const fieldRef = useMemo(() => mergeRefs(ref, attachField), [ref, attachField])
-  return <Textarea data-slot='trigger-menu-textarea' ref={fieldRef} {...props} />
+  return <Textarea data-trigger-menu-textarea='' ref={fieldRef} {...props} />
 }
 
 /** A one-line field to type in, such as a search or a subject line. */
@@ -529,7 +529,7 @@ function TriggerMenuInput({ ref, ...props }: ComponentProps<typeof Input>) {
   const attachField = useAttachField()
   // One callback for the field's life, so React doesn't hand it the element again each render.
   const fieldRef = useMemo(() => mergeRefs(ref, attachField), [ref, attachField])
-  return <Input data-slot='trigger-menu-input' ref={fieldRef} {...props} />
+  return <Input data-trigger-menu-input='' ref={fieldRef} {...props} />
 }
 
 /**

@@ -14,7 +14,7 @@ import {
   chipRemoveClassName,
 } from '@/registry/lib/chip'
 import { CutTooltip } from '@/registry/lib/cut'
-import { useFieldControl } from '@/registry/lib/field-control'
+import { useField, useFieldProps } from '@/registry/lib/field-control'
 import { fromWhereItIs, leaveAsCopy, returnFromCopy } from '@/registry/lib/flow'
 import { isComposing } from '@/registry/lib/keys'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
@@ -24,11 +24,6 @@ import {
   TriggerEditorContext,
   type TriggerContent,
 } from '@/registry/lib/trigger-editor'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import {
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
 import {
   type ClipboardEvent,
   type ComponentProps,
@@ -242,8 +237,8 @@ function TokenInput({
   form,
   children,
 }: TokenInputProps) {
-  const field = useFieldRootContext()
-  const disabled = disabledProp || field.disabled === true
+  const field = useField()
+  const disabled = disabledProp || field?.disabled === true
   const [ids] = useState(() => new WeakMap<Token, string>())
   const [own, setOwn] = useState(() => withIds(defaultValue, ids))
   const value = useMemo(
@@ -880,7 +875,7 @@ function TokenInput({
         required,
         handlers,
         text: toText(value, codec),
-        name: field.name ?? name,
+        name: name ?? field?.name,
         form,
         hidden,
         editsRef,
@@ -964,37 +959,31 @@ function TokenInputEditor({
     hidden,
     editsRef,
   } = useTokenInput()
-  const labelable = useLabelableContext()
-  // The Field's label points at the form's textarea, which hands focus on.
-  const id = useLabelableId({ id: idProp })
+  // The editable text is what its Field's label names and focuses, and what its description and check describe.
+  const { invalid, props: editorProps } = useFieldProps({ ...props, id: idProp })
+  const fieldRef = editorProps.ref
+  const editorRef = useMemo(
+    () => mergeRefs(setEditor, markMounted, ref, fieldRef),
+    [setEditor, ref, fieldRef],
+  )
   // A read-only field isn't editable, so a screen reader hears it as read
   // only; its text is still selected with the pointer, or all of it with Mod+A.
   const editable = !disabled && !readOnly
   const empty = value.length === 0
-  const control = useMemo(() => ({ current: editor }), [editor])
-  const fieldControl = useFieldControl({
-    control,
-    id,
-    value: text,
-    filled: !empty,
-    disabled,
-    name,
-  })
-  const { invalid } = fieldControl
-  // The root tells the Field of each change the person makes.
+  // The root marks each change the person makes; once it has rendered into
+  // the textarea, the Field hears it as an edit, so it checks again and a
+  // server's error for it goes.
+  const edited = useRef(false)
   useLayoutEffect(() => {
-    editsRef.current = fieldControl.edited
+    editsRef.current = () => {
+      edited.current = true
+    }
   })
-
-  const fieldHidden = fieldControl.hiddenProps(() => editor?.focus())
-  const editorRef = useMemo(
-    () => mergeRefs(setEditor, markMounted, ref),
-    [setEditor, ref],
-  )
-  // Base UI types its ref for an input; it reads only the validity a textarea has too.
-  const validityRef =
-    fieldHidden.ref as RefObject<HTMLElement | null> as RefObject<HTMLTextAreaElement | null>
-  const hiddenRef = useMemo(() => mergeRefs(hidden, validityRef), [hidden, validityRef])
+  useEffect(() => {
+    if (!edited.current) return
+    edited.current = false
+    hidden.current?.dispatchEvent(new Event('input', { bubbles: true }))
+  })
 
   return (
     <div
@@ -1018,14 +1007,13 @@ function TokenInputEditor({
       )}
     >
       <div
-        {...labelable.getDescriptionProps(props)}
+        {...editorProps}
         ref={editorRef}
         role='textbox'
         aria-multiline
         // A message takes the direction of what is written in it; an empty
         // one, the page's, which `auto` would turn left to right.
         dir={props.dir ?? (empty ? undefined : 'auto')}
-        aria-labelledby={props['aria-labelledby'] ?? labelable.labelId}
         aria-placeholder={placeholder}
         aria-invalid={invalid || props['aria-invalid'] || undefined}
         aria-required={required || undefined}
@@ -1040,14 +1028,6 @@ function TokenInputEditor({
         onKeyDown={(event) => {
           props.onKeyDown?.(event)
           handlers.onKeyDown(event)
-        }}
-        onFocus={(event) => {
-          props.onFocus?.(event)
-          fieldControl.focused()
-        }}
-        onBlur={(event) => {
-          props.onBlur?.(event)
-          fieldControl.left()
         }}
         onCopy={(event) => {
           props.onCopy?.(event)
@@ -1091,12 +1071,12 @@ function TokenInputEditor({
       {/* For a form: the value in the codec's text, and the browser's own check
           of `required`. A textarea, since an input drops line breaks. */}
       <textarea
-        {...fieldHidden}
-        // Base UI types its ref for an input; it reads only the validity a textarea has too.
-        ref={hiddenRef}
-        id={id}
+        ref={hidden}
+        data-field-check=''
         aria-hidden
         tabIndex={-1}
+        // The form's own check focuses it when the field fails; the text takes it.
+        onFocus={() => editor?.focus()}
         className='sr-only'
         name={name}
         form={form}

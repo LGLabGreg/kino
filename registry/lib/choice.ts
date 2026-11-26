@@ -28,7 +28,17 @@ const choiceBoxLookClassName =
  * also takes the card's hover. An invalid box keeps its colour under hover. Read-only and disabled boxes take no hover or
  * press.
  */
-export const choiceBoxClassName = `${choiceBoxLookClassName} transition-[background-color,border-color,box-shadow,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-easing)] not-data-checked:not-data-indeterminate:not-data-disabled:not-data-readonly:not-aria-invalid:hover:border-muted-foreground not-data-checked:not-data-indeterminate:not-data-disabled:not-data-readonly:[[data-choice-card]:hover:not([aria-invalid=true])_&]:border-muted-foreground focus-visible:border-ring aria-invalid:border-destructive [[data-choice-card][aria-invalid=true]_&]:border-destructive active:duration-[calc(var(--motion-press-duration)*0.4)] data-pressing:duration-[calc(var(--motion-press-duration)*0.4)] [label:active_&]:duration-[calc(var(--motion-press-duration)*0.4)] [[data-choice-card]:active_&]:duration-[calc(var(--motion-press-duration)*0.4)] [[data-choice-card][data-pressing]_&]:duration-[calc(var(--motion-press-duration)*0.4)] [[data-slot=field]:has(>[data-slot=field-label]:active)_&]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:not-data-readonly:active:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:not-data-readonly:data-pressing:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:[label:active:not(:has([data-disabled],[data-readonly]))_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:not-data-disabled:not-data-readonly:[[data-choice-card]:active_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:not-data-disabled:not-data-readonly:[[data-choice-card][data-pressing]_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:[[data-slot=field]:has(>[data-slot=field-label]:active):not(:has([data-disabled],[data-readonly]))_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)]`
+const choiceBoxBaseClassName = `${choiceBoxLookClassName} transition-[background-color,border-color,box-shadow,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-easing)] not-data-checked:not-data-indeterminate:not-data-disabled:not-data-readonly:not-aria-invalid:hover:border-muted-foreground not-data-checked:not-data-indeterminate:not-data-disabled:not-data-readonly:[[data-choice-card]:hover:not(:has([aria-invalid=true]))_&]:border-muted-foreground aria-invalid:border-destructive active:duration-[calc(var(--motion-press-duration)*0.4)] data-pressing:duration-[calc(var(--motion-press-duration)*0.4)] [label:active_&]:duration-[calc(var(--motion-press-duration)*0.4)] [[data-slot=field]:has(>[data-slot=field-label]:active)_&]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:not-data-readonly:active:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:not-data-readonly:data-pressing:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:[label:active:not(:has([data-disabled],[data-readonly]))_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:[[data-slot=field]:has(>[data-slot=field-label]:active):not(:has([data-disabled],[data-readonly]))_&]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)]`
+
+/** A Checkbox's or Radio's box, whose border takes the focus colour. */
+export const choiceBoxClassName = `${choiceBoxBaseClassName} focus-visible:border-ring`
+
+/**
+ * The box a choice card's indicator is drawn in: the card draws the focus
+ * ring and, in forced colours, the invalid outline, so the box keeps its
+ * border and draws neither outline of its own.
+ */
+export const choiceCardBoxClassName = `${choiceBoxBaseClassName} focus-visible:outline-hidden forced-colors:aria-invalid:outline-0`
 
 /** The primary fill of a box that is ticked or mixed, kept in forced colours. */
 const choiceFilledClassName =
@@ -97,7 +107,7 @@ export const choicePressingClassName =
  * and it takes no press.
  */
 export const choiceCardClassName =
-  'relative flex min-w-0 flex-col gap-1 rounded-(--surface-radius) border p-(--surface-padding) text-start text-sm shadow-xs outline-offset-2 transition-[border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:bg-card before:transition-[background-color] before:duration-(--motion-press-duration) before:ease-(--motion-press-fade-easing) not-data-checked:not-data-disabled:not-data-readonly:not-aria-invalid:hover:border-muted-foreground/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden data-checked:border-primary data-checked:[--muted-foreground:color-mix(in_oklab,var(--foreground)_70%,var(--background))] forced-colors:data-checked:border-[Highlight] aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-dashed dark:aria-invalid:ring-destructive/40 data-disabled:cursor-not-allowed data-disabled:shadow-none data-disabled:*:opacity-50 data-readonly:cursor-default'
+  'relative flex min-w-0 flex-col gap-1 rounded-(--surface-radius) border p-(--surface-padding) text-start text-sm shadow-xs outline-offset-2 transition-[border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none before:absolute before:inset-0 before:-z-1 before:rounded-[inherit] before:bg-card before:transition-[background-color] before:duration-(--motion-press-duration) before:ease-(--motion-press-fade-easing) not-has-data-checked:not-has-data-disabled:not-has-data-readonly:not-has-aria-invalid:hover:border-muted-foreground/50 has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-focus-visible:outline-hidden has-data-checked:border-primary has-data-checked:[--muted-foreground:color-mix(in_oklab,var(--foreground)_70%,var(--background))] forced-colors:has-data-checked:border-[Highlight] has-aria-invalid:border-destructive has-aria-invalid:ring-3 has-aria-invalid:ring-destructive/20 forced-colors:has-aria-invalid:outline-2 forced-colors:has-aria-invalid:outline-dashed dark:has-aria-invalid:ring-destructive/40 has-data-disabled:cursor-not-allowed has-data-disabled:shadow-none has-data-disabled:*:opacity-50 has-data-readonly:cursor-default'
 
 /**
  * A card's tint, as the card's first child, over its surface and under its
@@ -107,47 +117,28 @@ export const choiceCardClassName =
  */
 export const choiceCardFloodClassName =
   // 150% of the circle's reference reaches every corner from anywhere inside the card.
-  'pointer-events-none absolute inset-0 -z-1 rounded-[inherit] bg-primary/5 dark:bg-primary/10 [clip-path:circle(0_at_var(--flood-x,50%)_var(--flood-y,50%))] [[data-checked]>&]:[clip-path:circle(150%_at_var(--flood-x,50%)_var(--flood-y,50%))] transition-[clip-path] duration-(--motion-exit-duration) ease-(--motion-exit-easing) [[data-checked]>&]:duration-(--motion-enter-duration) [[data-checked]>&]:ease-(--motion-enter-easing) motion-reduce:opacity-0 motion-reduce:transition-[opacity] motion-reduce:[clip-path:none] motion-reduce:[[data-checked]>&]:opacity-100'
-
-type FloodHandlers<P, F, K> = {
-  onPointerDown?: (event: P) => void
-  onFocus?: (event: F) => void
-  onKeyDown?: (event: K) => void
-}
+  'pointer-events-none absolute inset-0 -z-1 rounded-[inherit] bg-primary/5 dark:bg-primary/10 [clip-path:circle(0_at_var(--flood-x,50%)_var(--flood-y,50%))] [[data-choice-card]:has([data-checked])>&]:[clip-path:circle(150%_at_var(--flood-x,50%)_var(--flood-y,50%))] transition-[clip-path] duration-(--motion-exit-duration) ease-(--motion-exit-easing) [[data-choice-card]:has([data-checked])>&]:duration-(--motion-enter-duration) [[data-choice-card]:has([data-checked])>&]:ease-(--motion-enter-easing) motion-reduce:opacity-0 motion-reduce:transition-[opacity] motion-reduce:[clip-path:none] motion-reduce:[[data-choice-card]:has([data-checked])>&]:opacity-100'
 
 /**
  * Sets where a card's tint spreads from, or drains to: where the pointer
  * presses it, or its indicator when Space picks it or the keyboard moves
- * focus onto it, as arrow keys do in a radio group. Each handler also calls
- * the one passed in.
+ * focus onto it, as arrow keys do in a radio group. They go on the card, and
+ * hear the indicator's focus and keys as they bubble up.
  */
-export function choiceCardFloodHandlers<
-  P extends PointerEvent<HTMLElement>,
-  F extends FocusEvent<HTMLElement>,
-  K extends KeyboardEvent<HTMLElement>,
->({
-  onPointerDown,
-  onFocus,
-  onKeyDown,
-}: FloodHandlers<P, F, K>): Required<FloodHandlers<P, F, K>> {
-  return {
-    onPointerDown: (event) => {
-      floodFrom(event.currentTarget, event)
-      onPointerDown?.(event)
-    },
-    onFocus: (event) => {
-      if (event.currentTarget.matches(':focus-visible')) {
-        floodFrom(event.currentTarget, indicatorCentre(event.currentTarget))
-      }
-      onFocus?.(event)
-    },
-    onKeyDown: (event) => {
-      if (event.key === ' ') {
-        floodFrom(event.currentTarget, indicatorCentre(event.currentTarget))
-      }
-      onKeyDown?.(event)
-    },
-  }
+export const choiceCardFloodHandlers = {
+  onPointerDown: (event: PointerEvent<HTMLElement>) => {
+    floodFrom(event.currentTarget, event)
+  },
+  onFocus: (event: FocusEvent<HTMLElement>) => {
+    if (event.target.matches(':focus-visible')) {
+      floodFrom(event.currentTarget, indicatorCentre(event.currentTarget))
+    }
+  },
+  onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === ' ') {
+      floodFrom(event.currentTarget, indicatorCentre(event.currentTarget))
+    }
+  },
 }
 
 /**
@@ -169,7 +160,7 @@ function floodFrom(card: HTMLElement, point: { clientX: number; clientY: number 
 /** The middle of the card's indicator, or of the card when it has none. */
 function indicatorCentre(card: HTMLElement) {
   const box = (
-    card.querySelector('[data-slot$=-card-indicator]') ?? card
+    card.querySelector('[role=checkbox],[role=radio]') ?? card
   ).getBoundingClientRect()
   return { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 }
 }
@@ -180,11 +171,17 @@ export const choiceCardTitleClassName = 'font-medium text-pretty'
 /** A card's description, under its title. */
 export const choiceCardDescriptionClassName = 'text-muted-foreground text-pretty'
 
-/** The ids a card names and describes itself by, from its title and description. */
+/**
+ * What a card hands its indicator, which is the choice's control: the ids of
+ * the title and description that name and describe it, and the props the
+ * card was given.
+ */
 export const ChoiceCardContext = createContext<{
   title: string
   description: string
+  control: Record<string, unknown>
 }>({
   title: '',
   description: '',
+  control: {},
 })

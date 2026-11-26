@@ -141,7 +141,7 @@ function PasswordInput({
 
   return (
     <InputGroup
-      data-slot='password-input'
+      data-password-input=''
       data-visible={shown ? '' : undefined}
       className={className}
     >

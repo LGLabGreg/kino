@@ -5,10 +5,14 @@ import {
   InputInvalidIcon,
   inputBoxClassName,
 } from '@/registry/components/kino/input'
-import { NumberField, RollingInput } from '@/registry/components/kino/number-field'
+import {
+  NumberField,
+  RollingInput,
+  useNumberFieldInputId,
+} from '@/registry/components/kino/number-field'
 import { AddonPicker, type AddonPickerOption } from '@/registry/lib/addon-picker'
 import { CountryFlag } from '@/registry/lib/countries'
-import { FieldValues } from '@/registry/lib/field-control'
+import { FieldValues, useFieldProps } from '@/registry/lib/field-control'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { createChangeEventDetails } from '@base-ui/react/internals/createBaseUIEventDetails'
 import { REASONS } from '@base-ui/react/internals/reasons'
@@ -461,6 +465,14 @@ function MoneyInputInput({
 }: Omit<NumberFieldPrimitive.Input.Props, 'className'> & { className?: string }) {
   const { format, allowNegative, inputRef } = useMoney()
   const nameId = useId()
+  const field = useFieldProps(
+    {
+      ...props,
+      ref: inputRef,
+      'aria-describedby': [nameId, props['aria-describedby']].filter(Boolean).join(' '),
+    },
+    { id: useNumberFieldInputId() },
+  )
 
   // Groups the digits as they're typed, keeping the caret beside the same digit.
   const regroupTyping = (event: InputHandlerEvent<'onChange'>) => {
@@ -562,7 +574,6 @@ function MoneyInputInput({
   return (
     <NumberFieldPrimitive.Input
       data-slot='money-input-input'
-      ref={inputRef}
       inputMode={format.digits > 0 ? 'decimal' : 'numeric'}
       // Zero in the currency's decimals, so an empty field shows what it takes.
       placeholder={writeAmount(
@@ -573,7 +584,6 @@ function MoneyInputInput({
         },
         format,
       )}
-      aria-describedby={nameId}
       onChange={regroupTyping}
       onKeyDown={skipSeparator}
       onPaste={pasteAmount}
@@ -600,7 +610,7 @@ function MoneyInputInput({
           <InputInvalidIcon />
         </span>
       )}
-      {...props}
+      {...field.props}
     />
   )
 }

@@ -177,7 +177,7 @@ export interface TableWidthProps {
 export interface TableSelectionProps {
   value: string[]
   allValues: string[]
-  onValueChange: (value: string[], details: { event: Event | undefined }) => void
+  onValueChange: (value: string[], details: { event?: Event }) => void
 }
 
 export interface UseTableDataOptions<Row> {

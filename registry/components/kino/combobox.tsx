@@ -13,6 +13,7 @@ import {
   chipRemoveClassName,
 } from '@/registry/lib/chip'
 import { CutTooltip } from '@/registry/lib/cut'
+import { useField } from '@/registry/lib/field-control'
 import {
   FilterListClear,
   FilterListContent,
@@ -64,12 +65,20 @@ function useChipsAnchor() {
  */
 function Combobox<Value, Multiple extends boolean | undefined = false>({
   autoHighlight = true,
+  name,
+  disabled,
   ...props
 }: ComboboxPrimitive.Root.Props<Value, Multiple>) {
   const [chips, setChips] = useState<HTMLElement | null>(null)
+  const field = useField()
   return (
     <ChipsContext value={{ chips, setChips }}>
-      <ComboboxPrimitive.Root autoHighlight={autoHighlight} {...props} />
+      <ComboboxPrimitive.Root
+        autoHighlight={autoHighlight}
+        name={name ?? field?.name}
+        disabled={disabled || field?.disabled}
+        {...props}
+      />
     </ChipsContext>
   )
 }

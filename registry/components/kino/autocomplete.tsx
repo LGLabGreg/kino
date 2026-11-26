@@ -1,5 +1,6 @@
 'use client'
 
+import { useField } from '@/registry/lib/field-control'
 import {
   FilterListClear,
   FilterListContent,
@@ -29,11 +30,22 @@ import { cn } from '@/lib/utils'
  */
 
 /** Base UI's Autocomplete. Its `locale` also decides which part of a suggestion `AutocompleteMatch` marks. */
-const Autocomplete = ((props: AutocompletePrimitive.Root.Props<unknown>) => (
-  <MatchLocaleContext value={props.locale}>
-    <AutocompletePrimitive.Root {...props} />
-  </MatchLocaleContext>
-)) as typeof AutocompletePrimitive.Root
+const Autocomplete = (({
+  name,
+  disabled,
+  ...props
+}: AutocompletePrimitive.Root.Props<unknown>) => {
+  const field = useField()
+  return (
+    <MatchLocaleContext value={props.locale}>
+      <AutocompletePrimitive.Root
+        name={name ?? field?.name}
+        disabled={disabled || field?.disabled}
+        {...props}
+      />
+    </MatchLocaleContext>
+  )
+}) as typeof AutocompletePrimitive.Root
 
 /**
  * The field: the input and the buttons beside it, in the box every text

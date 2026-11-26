@@ -36,9 +36,9 @@ import {
   weekStart,
   useLocale,
 } from '@/registry/lib/dates'
+import { keptOnReset, useFieldProps } from '@/registry/lib/field-control'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { createChangeEventDetails } from '@base-ui/react/internals/createBaseUIEventDetails'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
 import { mergeProps } from '@base-ui/react/merge-props'
 import type { BaseUIChangeEventDetails } from '@base-ui/react/types'
 import {
@@ -68,11 +68,11 @@ import {
 /**
  * Why a calendar's value, month, range start or focus is changing: a day or a
  * month pressed (`item-press`), the previous or next button
- * (`trigger-press`), a key (`keyboard`) or Escape (`escape-key`). Calling
- * `cancel()` keeps things as they are.
+ * (`trigger-press`), a key (`keyboard`), Escape (`escape-key`) or its form's
+ * reset (`reset`). Calling `cancel()` keeps things as they are.
  */
 export type CalendarChangeDetails = BaseUIChangeEventDetails<
-  'item-press' | 'trigger-press' | 'keyboard' | 'escape-key'
+  'item-press' | 'trigger-press' | 'keyboard' | 'escape-key' | 'reset'
 >
 
 interface CalendarOptions {
@@ -312,6 +312,11 @@ export function detailsOf(reason: Reason, event: SyntheticEvent<Element>) {
   return createDetails(reason, event.nativeEvent, event.currentTarget)
 }
 
+/** The details of a change that a form's reset makes. */
+export function resetDetails(event: Event) {
+  return createDetails('reset', event)
+}
+
 function noChange() {
   return () => {}
 }
@@ -345,14 +350,14 @@ interface CalendarBasics {
  * month, a day, a date and time) as the first and last days they allow.
  */
 export function useCalendarBasics(props: CalendarBasics) {
-  const field = useFieldRootContext()
+  const { field, invalid } = useFieldProps({})
   const clock = useToday(props.timeZone)
   return {
     min: boundDay(props.min, 'start'),
     max: boundDay(props.max, 'end'),
-    disabled: props.disabled === true || field.disabled === true,
-    name: field.name ?? props.name,
-    invalid: props.invalid ?? field.state.valid === false,
+    disabled: props.disabled === true || field?.disabled === true,
+    name: props.name ?? field?.name,
+    invalid: props.invalid ?? invalid,
     labels: { ...CALENDAR_LABELS, ...props.labels },
     locale: useLocale(props.locale),
     rtl: useDirection() === 'rtl',
@@ -521,6 +526,17 @@ export function useCalendarState(props: CalendarStateProps) {
     if (next.value !== value && !controlled) setOwnValue(next.value)
     setAnchor(next.anchor)
     setPreview(null)
+  }
+
+  /** Back to the value it started with, as a form's reset does. */
+  const reset = (event: Event) => {
+    if (keptOnReset(props.value, props.defaultValue)) return
+    const initial = normalizeValue(mode, props.defaultValue)
+    if (pickedDates(initial).join() !== picked.join()) {
+      if (!askValue(initial, resetDetails(event))) return
+      if (!controlled) setOwnValue(initial)
+    }
+    setAnchor(null)
   }
 
   // Focus moves to its day once the month it is in has rendered, before the
@@ -729,8 +745,8 @@ export function useCalendarState(props: CalendarStateProps) {
       form: props.form,
       required: props.required ?? false,
       dates: picked,
-      /** The value as the form's field validates it: null until a day, or a range, is picked. */
-      value: picked.length ? value : null,
+      many: mode !== 'single',
+      reset,
     },
     /** Focuses the grid's tab stop, as a press on the calendar's label does. */
     focusGrid,

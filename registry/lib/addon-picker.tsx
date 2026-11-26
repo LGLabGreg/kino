@@ -9,12 +9,11 @@ import {
   ComboboxList,
 } from '@/registry/components/kino/combobox'
 import { InputGroupAddon, InputGroupButton } from '@/registry/components/kino/input-group'
-import { OutsideField } from '@/registry/lib/field-control'
+import { OutsideField, useField } from '@/registry/lib/field-control'
 import { FilterListChevron, FilterListMatchedText } from '@/registry/lib/filter-list'
 import { matchRange } from '@/registry/lib/match'
 import { MenuShortcut } from '@/registry/lib/menu'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
 import { type ReactNode, type RefObject, useMemo, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -109,8 +108,8 @@ function AddonPicker({
 }) {
   const [query, setQuery] = useState('')
   // Read here, since OutsideField hides the Field from the Combobox: a disabled Field disables the pick too.
-  const field = useFieldRootContext()
-  const disabled = disabledProp || field.disabled === true
+  const field = useField()
+  const disabled = disabledProp || field?.disabled === true
   const trigger = useRef<HTMLButtonElement>(null)
   const picked = useRef(false)
   const selected = options.find((option) => option.value === value) ?? null

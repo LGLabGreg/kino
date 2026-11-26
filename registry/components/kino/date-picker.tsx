@@ -42,14 +42,12 @@ import {
   timeGranularity,
   useLocale,
 } from '@/registry/lib/dates'
-import { OutsideField } from '@/registry/lib/field-control'
+import { OutsideField, useField, useFieldProps } from '@/registry/lib/field-control'
 import { mergeRefs } from '@/registry/lib/refs'
 import { useRoomy } from '@/registry/lib/roomy'
 import { splitSegmentProps, useSegments } from '@/registry/lib/segment-field'
 import { SegmentRow, segmentRowPadding } from '@/registry/lib/segmented-input'
 import { dateScheme, dateTimeScheme } from '@/registry/lib/segments'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import { useLabelableContext } from '@base-ui/react/internals/labelable-provider'
 import {
   type ComponentProps,
   createContext,
@@ -158,7 +156,7 @@ interface DatePickerSingle {
   defaultValue?: string | null
   /** Called with the new value once one is whole, or with null once the field is empty. */
   onValueChange?: (value: string | null) => void
-  /** Sends the date with a form under this name. In a Field, the Field's name. */
+  /** Sends the date with a form under this name. Falls back to the Field's name. */
   name?: string
 }
 
@@ -170,7 +168,10 @@ interface DatePickerRange {
   value?: DateRange | null
   defaultValue?: DateRange | null
   onValueChange?: (value: DateRange | null) => void
-  /** Sends the start with a form under this name. In a Field, the Field's name. */
+  /**
+   * Sends the start with a form under this name. Without `startName` and
+   * `endName`, both dates go under the Field's name, start first.
+   */
   startName?: string
   /** Sends the end with a form under this name. */
   endName?: string
@@ -245,8 +246,9 @@ function DatePicker(props: DatePickerProps) {
     children,
   } = props
   // A disabled Field disables the picker's buttons and calendar, not just its segments.
-  const fieldDisabled = useFieldRootContext().disabled
-  const disabled = Boolean(props.disabled) || fieldDisabled
+  const field = useField()
+  const fieldDisabled = field?.disabled
+  const disabled = Boolean(props.disabled) || fieldDisabled === true
   const mode = props.mode ?? 'single'
   const granularity = props.granularity ?? 'day'
   const locale = useLocale(localeProp)
@@ -309,7 +311,12 @@ function DatePicker(props: DatePickerProps) {
     required,
     form,
     names:
-      props.mode === 'range' ? [props.startName, props.endName] : [props.name, undefined],
+      props.mode === 'range'
+        ? // Without names of its own, a range sends both dates under its Field's name, start first.
+          props.startName || props.endName
+          ? [props.startName, props.endName]
+          : [field?.name, field?.name]
+        : [props.name, undefined],
     labels: { ...ENGLISH, ...labels },
     anchor,
     setAnchor,
@@ -379,7 +386,11 @@ function DatePickerInput({
   const { setAnchor } = picker
   const boxRef = useMemo(() => mergeRefs(ref, setAnchor), [ref, setAnchor])
   const ownId = useId()
-  const fieldLabel = useLabelableContext().labelId
+  // Read here for a range's group and its end, which sits outside the Field: the start is its control.
+  const {
+    invalid: fieldInvalid,
+    props: { 'aria-labelledby': fieldLabel, 'aria-describedby': fieldDescribedBy },
+  } = useFieldProps({})
   const range = picker.mode === 'range'
   const startScheme = useMemo(() => {
     const time = timeGranularity(picker.granularity)
@@ -421,8 +432,6 @@ function DatePickerInput({
       }),
     [picker.locale, monthFormat, endMin, picker.max],
   )
-  const field = useFieldRootContext()
-  const fieldInvalid = field.invalid === true || field.state.valid === false
   const [startUnavailable, endUnavailable] = picker.drafts.map((draft) => {
     const day = splitDateTime(draft).date
     return day !== null && matchesDate(day, picker.unavailable)
@@ -460,12 +469,8 @@ function DatePickerInput({
     name: picker.names[0],
     id,
     invalid: startUnavailable || wrongLength,
-    // The start is the Field's control, so it holds the whole range and fails the form's check for anything wrong with it.
+    // The start is the Field's control, so it fails the form's check for anything wrong with the range.
     customError: problem ? picker.labels[problem] : '',
-    // The Field holds the whole value: a range, or a date and its time once both are in.
-    ...(range || timeGranularity(picker.granularity)
-      ? { fieldValue: picker.value }
-      : undefined),
     'aria-describedby': ariaDescribedBy,
     ...(range
       ? naming(startNameId)
@@ -511,7 +516,9 @@ function DatePickerInput({
               scheme={endScheme}
               shared={shared}
               naming={naming(endNameId)}
-              describedBy={ariaDescribedBy}
+              describedBy={
+                [ariaDescribedBy, fieldDescribedBy].filter(Boolean).join(' ') || undefined
+              }
               invalid={fieldInvalid || endUnavailable || wrongLength}
             />
           </OutsideField>
@@ -642,7 +649,7 @@ function DatePickerClear({
   return (
     <span data-shown={shown ? '' : undefined} className={cn(inputGroupPresence, 'flex')}>
       <InputGroupButton
-        data-slot='date-picker-clear'
+        data-date-picker-clear=''
         size='icon-xs'
         aria-label={picker.labels.clear}
         className={cn('text-muted-foreground', className)}

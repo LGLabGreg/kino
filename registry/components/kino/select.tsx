@@ -3,6 +3,7 @@
 import { InputInvalidIcon } from '@/registry/components/kino/input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
+import { useField, useFieldProps } from '@/registry/lib/field-control'
 import { followRows } from '@/registry/lib/highlight'
 import {
   MenuHighlight,
@@ -30,6 +31,7 @@ import {
   type RefObject,
   use,
   useEffect,
+  useMemo,
   useRef,
 } from 'react'
 
@@ -44,13 +46,21 @@ import { cn } from '@/lib/utils'
 
 const TriggerContext = createContext<RefObject<HTMLButtonElement | null> | null>(null)
 
-function Select<Value, Multiple extends boolean | undefined = false>(
-  props: SelectPrimitive.Root.Props<Value, Multiple>,
-) {
+function Select<Value, Multiple extends boolean | undefined = false>({
+  name,
+  disabled,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
   const triggerRef = useRef<HTMLButtonElement>(null)
+  // In a Field, it sends its value under the Field's name and turns off with it.
+  const field = useField()
   return (
     <TriggerContext value={triggerRef}>
-      <SelectPrimitive.Root {...props} />
+      <SelectPrimitive.Root
+        name={name ?? field?.name}
+        disabled={disabled || field?.disabled}
+        {...props}
+      />
     </TriggerContext>
   )
 }
@@ -101,15 +111,22 @@ function SelectTrigger({
   'className'
 > & { className?: string }) {
   const triggerRef = use(TriggerContext)
+  // The trigger is what a Field's label names, its description describes and its check marks.
+  const field = useFieldProps(props)
+  const fieldRef = field.props.ref
+  const refs = useMemo(
+    () => mergeRefs(triggerRef ?? undefined, ref, fieldRef),
+    [triggerRef, ref, fieldRef],
+  )
   return (
     <CutTooltip
       render={
         <SelectPrimitive.Trigger
-          ref={mergeRefs(triggerRef ?? undefined, ref)}
           data-slot='select-trigger'
           data-size={size}
           className={cn(selectTriggerVariants({ size }), className)}
-          {...props}
+          {...field.props}
+          ref={refs}
         >
           {children}
           {/* As on every text control, an invalid value is marked by more than its colour. */}

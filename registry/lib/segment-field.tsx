@@ -1,7 +1,6 @@
 'use client'
 
-import { useFieldControl } from '@/registry/lib/field-control'
-import { mergeRefs } from '@/registry/lib/refs'
+import { FieldCheck, keptOnReset, useFieldProps } from '@/registry/lib/field-control'
 import {
   awaitsDigit,
   deleteDigit,
@@ -21,16 +20,9 @@ import {
   typeDigit,
   valueTrend,
 } from '@/registry/lib/segments'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import {
-  useAriaLabelledBy,
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
 import {
   type ClipboardEvent,
   type ComponentProps,
-  type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
   type Ref,
@@ -42,11 +34,10 @@ import {
 } from 'react'
 
 /*
- * A value typed one segment at a time (a date, a time), wired into Base
- * UI's Field as its own segmented field, the code field, is: the label
- * names it and focuses its first segment, the field shows it invalid,
- * filled and focused, and a hidden input posts the value and takes part in
- * the form's validation. Each segment is an `<input>` with the spinbutton
+ * A value typed one segment at a time (a date, a time), wired into its
+ * Field: the label names it and focuses its first segment, the field shows
+ * it invalid, and a hidden input posts the value and takes part in the
+ * form's validation. Each segment is an `<input>` with the spinbutton
  * role, so a phone shows its number pad. What the value is comes from its
  * scheme (`dateScheme`, `timeScheme`); what it looks like is the
  * component's: this gives it the segments' props and which way each last
@@ -125,11 +116,6 @@ export interface UseSegmentsProps {
   invalid?: boolean
   /** Why the value fails the form's check, beside min and max, which the field reports itself; empty when it passes. */
   customError?: string
-  /**
-   * What the Field holds and the form's submit handler gets, in place of the
-   * field's own value: a range's start field holds the whole range.
-   */
-  fieldValue?: unknown
 }
 
 const SEGMENT_PROP_NAMES = [
@@ -147,7 +133,6 @@ const SEGMENT_PROP_NAMES = [
   'aria-describedby',
   'invalid',
   'customError',
-  'fieldValue',
 ] as const satisfies readonly (keyof UseSegmentsProps)[]
 
 /**
@@ -180,18 +165,6 @@ export type SegmentsComponentProps<Own = object> = UseSegmentsProps &
   }
 
 const SEPARATORS = new Set(['/', '.', '-', ',', ' ', ':'])
-
-const visuallyHidden: CSSProperties = {
-  position: 'absolute',
-  width: 1,
-  height: 1,
-  margin: -1,
-  padding: 0,
-  overflow: 'hidden',
-  clip: 'rect(0 0 0 0)',
-  whiteSpace: 'nowrap',
-  border: 0,
-}
 
 interface SegmentsState {
   fields: Fields
@@ -232,10 +205,15 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
     invalid: invalidProp,
     customError = '',
   } = props
-  const field = useFieldRootContext()
-  const { labelId, getDescriptionProps } = useLabelableContext()
-  const disabled = field.disabled || disabledProp
-  const name = field.name ?? nameProp
+  // In a Field, its label names the first segment, its description and
+  // check describe the segments, and it sends under the Field's name.
+  const {
+    field,
+    invalid: fieldInvalid,
+    props: fieldProps,
+  } = useFieldProps({ id: idProp, 'aria-describedby': props['aria-describedby'] })
+  const disabled = field?.disabled || disabledProp
+  const name = nameProp ?? field?.name
 
   const { layout, locale, hourCycle } = scheme
   const order = useMemo(
@@ -311,21 +289,13 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
     [order],
   )
 
-  const id = useLabelableId({ id: idProp })
   const ownId = useId()
-  const baseId = id ?? ownId
-  const groupLabelledBy = useAriaLabelledBy(
-    props['aria-labelledby'],
-    labelId,
-    firstInput,
-    true,
-    id,
-    props['aria-label'],
-  )
-  const describedBy =
-    [props['aria-describedby'], getDescriptionProps({})['aria-describedby']]
-      .filter(Boolean)
-      .join(' ') || undefined
+  const baseId = fieldProps.id ?? ownId
+  // The group is named as its first segment is, by its Field's label.
+  const groupLabelledBy: string | undefined =
+    props['aria-labelledby'] ??
+    (props['aria-label'] ? undefined : fieldProps['aria-labelledby'])
+  const describedBy = fieldProps['aria-describedby']
 
   const value = settled(scheme, state)
   const filled = Object.values(state.fields).some((part) => part != null)
@@ -336,30 +306,9 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
   // validation, as a native date or time input's would.
   const rangeError =
     scheme.outOfRange(value) || impossible ? scheme.rangeMessage : customError
-  const hiddenRef = useRef<HTMLInputElement>(null)
-  useLayoutEffect(() => {
-    hiddenRef.current?.setCustomValidity(rangeError)
-  }, [rangeError])
-  const fieldValue = 'fieldValue' in props ? props.fieldValue : value
-  // After the custom validity above, so the field validates once the hidden input holds the new date and its validity.
-  const control = useFieldControl({
-    control: firstInput,
-    id,
-    value: fieldValue,
-    filled,
-    disabled: Boolean(disabled),
-    name: nameProp,
-  })
-  // A range's other end, typed in its own field, changes what this one holds and whether it passes.
-  const checked = useRef<{ error: string; value: unknown } | null>(null)
-  useLayoutEffect(() => {
-    const before = checked.current
-    checked.current = { error: rangeError, value: fieldValue }
-    if (before && (before.error !== rangeError || before.value !== fieldValue))
-      control.recheck()
-  })
+  const fieldRef = field ? fieldProps.ref : undefined
   const invalid =
-    control.invalid ||
+    fieldInvalid ||
     Boolean(invalidProp) ||
     scheme.outOfRange(value) ||
     (impossible && focused === null)
@@ -376,7 +325,6 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
     const written = tells ? { ...next, source: after } : next
     latest.current = written
     setState(written)
-    if (after !== before) control.edited(after)
     if (tells) onValueChange?.(after)
   }
 
@@ -574,7 +522,6 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
     const current = latest.current
     const constrained = scheme.constrain(current.fields)
     if (constrained !== current.fields) fill(constrained)
-    control.left()
   }
 
   const segmentLabelId = (type: SegmentType) => `${baseId}-${type}-name`
@@ -606,12 +553,15 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
         ref: (node: HTMLInputElement | null) => {
           if (!node) return
           inputs.current.set(type, node)
+          // The first segment is the control its Field's label points at.
+          const unfield = first ? fieldRef?.(node) : undefined
           // The native event, which also carries deletions; React's onBeforeInput only has text.
           const listener = (event: InputEvent) => editing.current(type, event)
           node.addEventListener('beforeinput', listener)
           return () => {
             node.removeEventListener('beforeinput', listener)
             inputs.current.delete(type)
+            unfield?.()
           }
         },
         role: 'spinbutton',
@@ -638,7 +588,6 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
         onPaste,
         onFocus: (event: FocusEvent<HTMLInputElement>) => {
           setFocused(type)
-          control.focused()
           event.currentTarget.select()
         },
         onBlur: blurred(type),
@@ -653,23 +602,25 @@ export function useSegments(scheme: SegmentScheme, props: UseSegmentsProps) {
     </span>
   ))
 
-  const hidden = control.hiddenProps(() => firstInput.current?.focus())
-  const hiddenInputRef = useMemo(() => mergeRefs(hiddenRef, hidden.ref), [hidden.ref])
   const hiddenInput = (
-    <input
-      {...hidden}
-      ref={hiddenInputRef}
-      type='text'
+    <FieldCheck
+      value={value ?? ''}
       name={name}
       form={form}
-      value={value ?? ''}
-      onChange={() => {}}
       required={required}
-      disabled={disabled}
       readOnly={readOnly}
-      aria-hidden
-      tabIndex={-1}
-      style={visuallyHidden}
+      disabled={disabled}
+      message={rangeError}
+      onFocus={() => firstInput.current?.focus()}
+      // A form that is reset goes back to the value it started with.
+      onReset={() => {
+        if (
+          keptOnReset(valueProp, props.defaultValue) ||
+          (controlled && valueProp === defaultValue)
+        )
+          return
+        commit({ ...latest.current, fields: scheme.fromValue(defaultValue), texts: {} })
+      }}
     />
   )
 

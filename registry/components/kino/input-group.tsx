@@ -8,20 +8,28 @@ import {
   inputBoxClassName,
 } from '@/registry/components/kino/input'
 import { TextareaControl } from '@/registry/components/kino/textarea'
+import { InputGroup as InputGroupPrimitive } from '@ui-sdk/react/input'
 import { cva, type VariantProps } from 'class-variance-authority'
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * A box that holds a control and what sits beside it: an icon, a prefix, a
- * button, a counter. A press anywhere on it outside a button puts the caret
- * in the control, and the invalid mark sits before what ends the row.
+ * ui-sdk's Input group, as a box that holds a control and what sits beside
+ * it: an icon, a prefix, a button, a counter. A press anywhere on it outside
+ * a button puts the caret in the control, and the invalid mark sits before
+ * what ends the row.
  */
-function InputGroup({ className, children, ...props }: ComponentProps<'div'>) {
+function InputGroup({
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<typeof InputGroupPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   return (
-    <div
-      data-slot='input-group'
+    <InputGroupPrimitive
       role='group'
       onPointerDown={focusControl}
       className={cn(
@@ -34,7 +42,7 @@ function InputGroup({ className, children, ...props }: ComponentProps<'div'>) {
     >
       {children}
       <InputInvalidIcon className='group-has-[>[data-align=block-end]]/input:absolute group-has-[>[data-align=block-end]]/input:end-0 group-has-[>[data-align=block-end]]/input:top-2.5' />
-    </div>
+    </InputGroupPrimitive>
   )
 }
 
@@ -106,22 +114,15 @@ const inputGroupBesideStart =
   'group-has-[>[data-align=inline-start]]/input:ps-1.5 group-has-[>[data-align=inline-start]>[data-slot=input-group-text]:last-child]/input:ps-0'
 
 function InputGroupInput({ className, ...props }: ComponentProps<typeof InputControl>) {
-  return (
-    <InputControl
-      data-slot='input-group-control'
-      className={cn(inputGroupBesideStart, className)}
-      {...props}
-    />
-  )
+  return <InputControl className={cn(inputGroupBesideStart, className)} {...props} />
 }
 
 function InputGroupTextarea({
   className,
   ...props
-}: Omit<ComponentProps<'textarea'>, 'className'> & { className?: string }) {
+}: ComponentProps<typeof TextareaControl>) {
   return (
     <TextareaControl
-      data-slot='input-group-control'
       className={cn('group-has-[>[data-align=block-end]]/input:pb-1', className)}
       {...props}
     />

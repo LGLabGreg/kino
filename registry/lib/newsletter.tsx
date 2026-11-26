@@ -58,7 +58,7 @@ function NewsletterForm({
   const triedRef = useRef(false)
   return (
     <Form
-      data-slot='newsletter'
+      data-newsletter=''
       className={cn('@container/newsletter min-w-0', className)}
       onSubmitCapture={() => {
         triedRef.current = true

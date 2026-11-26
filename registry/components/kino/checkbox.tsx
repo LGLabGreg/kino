@@ -8,8 +8,13 @@ import {
   choiceWipeClassName,
 } from '@/registry/lib/choice'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox'
-import { CheckboxGroup as CheckboxGroupPrimitive } from '@base-ui/react/checkbox-group'
+import { mergeRefs } from '@/registry/lib/refs'
+import {
+  Checkbox as CheckboxPrimitive,
+  CheckboxGroup as CheckboxGroupPrimitive,
+  CheckboxIndicator as CheckboxIndicatorPrimitive,
+} from '@ui-sdk/react/checkbox'
+import { type ComponentProps, useMemo, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -22,10 +27,11 @@ function Checkbox({
   onKeyUp,
   onBlur,
   ...props
-}: Omit<CheckboxPrimitive.Root.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof CheckboxPrimitive>, 'className' | 'children'> & {
+  className?: string
+}) {
   return (
-    <CheckboxPrimitive.Root
-      data-slot='checkbox'
+    <CheckboxPrimitive
       data-value={value}
       value={value}
       className={cn(
@@ -41,20 +47,36 @@ function Checkbox({
       {...choicePressHandlers({ onKeyDown, onKeyUp, onBlur })}
       {...props}
     >
-      <CheckboxPrimitive.Indicator
-        keepMounted
-        className='pointer-events-none flex items-center justify-center'
-      >
-        <CheckboxMark />
-      </CheckboxPrimitive.Indicator>
-    </CheckboxPrimitive.Root>
+      <CheckboxIndicator />
+    </CheckboxPrimitive>
+  )
+}
+
+/** The tick and the dash inside a Checkbox, or inside a Checkbox card's indicator. */
+function CheckboxIndicator({
+  className,
+  ...props
+}: Omit<
+  ComponentProps<typeof CheckboxIndicatorPrimitive>,
+  'className' | 'keepMounted'
+> & {
+  className?: string
+}) {
+  return (
+    <CheckboxIndicatorPrimitive
+      keepMounted
+      className={cn('pointer-events-none flex items-center justify-center', className)}
+      {...props}
+    >
+      <CheckboxMark />
+    </CheckboxIndicatorPrimitive>
   )
 }
 
 /**
  * The tick and the dash, wiping in along their stroke, inside an element
  * marked `group/checkbox` that carries the state: a Checkbox's box, or a
- * Checkbox card's indicator.
+ * mark that shows a state but takes no press, such as a password's rule.
  */
 function CheckboxMark() {
   return (
@@ -108,37 +130,43 @@ function cascadeOrder(
 const inGroup = (element: Element | null, group: Element) =>
   element?.closest('[data-slot=checkbox-group]') === group
 
-function CheckboxGroup({
+/** Numbers the boxes a change to `next` ticks or clears, so their marks wipe in one after another. */
+function cascade(group: HTMLElement, next: readonly string[]) {
+  if (reducesMotion(group)) return
+  const boxes = [
+    ...group.querySelectorAll<HTMLElement>('[data-slot=checkbox][data-value]'),
+  ].filter((box) => inGroup(box, group))
+  const order = cascadeOrder(
+    boxes.map((box) => ({
+      value: box.dataset.value ?? '',
+      checked: box.hasAttribute('data-checked'),
+    })),
+    next,
+  )
+  boxes.forEach((box, index) => {
+    const place = order[index]
+    if (place === null) box.style.removeProperty('--checkbox-order')
+    else box.style.setProperty('--checkbox-order', String(place))
+  })
+}
+
+function CheckboxGroup<T extends string = string>({
   className,
   onValueChange,
   onTransitionEnd,
+  ref,
   ...props
-}: Omit<CheckboxGroupPrimitive.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof CheckboxGroupPrimitive<T>>, 'className'> & {
+  className?: string
+}) {
+  const group = useRef<HTMLDivElement>(null)
+  const refs = useMemo(() => mergeRefs(group, ref), [ref])
   return (
-    <CheckboxGroupPrimitive
-      data-slot='checkbox-group'
+    <CheckboxGroupPrimitive<T>
+      ref={refs}
       className={cn('flex flex-col gap-3', className)}
       onValueChange={(next, details) => {
-        const target = details.event.target
-        const group =
-          target instanceof Element ? target.closest('[data-slot=checkbox-group]') : null
-        if (group && !reducesMotion(group)) {
-          const boxes = [
-            ...group.querySelectorAll<HTMLElement>('[data-slot=checkbox][data-value]'),
-          ].filter((box) => inGroup(box, group))
-          const order = cascadeOrder(
-            boxes.map((box) => ({
-              value: box.dataset.value ?? '',
-              checked: box.hasAttribute('data-checked'),
-            })),
-            next,
-          )
-          boxes.forEach((box, index) => {
-            const place = order[index]
-            if (place === null) box.style.removeProperty('--checkbox-order')
-            else box.style.setProperty('--checkbox-order', String(place))
-          })
-        }
+        if (group.current) cascade(group.current, next)
         onValueChange?.(next, details)
       }}
       onTransitionEnd={(event) => {
@@ -154,4 +182,4 @@ function CheckboxGroup({
   )
 }
 
-export { Checkbox, CheckboxGroup, CheckboxMark, cascadeOrder }
+export { Checkbox, CheckboxGroup, CheckboxIndicator, CheckboxMark, cascadeOrder }

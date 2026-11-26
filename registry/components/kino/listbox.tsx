@@ -1,6 +1,11 @@
 'use client'
 
-import { FieldValues, useLabelFocus } from '@/registry/lib/field-control'
+import {
+  FieldValues,
+  keptOnReset,
+  useFieldProps,
+  useFormReset,
+} from '@/registry/lib/field-control'
 import {
   followPointer,
   itemMatching,
@@ -21,11 +26,6 @@ import { pickAll, usePick, useTypeahead } from '@/registry/lib/pick'
 import { mergeRefs } from '@/registry/lib/refs'
 import { followHeight } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import {
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
 import {
   type ComponentProps,
   createContext,
@@ -33,10 +33,10 @@ import {
   type MouseEvent,
   type ReactNode,
   use,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -129,15 +129,6 @@ function Listbox({
   /** The form the values go with, when the list sits outside it. */
   form?: string
 }) {
-  // In a Field, the list takes its label, description, error, name and
-  // disabled state from it. A label can't name a listbox for itself, so the
-  // list is named by it with `aria-labelledby`.
-  const field = useFieldRootContext()
-  const { labelId, getDescriptionProps } = useLabelableContext()
-  useLabelableId({ id: null })
-  const disabled = disabledProp || field.disabled === true
-  const name = field.name ?? nameProp
-  const invalid = ariaInvalid ?? (field.state.valid === false || undefined)
   const { selected, setSelected, pick } = usePick({
     value,
     defaultValue,
@@ -152,6 +143,19 @@ function Listbox({
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const areaRef = useRef<HTMLDivElement>(null)
+  // A form that is reset goes back to the options picked at first.
+  useFormReset(
+    listRef,
+    () => {
+      if (keptOnReset(value, defaultValue)) return
+      const initial = defaultValue ?? []
+      const same =
+        initial.length === selected.length &&
+        initial.every((item, index) => item === selected[index])
+      if (!same) setSelected(initial)
+    },
+    form,
+  )
   const contentRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLSpanElement>(null)
   const typeahead = useTypeahead()
@@ -167,12 +171,24 @@ function Listbox({
     return () => rows.disconnect()
   }, [])
 
-  // A press on its Field's label goes to the list, as it would to an input.
-  const focusList = useCallback(() => {
-    const list = listRef.current
-    if (list && !list.contains(document.activeElement)) list.focus()
-  }, [])
-  useLabelFocus(labelId, disabled, focusList)
+  // In a Field, the list takes its label, description, error, name and
+  // disabled state from it. A label can't name a listbox for itself, so the
+  // list is named by it with `aria-labelledby`, and a press on it focuses the list.
+  const {
+    field,
+    invalid: fieldInvalid,
+    props: listProps,
+  } = useFieldProps({
+    'aria-labelledby': ariaLabelledBy,
+    'aria-describedby':
+      [ariaDescribedBy, empty ? emptyId : undefined].filter(Boolean).join(' ') ||
+      undefined,
+  })
+  const fieldRef = listProps.ref
+  const listRefs = useMemo(() => mergeRefs(listRef, ref, fieldRef), [ref, fieldRef])
+  const disabled = disabledProp || field?.disabled === true
+  const name = nameProp ?? field?.name
+  const invalid = ariaInvalid ?? (fieldInvalid || undefined)
 
   useEffect(() => {
     const list = listRef.current
@@ -304,18 +320,12 @@ function Listbox({
           >
             <div ref={contentRef}>
               <div
-                ref={mergeRefs(listRef, ref)}
+                {...listProps}
+                ref={listRefs}
                 role='listbox'
                 aria-label={ariaLabel}
-                aria-labelledby={ariaLabelledBy ?? (ariaLabel ? undefined : labelId)}
-                aria-describedby={
-                  [
-                    ariaDescribedBy,
-                    getDescriptionProps({})['aria-describedby'],
-                    empty ? emptyId : undefined,
-                  ]
-                    .filter(Boolean)
-                    .join(' ') || undefined
+                aria-labelledby={
+                  ariaLabelledBy ?? (ariaLabel ? undefined : listProps['aria-labelledby'])
                 }
                 aria-invalid={invalid}
                 aria-multiselectable={multiple || undefined}
@@ -363,7 +373,12 @@ function Listbox({
           </div>
         </div>
       </ListboxContext>
-      <FieldValues name={disabled ? undefined : name} form={form} values={selected} />
+      <FieldValues
+        name={disabled ? undefined : name}
+        form={form}
+        values={selected}
+        many={multiple}
+      />
     </div>
   )
 }

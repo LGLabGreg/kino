@@ -5,7 +5,8 @@ import {
   InputInvalidIcon,
   inputBoxClassName,
 } from '@/registry/components/kino/input'
-import { Field as FieldPrimitive } from '@base-ui/react/field'
+import { InputGroup as InputGroupPrimitive } from '@ui-sdk/react/input'
+import { Textarea as TextareaPrimitive } from '@ui-sdk/react/textarea'
 import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -20,33 +21,33 @@ const textareaSizeClassName =
 /** The textarea inside a box: it grows with its text, then scrolls. */
 const textareaControlClassName = cn(
   textareaSizeClassName,
-  'field-sizing-content resize-none bg-transparent py-2 placeholder:text-muted-foreground read-only:text-muted-foreground',
+  'resize-none bg-transparent py-2 placeholder:text-muted-foreground read-only:text-muted-foreground',
 )
 
-type TextareaProps = Omit<ComponentProps<'textarea'>, 'className'> & {
+type TextareaProps = Omit<ComponentProps<typeof TextareaPrimitive>, 'className'> & {
   className?: string
 }
 
-/**
- * The textarea, wired to its Field. Base UI types Field.Control's props as an
- * input's, though it renders the textarea it is given, so a textarea's props
- * go through untyped here, in the one place.
- */
-function TextareaControl({ className, ...props }: TextareaProps) {
+/** ui-sdk's textarea alone, growing with its text up to its height, for a box of your own. */
+function TextareaControl({ className, autoResize = true, ...props }: TextareaProps) {
   return (
-    <FieldPrimitive.Control
-      data-slot='textarea-control'
-      render={<textarea />}
-      className={cn(textareaControlClassName, className)}
-      {...(props as object)}
+    <TextareaPrimitive
+      autoResize={autoResize}
+      // CSS sizes it on first paint, before ui-sdk's autoResize runs, so nothing below it moves on load.
+      className={cn(
+        textareaControlClassName,
+        autoResize && 'field-sizing-content',
+        className,
+      )}
+      {...props}
     />
   )
 }
 
+/** The box the textarea sits in, with its invalid mark; the props go to the textarea, `className` to the box. */
 function Textarea({ className, ...props }: TextareaProps) {
   return (
-    <div
-      data-slot='textarea'
+    <InputGroupPrimitive
       onPointerDown={focusControl}
       className={cn(
         inputBoxClassName,
@@ -57,7 +58,7 @@ function Textarea({ className, ...props }: TextareaProps) {
     >
       <TextareaControl {...props} />
       <InputInvalidIcon className='absolute end-0 top-2.5' />
-    </div>
+    </InputGroupPrimitive>
   )
 }
 

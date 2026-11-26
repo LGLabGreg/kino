@@ -26,7 +26,7 @@ import {
   userInputs,
 } from '@/registry/components/kino/sign-up/sign-up-flow'
 import { AuthEmailInput, AuthMessage } from '@/registry/lib/auth-screen'
-import { type ReactNode, type RefObject, useRef, useState } from 'react'
+import { type FocusEvent, type ReactNode, useState } from 'react'
 
 /*
  * A new account: a name, an email, a password with its strength and the
@@ -37,6 +37,11 @@ import { type ReactNode, type RefObject, useRef, useState } from 'react'
  * a real submit, so a password manager offers a new password and saves it
  * with the email once the account is made.
  */
+
+type FieldName = 'name' | 'email' | 'password' | 'terms'
+
+/** Where the person is with a field: editing it since they last left it, or left it. */
+type Visit = 'editing' | 'left'
 
 const linkClassName =
   'text-foreground font-medium underline underline-offset-4 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden'
@@ -86,16 +91,15 @@ function SignUpForm({
   const set = (change: Partial<SignUpValues>) =>
     setValues((now) => ({ ...now, ...change }))
   // Whether Create account has been pressed: until then, an empty field isn't an error.
-  const tried = useRef(false)
+  const [tried, setTried] = useState(false)
 
   return (
     <div className='flex flex-col pt-(--surface-gap)'>
       <Form
         className='flex flex-col gap-(--surface-gap)'
-        validationMode='onBlur'
-        onSubmitCapture={() => {
-          tried.current = true
-        }}
+        // A press checks every field, whether the browser turns the form down or sends it.
+        onInvalidCapture={() => setTried(true)}
+        onSubmitCapture={() => setTried(true)}
         onFormSubmit={async () => {
           const { name, email, password } = values
           const refused = await onSignUp?.({ name, email, password })
@@ -121,15 +125,45 @@ function SignUpFields({
 }: {
   values: SignUpValues
   set: (change: Partial<SignUpValues>) => void
-  tried: RefObject<boolean>
+  tried: boolean
   terms: ReactNode
 }) {
   const status = useFormSubmission()?.status
   // Still busy once saved: the form leaves for the email screen as it was, spinner and all.
   const busy = status === 'saving' || status === 'saved'
+  // Each check is the whole of it, so a press finds every problem; what shows
+  // after the person leaves a field waits for a press to ask for an empty one.
+  const check = (asked: boolean): Record<FieldName, string | null> => ({
+    name: nameError(values.name, asked),
+    email: emailError(values.email, asked),
+    password: passwordError(values, asked),
+    terms: termsError(values.agreed, asked),
+  })
+  const errors = check(true)
+  const shown = check(tried)
+  const [visits, setVisits] = useState<Partial<Record<FieldName, Visit>>>({})
+  const visit = (name: FieldName, next: Visit) =>
+    setVisits((last) => (last[name] === next ? last : { ...last, [name]: next }))
+  // A field the person is editing hides its error, and one they left shows
+  // it; until then, a press shows it.
+  const checked = (name: FieldName) => ({
+    name,
+    validate: () => errors[name],
+    invalid:
+      visits[name] === 'editing'
+        ? false
+        : visits[name] === 'left' && shown[name]
+          ? true
+          : undefined,
+    onInputCapture: () => visit(name, 'editing'),
+    onChangeCapture: () => visit(name, 'editing'),
+    onBlur: (event: FocusEvent<HTMLDivElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) visit(name, 'left')
+    },
+  })
   return (
     <>
-      <Field name='name' validate={() => nameError(values.name, tried.current)}>
+      <Field {...checked('name')}>
         <FieldLabel>Name</FieldLabel>
         <Input
           autoComplete='name'
@@ -139,7 +173,7 @@ function SignUpFields({
         />
         <FieldError />
       </Field>
-      <Field name='email' validate={() => emailError(values.email, tried.current)}>
+      <Field {...checked('email')}>
         <FieldLabel>Email</FieldLabel>
         <AuthEmailInput
           autoComplete='username'
@@ -151,7 +185,7 @@ function SignUpFields({
         />
         <FieldError />
       </Field>
-      <Field name='password' validate={() => passwordError(values, tried.current)}>
+      <Field {...checked('password')}>
         <FieldLabel>Password</FieldLabel>
         <PasswordInput
           autoComplete='new-password'
@@ -166,13 +200,13 @@ function SignUpFields({
         />
         <FieldError />
       </Field>
-      <Field name='terms' validate={() => termsError(values.agreed, tried.current)}>
+      <Field {...checked('terms')}>
         <FieldLabel className='flex items-start gap-2.5 pb-0 text-sm leading-5 font-normal'>
           <Checkbox
             checked={values.agreed}
             readOnly={busy}
             className='mt-0.5'
-            onCheckedChange={(agreed) => set({ agreed })}
+            onCheckedChange={(agreed) => set({ agreed: agreed === true })}
           />
           <span className='text-muted-foreground'>{terms}</span>
         </FieldLabel>

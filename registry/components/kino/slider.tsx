@@ -1,6 +1,8 @@
 'use client'
 
+import { useFieldProps } from '@/registry/lib/field-control'
 import { numberFormatter } from '@/registry/lib/number-format'
+import { mergeRefs } from '@/registry/lib/refs'
 import { markResizing } from '@/registry/lib/resize'
 import {
   channelThumbClassName,
@@ -22,6 +24,8 @@ import {
   Fragment,
   type ReactNode,
   useCallback,
+  useLayoutEffect,
+  useMemo,
   useReducer,
   useState,
 } from 'react'
@@ -166,9 +170,31 @@ function Slider<Value extends number | readonly number[]>({
   style,
   onFocus,
   variant = 'default',
+  name,
+  'aria-describedby': ariaDescribedBy,
   ...props
 }: SliderProps<Value>) {
   const count = thumbCount(value ?? defaultValue)
+  // The first thumb's input is its Field's control: its label's target.
+  const {
+    field,
+    invalid,
+    props: fieldProps,
+  } = useFieldProps({
+    'aria-describedby': ariaDescribedBy,
+  })
+  const fieldRef = field ? fieldProps.ref : undefined
+  const off = disabled || field?.disabled
+  // Base UI's thumb takes no aria-invalid for its input, so it is set here.
+  const [input, setInput] = useState<HTMLInputElement | null>(null)
+  const inputRef = useMemo(
+    () => mergeRefs<HTMLInputElement>(setInput, fieldRef),
+    [fieldRef],
+  )
+  useLayoutEffect(() => {
+    if (invalid) input?.setAttribute('aria-invalid', 'true')
+    else input?.removeAttribute('aria-invalid')
+  }, [input, invalid])
   const [reveal, send] = useReducer(revealStep, HIDDEN)
   const formatter = numberFormatter(locale, format)
   const [control, setControl] = useState<HTMLDivElement | null>(null)
@@ -187,7 +213,8 @@ function Slider<Value extends number | readonly number[]>({
       max={max}
       format={format}
       locale={locale}
-      disabled={disabled}
+      name={name ?? field?.name}
+      disabled={off}
       onValueChange={(next, details) => {
         send({
           type: 'change',
@@ -209,6 +236,7 @@ function Slider<Value extends number | readonly number[]>({
         onBlur?.(event)
       }}
       aria-label={count > 1 ? ariaLabel : undefined}
+      data-invalid={invalid || undefined}
       data-following={reveal.dragged >= 0 || undefined}
       style={(state) =>
         ({
@@ -245,6 +273,13 @@ function Slider<Value extends number | readonly number[]>({
                   <SliderPrimitive.Thumb
                     data-slot='slider-thumb'
                     index={index}
+                    inputRef={index === 0 ? inputRef : undefined}
+                    aria-labelledby={
+                      getAriaLabel || ariaLabel
+                        ? undefined
+                        : fieldProps['aria-labelledby']
+                    }
+                    aria-describedby={fieldProps['aria-describedby']}
                     aria-label={getAriaLabel ? undefined : ariaLabel}
                     getAriaLabel={getAriaLabel}
                     getAriaValueText={getAriaValueText}
@@ -276,7 +311,7 @@ function Slider<Value extends number | readonly number[]>({
                   />
                   <SliderThumbValue
                     control={control}
-                    open={!disabled && thumbShowsValue(reveal, index)}
+                    open={!off && thumbShowsValue(reveal, index)}
                     following={reveal.dragged >= 0}
                     percent={valuePercent(state.values[index] ?? min, min, max)}
                   >

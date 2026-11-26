@@ -1,9 +1,9 @@
 'use client'
 
-import { CheckboxMark } from '@/registry/components/kino/checkbox'
+import { CheckboxIndicator } from '@/registry/components/kino/checkbox'
 import {
   ChoiceCardContext,
-  choiceBoxClassName,
+  choiceCardBoxClassName,
   choiceCardClassName,
   choiceCardDescriptionClassName,
   choiceCardFloodClassName,
@@ -12,26 +12,30 @@ import {
   choiceCheckboxClassName,
   choicePressHandlers,
 } from '@/registry/lib/choice'
-import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox'
-import { CheckboxGroup as CheckboxGroupPrimitive } from '@base-ui/react/checkbox-group'
-import { type ComponentProps, use, useId } from 'react'
+import {
+  Checkbox as CheckboxPrimitive,
+  CheckboxGroup as CheckboxGroupPrimitive,
+} from '@ui-sdk/react/checkbox'
+import { type ComponentProps, type ReactNode, use, useId } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * Several options, each a card: add-ons, notification channels. Ticked, the
- * card's tint spreads out from where it was pressed until it fills the card,
- * and its border turns primary; cleared, the tint drains back to the press.
- * Space spreads it from the checkbox.
+ * Several options, each a card: add-ons, notification channels. The card is
+ * a label around its checkbox, so a press anywhere on it ticks the box.
+ * Ticked, the card's tint spreads out from where it was pressed until it
+ * fills the card, and its border turns primary; cleared, the tint drains
+ * back to the press. Space spreads it from the checkbox.
  */
 
-function CheckboxCards({
+function CheckboxCards<T extends string = string>({
   className,
   ...props
-}: Omit<CheckboxGroupPrimitive.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof CheckboxGroupPrimitive<T>>, 'className'> & {
+  className?: string
+}) {
   return (
-    <CheckboxGroupPrimitive
-      data-slot='checkbox-cards'
+    <CheckboxGroupPrimitive<T>
       className={cn(
         // Columns at least 14rem wide, as many as fit, so the cards wrap from a phone to a wide page.
         'relative isolate grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3',
@@ -42,65 +46,58 @@ function CheckboxCards({
   )
 }
 
+type CheckboxProps = ComponentProps<typeof CheckboxPrimitive>
+
+/** One option's card. Its props go to its checkbox, the `CheckboxCardIndicator` inside it, and `className` to the card. */
 function CheckboxCard({
   className,
   children,
-  onPointerDown,
-  onFocus,
-  onKeyDown,
-  onKeyUp,
-  onBlur,
   ...props
-}: Omit<CheckboxPrimitive.Root.Props, 'className' | 'nativeButton' | 'render'> & {
+}: Omit<CheckboxProps, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
 }) {
   const id = useId()
-  const ids = { title: `${id}-title`, description: `${id}-description` }
-  const press = choicePressHandlers({ onKeyDown, onKeyUp, onBlur })
   return (
-    <CheckboxPrimitive.Root
+    <label
       data-slot='checkbox-card'
       data-choice-card=''
-      render={<div />}
-      aria-labelledby={ids.title}
-      aria-describedby={ids.description}
       className={cn(choiceCardClassName, className)}
-      {...press}
-      {...choiceCardFloodHandlers({ onPointerDown, onFocus, onKeyDown: press.onKeyDown })}
-      {...props}
+      {...choiceCardFloodHandlers}
     >
       <span
         aria-hidden
         data-slot='checkbox-card-flood'
         className={choiceCardFloodClassName}
       />
-      <ChoiceCardContext value={ids}>{children}</ChoiceCardContext>
-    </CheckboxPrimitive.Root>
+      <ChoiceCardContext
+        value={{ title: `${id}-title`, description: `${id}-description`, control: props }}
+      >
+        {children}
+      </ChoiceCardContext>
+    </label>
   )
 }
 
-/** The card's checkbox, whose tick wipes in along its stroke. */
-function CheckboxCardIndicator({
-  className,
-  ...props
-}: Omit<CheckboxPrimitive.Indicator.Props, 'className' | 'keepMounted'> & {
-  className?: string
-}) {
+/** The card's checkbox, named by the card's title and described by its description, whose tick wipes in along its stroke. */
+function CheckboxCardIndicator({ className }: { className?: string }) {
+  const { title, description, control } = use(ChoiceCardContext)
+  const { onKeyDown, onKeyUp, onBlur, ...props } = control as CheckboxProps
   return (
-    <CheckboxPrimitive.Indicator
-      data-slot='checkbox-card-indicator'
-      keepMounted
-      aria-hidden
+    <CheckboxPrimitive
+      aria-labelledby={title}
+      aria-describedby={description}
       className={cn(
-        choiceBoxClassName,
+        choiceCardBoxClassName,
         choiceCheckboxClassName,
         'group/checkbox relative inline-flex',
         className,
       )}
+      {...choicePressHandlers({ onKeyDown, onKeyUp, onBlur })}
       {...props}
     >
-      <CheckboxMark />
-    </CheckboxPrimitive.Indicator>
+      <CheckboxIndicator />
+    </CheckboxPrimitive>
   )
 }
 

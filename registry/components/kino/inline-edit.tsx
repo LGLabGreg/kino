@@ -15,6 +15,7 @@ import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
+import { useFieldProps } from '@/registry/lib/field-control'
 import { isComposing } from '@/registry/lib/keys'
 import { noticeIcon } from '@/registry/lib/notice'
 import { mergeRefs } from '@/registry/lib/refs'
@@ -215,7 +216,6 @@ function InlineEdit({
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   // The buyer's ref gets the field too, memoised so it isn't set again on every render.
-  const inputRefs = useMemo(() => mergeRefs(inputRef, ref), [ref])
   const buttonRef = useRef<HTMLButtonElement>(null)
   const hintId = useId()
   // Focus goes back to the text after Enter or Escape; after a press elsewhere it stays there.
@@ -362,6 +362,10 @@ function InlineEdit({
   }
 
   const mark = inlineEditMark(status, spinning)
+  // The Field's control, once it opens.
+  const field = useFieldProps(props)
+  const fieldRef = field.props.ref
+  const inputRefs = useMemo(() => mergeRefs(inputRef, ref, fieldRef), [ref, fieldRef])
 
   // Save keeps its spinner or its tick while it leaves with the field, so
   // nothing in it changes on the way out.
@@ -372,7 +376,7 @@ function InlineEdit({
   return (
     <Field
       ref={rootRef}
-      data-slot='inline-edit'
+      data-inline-edit=''
       data-variant={variant}
       invalid={error !== null}
       className={cn('min-w-0', className)}
@@ -395,7 +399,7 @@ function InlineEdit({
         {editing ? (
           <>
             <InputPrimitive
-              {...props}
+              {...field.props}
               ref={inputRefs}
               data-slot='inline-edit-field'
               aria-label={label}

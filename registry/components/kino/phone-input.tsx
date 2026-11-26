@@ -5,7 +5,7 @@ import { InputGroup, inputGroupBesideStart } from '@/registry/components/kino/in
 import { AddonPicker, type AddonPickerOption } from '@/registry/lib/addon-picker'
 import { countryAliases, CountryFlag, countryName } from '@/registry/lib/countries'
 import { useLocale } from '@/registry/lib/dates'
-import { useFieldControl } from '@/registry/lib/field-control'
+import { FieldCheck, keptOnReset, useFieldProps } from '@/registry/lib/field-control'
 import {
   callingCode,
   caretAt,
@@ -20,11 +20,6 @@ import {
   wholeNumber,
 } from '@/registry/lib/phone-number'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import {
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
 import { type CountryCode, getCountries } from 'libphonenumber-js/min'
 import {
   type ComponentProps,
@@ -71,7 +66,7 @@ interface PhoneInputProps extends Omit<
 
 function PhoneInput({
   value: valueProp,
-  defaultValue = '',
+  defaultValue,
   onValueChange,
   country: countryProp,
   defaultCountry = 'US',
@@ -96,7 +91,7 @@ function PhoneInput({
 }: PhoneInputProps) {
   const locale = useLocale(localeProp)
   const [reading, setReading] = useState(() =>
-    readValue(valueProp ?? defaultValue, countryProp ?? defaultCountry),
+    readValue(valueProp ?? defaultValue ?? '', countryProp ?? defaultCountry),
   )
   // A value set from outside is shown the field's way, once per change.
   const [synced, setSynced] = useState(valueProp)
@@ -112,11 +107,7 @@ function PhoneInput({
     reading.value && !reading.value.startsWith(`+${callingCode(owned)}`)
       ? reading.country
       : owned
-  const field = useFieldRootContext()
-  const disabled = disabledProp || field.disabled === true
-
   const input = useRef<HTMLInputElement>(null)
-  const hidden = useRef<HTMLInputElement>(null)
   const caret = useRef<number | null>(null)
   useLayoutEffect(() => {
     if (caret.current === null || !input.current) return
@@ -126,26 +117,15 @@ function PhoneInput({
     caret.current = null
   })
 
-  const labelable = useLabelableContext()
-  // The element as state too, for what render hands on: the Field's control, and focus from its label.
-  const [element, setElement] = useState<HTMLInputElement | null>(null)
-  const fieldInput = useMemo(() => ({ current: element }), [element])
-  const id = useLabelableId({ id: idProp })
   const problem = phoneProblem(reading.value)
-  useLayoutEffect(() => {
-    hidden.current?.setCustomValidity(problem)
-  }, [problem])
-  const control = useFieldControl({
-    control: fieldInput,
-    id,
-    value: reading.value,
-    filled: reading.text !== '',
-    disabled,
-    name,
-  })
-  const hiddenProps = control.hiddenProps(() => element?.focus())
-  const validityRef = hiddenProps.ref
-  const hiddenRef = useMemo(() => mergeRefs(hidden, validityRef), [validityRef])
+  // The number's box is what its Field's label names, its description and check describe.
+  const { field, invalid, props: inputProps } = useFieldProps({ ...props, id: idProp })
+  const fieldRef = inputProps.ref
+  const inputRef = useMemo(
+    () => mergeRefs<HTMLInputElement>(input, markMounted, ref, fieldRef),
+    [ref, fieldRef],
+  )
+  const disabled = disabledProp || field?.disabled === true
 
   function commit(next: PhoneReading, caretAfter: number) {
     caret.current = caretAfter
@@ -155,10 +135,7 @@ function PhoneInput({
         ? { ...reading }
         : next,
     )
-    if (next.value !== reading.value) {
-      control.edited(next.value)
-      onValueChange?.(next.value)
-    }
+    if (next.value !== reading.value) onValueChange?.(next.value)
     if (next.country !== country) onCountryChange?.(next.country)
   }
 
@@ -188,15 +165,21 @@ function PhoneInput({
     commit(read.reading, after)
   }
 
+  /** Back to the number it started with, as a form's reset does. */
+  function reset() {
+    if (keptOnReset(valueProp, defaultValue)) return
+    const initial = readValue(defaultValue ?? '', countryProp ?? defaultCountry)
+    setReading(initial)
+    if (initial.value !== reading.value) onValueChange?.(initial.value)
+    if (initial.country !== country) onCountryChange?.(initial.country)
+  }
+
   function pick(next: string) {
     const picked = next as CountryCode
     const read = readForCountry(reading, picked)
     caret.current = read.text.length
     setReading(read)
-    if (read.value !== reading.value) {
-      control.edited(read.value)
-      onValueChange?.(read.value)
-    }
+    if (read.value !== reading.value) onValueChange?.(read.value)
     if (picked !== country) onCountryChange?.(picked)
   }
 
@@ -213,13 +196,8 @@ function PhoneInput({
       .sort((a, b) => collator.compare(a.label, b.label))
   }, [countries, locale])
 
-  const inputRef = useMemo(
-    () => mergeRefs<HTMLInputElement>(input, setElement, markMounted, ref),
-    [ref],
-  )
-
   return (
-    <InputGroup data-slot='phone-input' className={className}>
+    <InputGroup data-phone-input='' className={className}>
       <AddonPicker
         options={options}
         value={country}
@@ -239,18 +217,15 @@ function PhoneInput({
         </span>
       </AddonPicker>
       <input
-        {...labelable.getDescriptionProps(props)}
-        {...props}
+        {...inputProps}
         ref={inputRef}
-        id={undefined}
         data-slot='phone-input-control'
         type='tel'
         inputMode='tel'
         autoComplete={props.autoComplete ?? 'tel'}
         // A number reads left to right in every language.
         dir='ltr'
-        aria-labelledby={props['aria-labelledby'] ?? labelable.labelId}
-        aria-invalid={control.invalid || props['aria-invalid'] || undefined}
+        aria-invalid={invalid || props['aria-invalid'] || undefined}
         aria-required={required || undefined}
         value={reading.text}
         placeholder={placeholder ?? examplePhone(country)}
@@ -289,35 +264,24 @@ function PhoneInput({
           event.preventDefault()
           take(next.text, next.caret, false)
         }}
-        onFocus={(event) => {
-          onFocus?.(event)
-          control.focused()
-        }}
-        onBlur={(event) => {
-          onBlur?.(event)
-          control.left()
-        }}
+        onFocus={onFocus}
+        onBlur={onBlur}
         className={cn(
           inputControlClassName,
           inputGroupBesideStart,
           'tabular-nums rtl:text-right rtl:placeholder:text-right',
         )}
       />
-      <input
-        {...hiddenProps}
-        ref={hiddenRef}
-        id={id}
-        type='text'
-        tabIndex={-1}
-        aria-hidden
-        name={field.name ?? name}
-        form={form}
+      <FieldCheck
         value={reading.value}
+        name={name ?? field?.name}
+        form={form}
         required={required}
-        disabled={disabled}
         readOnly={readOnly}
-        onChange={() => {}}
-        className='sr-only'
+        disabled={disabled}
+        message={problem}
+        onFocus={() => input.current?.focus()}
+        onReset={reset}
       />
     </InputGroup>
   )

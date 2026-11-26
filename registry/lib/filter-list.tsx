@@ -11,6 +11,7 @@ import {
 import { selectTriggerVariants } from '@/registry/components/kino/select'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
+import { OutsideField, useFieldProps } from '@/registry/lib/field-control'
 import { followRows } from '@/registry/lib/highlight'
 import { matchRange } from '@/registry/lib/match'
 import {
@@ -91,15 +92,17 @@ function FilterListInput({
 }: Omit<FilterListPrimitive.Input.Props, 'className'> & {
   className?: string
 }) {
+  // The field's control, unless it is the box's search line, which sits outside the Field.
+  const field = useFieldProps(props)
   return (
     <FilterListPrimitive.Input
+      {...field.props}
       className={cn(
         inputControlClassName,
         // In the box: a line of its own above the rows.
         'in-data-filter-list-content:flex-none in-data-filter-list-content:border-b in-data-filter-list-content:px-[calc(var(--control-padding)+0.25rem)] in-data-filter-list-content:focus-visible:border-ring',
         className,
       )}
-      {...props}
     />
   )
 }
@@ -175,6 +178,8 @@ function FilterListTrigger({
   children?: ReactNode
 }) {
   const id = useId()
+  // With the value inside, it is the field's control, as a Select's trigger is.
+  const field = useFieldProps(props)
   if (children === undefined) {
     return (
       <FilterListPrimitive.Trigger
@@ -206,7 +211,7 @@ function FilterListTrigger({
       render={
         <FilterListPrimitive.Trigger
           className={cn(selectTriggerVariants(), className)}
-          {...props}
+          {...field.props}
         >
           {/* A bare label truncates; an icon and a label sit in a row. */}
           <span
@@ -499,7 +504,10 @@ function FilterListContent({
           )}
           {...props}
         >
-          <FilterListFrame className={className}>{children}</FilterListFrame>
+          {/* Its search line is the list's, not the Field's. */}
+          <OutsideField>
+            <FilterListFrame className={className}>{children}</FilterListFrame>
+          </OutsideField>
           <FilterListPrimitive.Arrow {...anchorProps} />
         </FilterListPrimitive.Popup>
       </FilterListPrimitive.Positioner>

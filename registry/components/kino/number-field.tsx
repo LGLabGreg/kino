@@ -6,6 +6,7 @@ import {
   inputControlClassName,
 } from '@/registry/components/kino/input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
+import { useField, useFieldProps } from '@/registry/lib/field-control'
 import { runningTransitions } from '@/registry/lib/resize'
 import { Roll } from '@/registry/lib/roll'
 import { NumberField as NumberFieldPrimitive } from '@base-ui/react/number-field'
@@ -14,6 +15,7 @@ import {
   createContext,
   type TransitionEvent,
   use,
+  useId,
   useState,
 } from 'react'
 
@@ -57,6 +59,17 @@ function rollTo(next: number | null, prev: number | null): RollState {
   return { phase: 'rolling', trend: next > prev ? 1 : -1 }
 }
 
+/**
+ * The input's id, which Base UI's buttons name and the Field's label names
+ * too, so all of them point at the one input.
+ */
+const InputIdContext = createContext<string | undefined>(undefined)
+
+/** The id of the input inside the `NumberField` around it, for an input part of its own. */
+function useNumberFieldInputId() {
+  return use(InputIdContext)
+}
+
 const RollContext = createContext<{ roll: RollState; settle: () => void }>({
   roll: STILL,
   settle: () => {},
@@ -65,8 +78,13 @@ const RollContext = createContext<{ roll: RollState; settle: () => void }>({
 function NumberField({
   className,
   onValueChange,
+  name,
+  disabled,
   ...props
 }: Omit<NumberFieldPrimitive.Root.Props, 'className'> & { className?: string }) {
+  const field = useField()
+  const ownId = useId()
+  const inputId = props.id ?? ownId
   const [roll, setRoll] = useState<RollState>(STILL)
   // The value it showed last. A parent that owns the value may change it on its own, as a pager's Next does: that rolls too.
   const [shown, setShown] = useState<number | null>(
@@ -79,18 +97,23 @@ function NumberField({
   const settle = () => setRoll(STILL)
 
   return (
-    <RollContext value={{ roll, settle }}>
-      <NumberFieldPrimitive.Root
-        data-slot='number-field'
-        className={cn('flex min-w-0 flex-col', className)}
-        onValueChange={(value, details) => {
-          setShown(value)
-          setRoll(rollOf(details.reason, value, shown))
-          onValueChange?.(value, details)
-        }}
-        {...props}
-      />
-    </RollContext>
+    <InputIdContext value={inputId}>
+      <RollContext value={{ roll, settle }}>
+        <NumberFieldPrimitive.Root
+          data-slot='number-field'
+          name={name ?? field?.name}
+          disabled={disabled || field?.disabled}
+          className={cn('flex min-w-0 flex-col', className)}
+          onValueChange={(value, details) => {
+            setShown(value)
+            setRoll(rollOf(details.reason, value, shown))
+            onValueChange?.(value, details)
+          }}
+          {...props}
+          id={inputId}
+        />
+      </RollContext>
+    </InputIdContext>
   )
 }
 
@@ -233,6 +256,7 @@ function NumberFieldInput({
   className,
   ...props
 }: Omit<NumberFieldPrimitive.Input.Props, 'className'> & { className?: string }) {
+  const field = useFieldProps(props, { id: useNumberFieldInputId() })
   return (
     <NumberFieldPrimitive.Input
       data-slot='number-field-input'
@@ -246,7 +270,7 @@ function NumberFieldInput({
           <InputInvalidIcon />
         </span>
       )}
-      {...props}
+      {...field.props}
     />
   )
 }
@@ -315,4 +339,5 @@ export {
   RollingInput,
   rollOf,
   rollTail,
+  useNumberFieldInputId,
 }

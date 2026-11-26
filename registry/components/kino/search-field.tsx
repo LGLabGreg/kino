@@ -44,7 +44,7 @@ const searchFieldVariants = cva('', {
       // slot so it wins over the box's own transition; with less motion the
       // width changes at once.
       widen:
-        'w-(--search-field-width,15rem) max-w-full data-wide:w-full motion-safe:data-[slot=search-field]:[transition:width_var(--motion-layout-duration)_var(--motion-layout-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),border-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)]',
+        'w-(--search-field-width,15rem) max-w-full data-wide:w-full motion-safe:data-search-field:[transition:width_var(--motion-layout-duration)_var(--motion-layout-easing),color_var(--motion-press-duration)_var(--motion-press-fade-easing),background-color_var(--motion-press-duration)_var(--motion-press-fade-easing),border-color_var(--motion-press-duration)_var(--motion-press-fade-easing),box-shadow_var(--motion-press-duration)_var(--motion-press-fade-easing)]',
     },
   },
   defaultVariants: {
@@ -147,7 +147,7 @@ function SearchField({
 
   return (
     <InputGroup
-      data-slot='search-field'
+      data-search-field=''
       data-filled={filled ? '' : undefined}
       data-wide={variant === 'widen' && (focused || filled) ? '' : undefined}
       className={cn(searchFieldVariants({ variant }), className)}

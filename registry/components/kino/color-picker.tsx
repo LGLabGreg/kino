@@ -673,7 +673,7 @@ function ColorPickerInput({
   }
 
   return (
-    <InputGroup data-slot='color-picker-input' className={cn('w-full', className)}>
+    <InputGroup data-color-picker-input='' className={cn('w-full', className)}>
       <InputGroupAddon>
         <ColorPickerSwatch color={cssColor(color)} />
       </InputGroupAddon>

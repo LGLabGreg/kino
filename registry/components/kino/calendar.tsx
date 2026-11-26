@@ -28,6 +28,7 @@ import {
   type CalendarLabels,
   type DayProps,
   detailsOf,
+  resetDetails,
   splitCalendarProps,
   useCalendarBasics,
   useCalendarState,
@@ -42,24 +43,21 @@ import {
   yearMonth,
   yearPage,
 } from '@/registry/lib/dates'
-import { FieldValues, useLabelFocus } from '@/registry/lib/field-control'
+import {
+  FieldCheck,
+  FieldValues,
+  keptOnReset,
+  useFieldProps,
+  useLabelFocus,
+} from '@/registry/lib/field-control'
 import { mergeRefs } from '@/registry/lib/refs'
 import { Swap } from '@/registry/lib/swap'
-import { useRegisterFieldControl } from '@base-ui/react/internals/field-register-control'
-import { useFieldRootContext } from '@base-ui/react/internals/field-root-context'
-import { useFormContext } from '@base-ui/react/internals/form-context'
-import {
-  useLabelableContext,
-  useLabelableId,
-} from '@base-ui/react/internals/labelable-provider'
 import {
   type ComponentProps,
   type CSSProperties,
   type MouseEvent,
   useCallback,
-  useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -444,7 +442,8 @@ function picksChoices(props: CalendarProps): props is CalendarChoiceProps {
 
 /**
  * The naming a calendar takes in a Field: its label names it and focuses
- * its tab stop, and its description and error describe it.
+ * its tab stop, and its description and error describe it. `props` go on the
+ * calendar's root, with `ref`.
  */
 function useCalendarNaming(
   {
@@ -455,16 +454,25 @@ function useCalendarNaming(
   disabled: boolean,
   focus: () => void,
 ) {
-  const { labelId: fieldLabel, getDescriptionProps } = useLabelableContext()
-  useLabelableId({ id: null })
-  useLabelFocus(fieldLabel, disabled, focus)
+  const { props } = useFieldProps({
+    'aria-labelledby': ariaLabelledBy,
+    'aria-describedby': ariaDescribedBy,
+  })
+  const {
+    ref,
+    id,
+    'aria-labelledby': labelledBy,
+    'aria-describedby': describedBy,
+  } = props
+  useLabelFocus(ariaLabelledBy ? undefined : labelledBy?.split(' ')[0], disabled, focus)
   return {
-    'aria-label': ariaLabel,
-    'aria-labelledby': ariaLabelledBy ?? (ariaLabel ? undefined : fieldLabel),
-    'aria-describedby':
-      [ariaDescribedBy, getDescriptionProps({})['aria-describedby']]
-        .filter(Boolean)
-        .join(' ') || undefined,
+    ref,
+    props: {
+      id,
+      'aria-label': ariaLabel,
+      'aria-labelledby': ariaLabelledBy ?? (ariaLabel ? undefined : labelledBy),
+      'aria-describedby': describedBy,
+    },
   }
 }
 
@@ -493,14 +501,18 @@ function DayCalendar({
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
   useTurnPlaces(root, state.rtl)
   const attachRoot = state.rootRef
-  const rootRef = useMemo(() => mergeRefs(ref, setRoot, attachRoot), [ref, attachRoot])
+  const namingRef = naming.ref
+  const rootRef = useMemo(
+    () => mergeRefs<HTMLDivElement>(ref, setRoot, attachRoot, namingRef),
+    [ref, attachRoot, namingRef],
+  )
 
   return (
     <div
       data-slot='calendar'
       {...state.rootProps(rest)}
+      {...naming.props}
       ref={rootRef}
-      {...naming}
       className={cn(
         calendarClassName,
         'relative gap-1',
@@ -513,7 +525,6 @@ function DayCalendar({
         {...state.formValue}
         disabled={state.disabled}
         focus={state.focusGrid}
-        root={root}
       />
       <CalendarTurn
         direction='previous'
@@ -556,7 +567,7 @@ function DayCalendar({
 function ChoiceCalendar({
   granularity,
   value: valueProp,
-  defaultValue = null,
+  defaultValue,
   onValueChange,
   min: minProp,
   max: maxProp,
@@ -600,7 +611,7 @@ function ChoiceCalendar({
 
   const [given, pick] = useControllable<string | null, [CalendarChangeDetails]>(
     valueProp,
-    defaultValue,
+    defaultValue ?? null,
     onValueChange,
   )
   const value = fits(given) ? given : null
@@ -614,7 +625,6 @@ function ChoiceCalendar({
       : { level: final, year: yearPage(around, CHOICES) }
 
   const [root, setRoot] = useState<HTMLDivElement | null>(null)
-  const rootRef = useMemo(() => mergeRefs(ref, setRoot), [ref])
   const focus = useCallback(() => {
     root
       ?.querySelector<HTMLElement>('[data-slot=calendar-choice][tabindex="0"]')
@@ -629,6 +639,11 @@ function ChoiceCalendar({
     disabled,
     focus,
   )
+  const namingRef = naming.ref
+  const rootRef = useMemo(
+    () => mergeRefs<HTMLDivElement>(ref, setRoot, namingRef),
+    [ref, namingRef],
+  )
 
   return (
     <div
@@ -639,8 +654,8 @@ function ChoiceCalendar({
       data-readonly={readOnly ? '' : undefined}
       data-invalid={invalid ? '' : undefined}
       {...rest}
+      {...naming.props}
       ref={rootRef}
-      {...naming}
       className={cn(calendarClassName, 'gap-1', invalidClassName, motion, className)}
     >
       <CalendarForm
@@ -648,10 +663,13 @@ function ChoiceCalendar({
         form={form}
         required={required}
         dates={value === null ? [] : [value]}
-        value={value}
         disabled={disabled}
         focus={focus}
-        root={root}
+        reset={(event) => {
+          if (keptOnReset(valueProp, defaultValue)) return
+          const initial = fits(defaultValue) ? defaultValue : null
+          if (initial !== value) pick(initial, resetDetails(event))
+        }}
       />
       {today === null && todayProp === undefined ? (
         // The server can't know the visitor's today, which the page opens around.
@@ -688,97 +706,44 @@ function ChoiceCalendar({
 const invalidClassName =
   'rounded-(--surface-radius) outline-offset-4 data-invalid:outline-1 data-invalid:outline-destructive forced-colors:data-invalid:outline-2 forced-colors:data-invalid:outline-dashed'
 
-/**
- * What the calendar sends with a form: each picked day under its name. In a
- * Field, it joins the form's validation through a hidden input, which hands
- * focus to the grid when the form reports it.
- */
+/** What a calendar sends with a form, each date under `name`, and its check: `required` turns it down while nothing is picked. */
 function CalendarForm({
   name,
   form,
   required,
   dates,
-  value,
+  many = false,
   disabled,
   focus,
-  root,
+  reset,
 }: {
   name: string | undefined
   form: string | undefined
   required: boolean
   /** What the form sends, each under `name`. */
   dates: readonly string[]
-  /** The value as the Field validates it: null until one is picked. */
-  value: unknown
+  /** Whether it picks several dates, so a Form's values hold a list under `name`. */
+  many?: boolean
   disabled: boolean
   /** Focuses the calendar's tab stop, when the form reports it. */
   focus: () => void
-  root: HTMLElement | null
+  /** Puts the calendar back to its default when the form is reset. */
+  reset: (event: Event) => void
 }) {
-  const field = useFieldRootContext()
-  const { clearErrors } = useFormContext()
-  const controlId = useId()
-  // The field checks and focuses the hidden input, which hands focus to the grid.
-  const control = useRef<HTMLInputElement | null>(null)
-  useRegisterFieldControl(control, controlId, value, undefined, !disabled, name)
-
-  // A new pick clears the form's error for it and validates it again.
-  const key = dates.join(' ')
-  const seen = useRef(key)
-  const { validation, setDirty, validityData } = field
-  useLayoutEffect(() => {
-    if (seen.current === key) return
-    seen.current = key
-    clearErrors(name)
-    setDirty(value !== validityData.initialValue)
-    validation.change(value)
-  }, [key, value, name, clearErrors, setDirty, validation, validityData])
-
-  const validationRef = useMemo(
-    () => mergeRefs(validation.inputRef, control),
-    [validation],
-  )
-
-  // Leaving the calendar touches the field, and validates it in `onBlur` mode.
-  const { setTouched, setFocused, validationMode } = field
-  useEffect(() => {
-    if (!root) return
-    const enter = () => setFocused(true)
-    const leave = (event: FocusEvent) => {
-      if (event.relatedTarget instanceof Node && root.contains(event.relatedTarget))
-        return
-      setTouched(true)
-      setFocused(false)
-      if (validationMode === 'onBlur') void validation.commit(value)
-    }
-    root.addEventListener('focusin', enter)
-    root.addEventListener('focusout', leave)
-    return () => {
-      root.removeEventListener('focusin', enter)
-      root.removeEventListener('focusout', leave)
-    }
-  }, [root, setTouched, setFocused, validationMode, validation, value])
-
   return (
     <>
-      <FieldValues name={name} form={form} values={dates} />
-      <input
-        {...validation.getValidationProps(disabled, { onFocus: focus })}
-        ref={validationRef}
+      <FieldValues name={name} form={form} values={dates} many={many} />
+      <FieldCheck
+        value={dates.join(' ')}
         form={form}
-        value={key}
-        onChange={noChange}
         required={required}
         disabled={disabled}
-        aria-hidden
-        tabIndex={-1}
-        className='sr-only'
+        onFocus={focus}
+        onReset={reset}
       />
     </>
   )
 }
-
-function noChange() {}
 
 /**
  * Once the months that `from` sat in have turned, focuses the heading at

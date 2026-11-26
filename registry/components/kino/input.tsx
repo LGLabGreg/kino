@@ -2,7 +2,10 @@
 
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { markMounted } from '@/registry/lib/refs'
-import { Input as InputPrimitive } from '@base-ui/react/input'
+import {
+  InputGroup as InputGroupPrimitive,
+  Input as InputPrimitive,
+} from '@ui-sdk/react/input'
 import type { ComponentProps, PointerEvent } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -23,7 +26,10 @@ const inputBoxClassName =
 const inputControlClassName =
   '[&::-webkit-search-cancel-button]:appearance-none h-(--control-height) w-full min-w-0 flex-1 bg-transparent px-(--control-padding) text-base focus-visible:outline-hidden placeholder:text-muted-foreground read-only:text-muted-foreground md:text-sm'
 
-/** A press on a box, outside its value and its buttons, puts the caret in the value. */
+/**
+ * A press on a box, outside its value and its buttons, puts the caret in the
+ * value as the press starts, so a focused value never blurs and comes back.
+ */
 function focusControl(event: PointerEvent<HTMLElement>) {
   const target = event.target as HTMLElement
   if (target.closest('input, textarea, select, button, a, [data-slot*=scrub]')) return
@@ -69,31 +75,25 @@ function InputInvalidIcon({ className, ...props }: ComponentProps<'span'>) {
   )
 }
 
-type InputControlProps = Omit<InputPrimitive.Props, 'className'> & {
+type InputControlProps = Omit<ComponentProps<typeof InputPrimitive>, 'className'> & {
   className?: string
 }
 
-/** The `<input>` alone, at the control's height, for a box of your own. */
+/** ui-sdk's `<input>` alone, at the control's height, for a box of your own. */
 function InputControl({ className, ...props }: InputControlProps) {
-  return (
-    <InputPrimitive
-      data-slot='input-control'
-      className={cn(inputControlClassName, className)}
-      {...props}
-    />
-  )
+  return <InputPrimitive className={cn(inputControlClassName, className)} {...props} />
 }
 
+/** The box the input sits in, with its invalid mark; the props go to the input, `className` to the box. */
 function Input({ className, ...props }: InputControlProps) {
   return (
-    <div
-      data-slot='input'
+    <InputGroupPrimitive
       onPointerDown={focusControl}
       className={cn(inputBoxClassName, 'cursor-text', className)}
     >
       <InputControl {...props} />
       <InputInvalidIcon />
-    </div>
+    </InputGroupPrimitive>
   )
 }
 

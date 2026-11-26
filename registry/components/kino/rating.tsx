@@ -3,6 +3,8 @@
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { choicePressingClassName } from '@/registry/lib/choice'
 import { useControllable } from '@/registry/lib/controllable'
+import { focusPicked, useFieldProps, useLabelFocus } from '@/registry/lib/field-control'
+import { mergeRefs } from '@/registry/lib/refs'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'
 import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
@@ -11,6 +13,8 @@ import {
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
+  useCallback,
+  useMemo,
   useState,
 } from 'react'
 
@@ -147,6 +151,17 @@ function Rating({
   ...props
 }: RatingProps) {
   const rtl = useDirection() === 'rtl'
+  const { field, invalid, props: fieldProps } = useFieldProps(props)
+  // A label can't focus a group for itself: a press on it focuses the score.
+  const [group, setGroup] = useState<HTMLElement | null>(null)
+  const fieldRef = fieldProps.ref
+  const groupRef = useMemo(() => mergeRefs(setGroup, fieldRef), [fieldRef])
+  const focusScore = useCallback(() => focusPicked(group), [group])
+  useLabelFocus(
+    props['aria-labelledby'] ? undefined : fieldProps['aria-labelledby']?.split(' ')[0],
+    disabled === true || field?.disabled === true,
+    focusScore,
+  )
   const [current, setCurrent] = useControllable(
     value,
     defaultValue,
@@ -214,11 +229,13 @@ function Rating({
 
   return (
     <RadioGroupPrimitive<number | null>
-      {...props}
+      {...fieldProps}
+      ref={groupRef}
       data-slot='rating'
+      data-invalid={invalid || undefined}
       value={current}
-      disabled={disabled}
-      name={name}
+      disabled={disabled || field?.disabled}
+      name={name ?? field?.name}
       form={form}
       required={required}
       inputRef={inputRef}

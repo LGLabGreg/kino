@@ -1,8 +1,12 @@
 'use client'
 
 import { choiceClassName, choicePressHandlers } from '@/registry/lib/choice'
-import { Switch as SwitchPrimitive } from '@base-ui/react/switch'
+import {
+  Switch as SwitchPrimitive,
+  SwitchThumb as SwitchThumbPrimitive,
+} from '@ui-sdk/react/switch'
 import { cva, type VariantProps } from 'class-variance-authority'
+import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -35,12 +39,12 @@ function Switch({
   onKeyUp,
   onBlur,
   ...props
-}: Omit<SwitchPrimitive.Root.Props & VariantProps<typeof switchVariants>, 'className'> & {
-  className?: string
-}) {
+}: Omit<ComponentProps<typeof SwitchPrimitive>, 'className' | 'children'> &
+  VariantProps<typeof switchVariants> & {
+    className?: string
+  }) {
   return (
-    <SwitchPrimitive.Root
-      data-slot='switch'
+    <SwitchPrimitive
       data-size={size}
       className={cn(switchVariants({ size }), className)}
       {...choicePressHandlers({ onKeyDown, onKeyUp, onBlur })}
@@ -52,8 +56,7 @@ function Switch({
        * toward the other side. The drop shadow is on the outer element, so it
        * follows what the clip leaves.
        */}
-      <SwitchPrimitive.Thumb
-        data-slot='switch-thumb'
+      <SwitchThumbPrimitive
         className={cn(
           'pointer-events-none flex h-(--switch-thumb) w-[calc(var(--switch-thumb)+var(--switch-stretch))] drop-shadow-sm',
           'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none',
@@ -73,8 +76,8 @@ function Switch({
             '[[data-slot=switch]:active_&]:duration-(--motion-press-duration) [[data-slot=switch]:active_&]:ease-(--motion-press-easing) [label:active_&]:duration-(--motion-press-duration) [label:active_&]:ease-(--motion-press-easing) [[data-slot=switch][data-pressing]_&]:duration-(--motion-press-duration) [[data-slot=switch][data-pressing]_&]:ease-(--motion-press-easing) [[data-slot=field]:has(>[data-slot=field-label]:active)_&]:duration-(--motion-press-duration) [[data-slot=field]:has(>[data-slot=field-label]:active)_&]:ease-(--motion-press-easing)',
           )}
         />
-      </SwitchPrimitive.Thumb>
-    </SwitchPrimitive.Root>
+      </SwitchThumbPrimitive>
+    </SwitchPrimitive>
   )
 }
 

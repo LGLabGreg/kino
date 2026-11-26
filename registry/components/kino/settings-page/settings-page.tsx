@@ -544,7 +544,7 @@ function SettingsRow({
   return (
     <Field
       name={name}
-      data-slot='settings-row'
+      data-settings-row=''
       className={cn('p-(--surface-padding)', rowLayouts[layout], className)}
       {...props}
     >
