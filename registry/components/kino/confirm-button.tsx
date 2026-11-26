@@ -62,6 +62,7 @@ function ConfirmButton({
   onConfirm,
   onUndo,
   question = 'Delete?',
+  confirmSentence,
   confirmLabel = 'Delete',
   cancelLabel = 'Cancel',
   doneLabel = 'Deleted',
@@ -83,6 +84,8 @@ function ConfirmButton({
   onUndo?: () => unknown
   /** What the question asks, beside Cancel and the action. */
   question?: string
+  /** What a person is asked when an agent presses the confirm, as a whole sentence that names the thing. Without it, the `question`. */
+  confirmSentence?: string
   /** The action's label in the question. Name what it does, never "OK". */
   confirmLabel?: string
   cancelLabel?: string
@@ -234,6 +237,7 @@ function ConfirmButton({
             variant='destructive'
             size={shownSize}
             loading={status === 'working'}
+            data-agent-confirm={confirmSentence ?? question}
             onClick={confirm}
           >
             {confirmLabel}
@@ -285,7 +289,14 @@ function ConfirmButton({
           </Button>
         ) : null}
         {done ? null : (
-          <Button data-focus-target='' variant='ghost' size={shownSize} onClick={confirm}>
+          <Button
+            data-focus-target=''
+            variant='ghost'
+            size={shownSize}
+            // It runs the action again, which a person agreed to once.
+            data-agent-confirm={confirmSentence ?? question}
+            onClick={confirm}
+          >
             {retryLabel}
           </Button>
         )}
