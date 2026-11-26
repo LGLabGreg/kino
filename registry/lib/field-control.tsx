@@ -18,9 +18,9 @@ import {
 } from 'react'
 
 /*
- * What a control that isn't one of ui-sdk's needs to sit in its Field like
- * one: a Base UI part, such as the Select's trigger, or a control of our own,
- * such as the Listbox. `useFieldProps` puts the Field's id, label,
+ * What a control that isn't one of ui-sdk's fields needs to sit in its Field
+ * like one: a part of ui-sdk's that joins no Field itself, or a control of our
+ * own, such as the Listbox. `useFieldProps` puts the Field's id, label,
  * description and check on the element its label names; `FieldCheck` gives
  * the Field a native input to check when the control keeps no value of its
  * own in one; `FieldValues` sends its values with the form; `useLabelFocus`

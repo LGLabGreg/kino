@@ -4,15 +4,14 @@ import { useState } from 'react'
 
 /**
  * Whether `details` is a change its handler called off, after `cancel()`:
- * ui-sdk's change details, whose `canceled` turns true, or Base UI's, whose
- * `isCanceled` does.
+ * ui-sdk's change details, whose `canceled` turns true.
  */
 export function isCanceled(details: unknown): boolean {
   return (
     typeof details === 'object' &&
     details !== null &&
-    (('canceled' in details && details.canceled === true) ||
-      ('isCanceled' in details && details.isCanceled === true))
+    'canceled' in details &&
+    details.canceled === true
   )
 }
 

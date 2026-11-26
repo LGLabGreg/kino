@@ -146,7 +146,7 @@ function useLinkTarget(
           behavior: landing || reducesMotion(root) ? 'instant' : 'smooth',
         })
         holdAtEdge(item, root, topEdge(item))
-        // Base UI starts an opening, and places a tab's highlight, a few frames after it renders: those land too.
+        // An opening starts, and a tab's highlight is placed, a few frames after it renders: those land too.
         if (landing) {
           let wait = LANDING_FRAMES
           const land = () => {

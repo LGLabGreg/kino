@@ -38,9 +38,8 @@ type Orientation = 'horizontal' | 'vertical'
 
 const OrientationContext = createContext<Orientation>('horizontal')
 
-// Base UI's focus guards beside an open menu's trigger, and a Tooltip's hidden
-// copy of its label, aren't items.
-const FLOW_ITEMS = ':not([data-base-ui-focus-guard],[aria-owns],[hidden])'
+// A Tooltip's hidden copy of its label, and what an open popup's trigger owns, aren't items.
+const FLOW_ITEMS = ':not([aria-owns],[hidden])'
 
 function Toolbar({
   ref,

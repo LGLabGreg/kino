@@ -67,8 +67,8 @@ function SignInCode({
 
   return (
     <SignInFold hidden={hidden} moved={flow.step !== 'email'}>
-      {/* A plain form: Base UI's would check the boxes' pattern on every change once
-          the email has been sent, in the browser's words. The sign-in checks the code. */}
+      {/* A plain form, not a Form, whose checks would speak on every change in the
+          browser's words: the sign-in checks the code itself. */}
       <form
         ref={focusRef}
         noValidate

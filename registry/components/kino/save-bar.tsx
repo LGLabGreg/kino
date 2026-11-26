@@ -180,7 +180,7 @@ function SaveBar({
           {open ? (
             <span
               ref={guardRef}
-              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a focus guard: it hands focus on into the bar the moment it has it, as Base UI's portals' guards do.
+              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a focus guard: it hands focus on into the bar the moment it has it, as a focus trap's guards do.
               tabIndex={0}
               data-slot='save-bar-guard'
               onFocus={onGuardFocus}

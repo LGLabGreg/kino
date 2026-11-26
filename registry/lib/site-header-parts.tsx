@@ -22,6 +22,7 @@ import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { pageColumnClassName } from '@/registry/lib/hero-parts'
 import { withoutTransition } from '@/registry/lib/resize'
 import { scrollerOf } from '@/registry/lib/scroll'
+import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
 import {
   type ComponentProps,
   type ReactNode,
@@ -354,15 +355,14 @@ function SiteHeaderPhoneMenu({
                 {items.map((item) => (
                   <li key={item.label} className='border-b last:border-b-0'>
                     {isSection(item) ? (
-                      <button
-                        type='button'
+                      <ButtonPrimitive
                         data-section={item.label}
                         onClick={() => go(item.label)}
                         className={phoneRowClassName}
                       >
                         {item.label}
                         <ChevronIcon />
-                      </button>
+                      </ButtonPrimitive>
                     ) : (
                       <a
                         href={item.href}
@@ -384,9 +384,8 @@ function SiteHeaderPhoneMenu({
                 section === null && 'translate-x-full opacity-0 rtl:-translate-x-full',
               )}
             >
-              <button
+              <ButtonPrimitive
                 ref={back}
-                type='button'
                 onClick={() => go(null)}
                 className={cn(
                   phoneRowClassName,
@@ -395,7 +394,7 @@ function SiteHeaderPhoneMenu({
               >
                 <ChevronIcon back />
                 Back
-              </button>
+              </ButtonPrimitive>
               {shown && isSection(shown) ? (
                 <>
                   <h3 className='px-(--control-padding) text-lg font-semibold'>

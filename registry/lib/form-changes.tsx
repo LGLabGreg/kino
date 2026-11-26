@@ -568,7 +568,7 @@ export function useSaveBar({
         taken: event.defaultPrevented,
       })
       if (!owns) return
-      if (form.closest('[inert], [data-base-ui-inert], [aria-hidden="true"]')) return
+      if (form.closest('[inert], [aria-hidden="true"]')) return
       event.preventDefault()
       form.requestSubmit()
     }
@@ -606,8 +606,8 @@ export function useSaveBar({
   }, [open, frame, barElement])
 
   // Where it renders, known once the page has loaded (it starts hidden, so
-  // nothing shows late): in place inside a Base UI popup, such as a Dialog,
-  // whose layer is already on top and keeps focus in; otherwise away from
+  // nothing shows late): in place inside a popup, such as a Dialog, which
+  // ui-sdk opens in the top layer and which keeps focus in; otherwise away from
   // the form, at the end of the page or in `container`.
   const anchor = useRef<HTMLSpanElement | null>(null)
   const guard = useRef<HTMLSpanElement | null>(null)
@@ -615,11 +615,7 @@ export function useSaveBar({
   useLayoutEffect(() => {
     const here = anchor.current
     if (!here) return
-    setTarget(
-      here.closest('[data-base-ui-portal]')
-        ? 'here'
-        : (container ?? here.ownerDocument.body),
-    )
+    setTarget(here.closest('[popover]') ? 'here' : (container ?? here.ownerDocument.body))
   }, [container])
   const into = target !== null && target !== 'here' ? target : null
   const away = into !== null
@@ -679,7 +675,7 @@ export function useSaveBar({
     region,
     /** Where the bar renders, and how focus goes round it when that is away from its form. */
     placement: {
-      /** Whether it renders in place, inside a Base UI popup; `false` until the page has loaded. */
+      /** Whether it renders in place, inside a top-layer popup; `false` until the page has loaded. */
       here: target === 'here',
       /** The element it renders into away from its form, or `null` in place or until the page has loaded. */
       into,

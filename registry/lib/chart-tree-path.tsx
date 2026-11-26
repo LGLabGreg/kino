@@ -18,6 +18,7 @@ import {
 } from '@/registry/lib/chart-root'
 import { tileAncestors, type TileNode, tileNodeAt } from '@/registry/lib/chart-tiles'
 import { useControllable } from '@/registry/lib/controllable'
+import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
 import { type ComponentProps, createContext, Fragment, type ReactNode, use } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -186,7 +187,7 @@ function TreeZoomPath({
             <BreadcrumbItem>
               <BreadcrumbLink
                 // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the crumb's name, its children, labels the button
-                render={<button type='button' />}
+                render={<ButtonPrimitive />}
                 onClick={() => {
                   zoomTo(node.path)
                   // The crumb pressed becomes the part in view, and "…" may fold away with it:

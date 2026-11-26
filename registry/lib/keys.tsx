@@ -258,7 +258,7 @@ export function matchesShortcut(
  * makes the rest of the page inert or hides it from screen readers.
  */
 function outOfReach(element: Element) {
-  return element.closest('[inert], [data-base-ui-inert], [aria-hidden="true"]') !== null
+  return element.closest('[inert], [aria-hidden="true"]') !== null
 }
 
 /**
