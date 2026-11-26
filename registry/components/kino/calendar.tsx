@@ -30,6 +30,7 @@ import {
   MonthSlide,
   useCalendarLook,
   useTurnPlaces,
+  weekdaysClassName,
   weekLayout,
   weekNumberClassName,
 } from '@/registry/lib/calendar-grid'
@@ -293,7 +294,10 @@ function MonthWeeks({ month, weeks }: { month: string; weeks: GridWeeks }) {
           className={cn(highlightClassName, pillBackdropClassName)}
         />
       )}
-      <div role='row' className={cn(weekLayout, 'mb-1 text-xs text-muted-foreground')}>
+      <div
+        role='row'
+        className={cn(weekLayout, weekdaysClassName, 'text-xs text-muted-foreground')}
+      >
         {look.showWeekNumbers && (
           <span role='columnheader'>
             <span className='sr-only'>{look.labels.weekNumbers}</span>
@@ -305,7 +309,7 @@ function MonthWeeks({ month, weeks }: { month: string; weeks: GridWeeks }) {
             key={index}
             index={index}
             render={<span />}
-            className='flex h-[calc(var(--control-height)*0.75)] items-center justify-center font-normal'
+            className='flex items-center justify-center font-normal'
           />
         ))}
       </div>
@@ -345,7 +349,7 @@ function MonthWeeks({ month, weeks }: { month: string; weeks: GridWeeks }) {
         )}
       >
         <span className='flex flex-col'>
-          <span className='h-[calc(var(--control-height)*0.75)]' />
+          <span className={weekdaysClassName} />
           {weeks.map((week) => (
             <span key={week[0].date} className={weekLayout}>
               {look.showWeekNumbers && <span />}
@@ -1149,6 +1153,8 @@ function DayCalendar(allProps: CalendarDayProps) {
       <CalendarPrimitive
         {...rest}
         {...naming.props}
+        // Every calendar's root is found by this, to the day or to the month or year alike.
+        data-calendar=''
         // A group, so its name, description and error reach a screen reader with the day in focus.
         role='group'
         ref={rootRef}
@@ -1289,6 +1295,7 @@ function ChoiceCalendar({
   return (
     <div
       role='group'
+      data-calendar=''
       data-calendar-granularity={granularity}
       data-disabled={disabled ? '' : undefined}
       data-readonly={readOnly ? '' : undefined}

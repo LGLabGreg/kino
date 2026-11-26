@@ -96,6 +96,9 @@ const DAY = '[data-slot=calendar-day]'
 const weekLayout =
   'relative grid w-full grid-cols-[repeat(7,minmax(0,var(--control-height)))] group-data-week-numbers/calendar:grid-cols-[var(--calendar-week-width)_repeat(7,minmax(0,var(--control-height)))]'
 
+/** The weekdays' row, shared by the row and the pill's copy of it, so the copy's weeks sit on the days below it. */
+const weekdaysClassName = 'mb-1 h-[calc(var(--control-height)*0.75)]'
+
 /** A week's number, in the column before its days. */
 const weekNumberClassName =
   'flex items-center justify-center text-xs text-muted-foreground tabular-nums'
@@ -448,6 +451,7 @@ export {
   turnInsets,
   useCalendarLook,
   useTurnPlaces,
+  weekdaysClassName,
   weekLayout,
   weekNumberClassName,
 }
