@@ -403,7 +403,10 @@ function NotificationShell({
                 </PopoverTitle>
                 <Header unread={unread} markAllRead={markAllRead} />
               </div>
-              <TabsList className='self-stretch *:w-full'>
+              <TabsList
+                aria-label='Filter notifications'
+                className='self-stretch *:w-full'
+              >
                 <TabsTab value='all' className='flex-1'>
                   All
                 </TabsTab>

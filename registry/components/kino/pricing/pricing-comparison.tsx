@@ -148,7 +148,13 @@ function PricingComparison({
               (plan) => (
                 <span className='flex flex-wrap items-center justify-center gap-x-2 gap-y-1'>
                   {plan.name}
-                  {plan.badge ? <Badge>{plan.badge}</Badge> : null}
+                  {/* A space a flex row doesn't draw, so the header reads "Pro Most popular". */}
+                  {plan.badge ? (
+                    <>
+                      {' '}
+                      <Badge>{plan.badge}</Badge>
+                    </>
+                  ) : null}
                 </span>
               ),
               TableHead,

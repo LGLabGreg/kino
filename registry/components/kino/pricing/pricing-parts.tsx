@@ -73,6 +73,8 @@ function PricingBillingSwitch({ className }: { className?: string }) {
       <SegmentedControlItem value='monthly'>Monthly</SegmentedControlItem>
       <SegmentedControlItem value='yearly'>
         Yearly
+        {/* A space the row doesn't draw, so an agent reads "Yearly Save 20%". */}
+        {most > 0 ? ' ' : null}
         {most > 0 ? (
           <Badge variant='secondary'>
             {/* Shorter in a column as narrow as a small phone, so the switch fits it; read in full. */}
