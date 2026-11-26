@@ -23,7 +23,7 @@ import {
   SegmentedControlItem,
 } from '@/registry/components/kino/segmented-control'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { flowItemClassName, useFlow } from '@/registry/lib/flow'
 import { pageColumnClassName } from '@/registry/lib/hero-parts'
@@ -118,7 +118,6 @@ function IntegrationsDirectory({
     onCategoryChange,
   )
   const [query, setQuery] = useControllable(queryProp, defaultQuery, onQueryChange)
-  const { announce, region } = useAnnouncer()
   const { frame, row } = useFlow<HTMLDivElement, HTMLUListElement>(
     '[data-slot=integrations-directory-item]',
     'data-integration',
@@ -289,7 +288,6 @@ function IntegrationsDirectory({
           ) : null}
         </div>
       </div>
-      {region}
     </section>
   )
 }

@@ -13,7 +13,7 @@ import {
 } from '@/registry/components/kino/input-group'
 import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { editInPlace, type EditInPlaceReason } from '@/registry/lib/edit-in-place'
 import { useFieldProps } from '@/registry/lib/field-control'
@@ -215,7 +215,6 @@ function InlineEdit({
   // The text on show: Quiet's value being saved, or the value. A commit is compared with it, so
   // a field opened again during a save neither saves the same text twice nor drops the old one put back.
   const shown = pending ?? value
-  const { announce, region } = useAnnouncer()
   const rootRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const hintId = useId()
@@ -517,7 +516,6 @@ function InlineEdit({
       <span id={hintId} hidden>
         {status === 'failed' ? `${editLabel}. ${failedLabel}` : editLabel}
       </span>
-      {region}
     </Field>
   )
 }

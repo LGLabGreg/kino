@@ -1,6 +1,6 @@
 'use client'
 
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { daysBetween, isISODate, useLocale } from '@/registry/lib/dates'
 import { clampPage, pageCountOf, pageForSize, pageRange } from '@/registry/lib/pages'
@@ -716,7 +716,6 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
   const rowsById = new Map(pageRows.map((row) => [row.id, row]))
   const shownColumns = columns.filter((column) => !view.hiddenColumns.includes(column.id))
   const sortIndex = new Map(view.sort.map(({ column }, index) => [column, index]))
-  const { announce, region } = useAnnouncer()
 
   const setSort = (sort: TableSortBy[]) => {
     const next = cleanSort(sort, known)
@@ -1010,8 +1009,6 @@ function useTableData<Row extends object>(options: UseTableDataOptions<Row>) {
     },
 
     view: { ...view, page },
-    /** Reads out each sort and page turn: put it in the page once. */
-    status: region,
   }
 }
 

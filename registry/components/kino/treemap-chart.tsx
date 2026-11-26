@@ -146,8 +146,11 @@ function TreemapChart(props: TreemapChartProps) {
     ref,
   } = props
   const tree = tileTree(data, index, dataKey)
-  const { state, groups, hidden, view, nameOf, valueOf, zoomTo, region } =
-    useTreeZoomRoot(props, tree, { entrance: entrance !== 'none' })
+  const { state, groups, hidden, view, nameOf, valueOf, zoomTo } = useTreeZoomRoot(
+    props,
+    tree,
+    { entrance: entrance !== 'none' },
+  )
   const { messages: words, valueText, locale, direction, moves } = state
   /** A tile's name as the table and a screen reader give it: its group's label for a top. */
   const stopName = (name: unknown) => {
@@ -371,7 +374,6 @@ function TreemapChart(props: TreemapChartProps) {
             nameOf={nameOf}
           />
           {props.children}
-          {region}
           {load.placeholder && <TreemapPlaceholder />}
         </IndexActive>
       </ChartFrame>

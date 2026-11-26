@@ -87,7 +87,6 @@ function CookieConsentIsland<Id extends string>({
       className={cn(islandPlaceClassName, className)}
       {...props}
     >
-      {model.region}
       <section
         ref={surfaceRef}
         aria-labelledby={titleId}

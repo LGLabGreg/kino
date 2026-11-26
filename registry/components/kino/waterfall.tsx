@@ -6,7 +6,7 @@ import {
 } from '@/registry/components/kino/collapsible'
 import { useSpinner } from '@/registry/components/kino/spinner'
 import { Tooltip } from '@/registry/components/kino/tooltip'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import {
   type ChartConfig,
   type Span,
@@ -484,7 +484,6 @@ function WaterfallList({
   const layerRef = useRef<HTMLSpanElement>(null)
   const waiting = useSpinner(loading)
   const hasSpans = items.length > 0
-  const { announce, region } = useAnnouncer()
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -679,7 +678,6 @@ function WaterfallList({
       style={style}
     >
       {root}
-      {region}
     </div>
   )
 }

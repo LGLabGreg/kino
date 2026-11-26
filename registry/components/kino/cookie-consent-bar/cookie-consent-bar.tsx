@@ -52,7 +52,6 @@ function CookieConsentBar<Id extends string>({
       className={cn('@container/cookie-consent w-full', className)}
       {...props}
     >
-      {model.ready ? model.region : null}
       {/* Closed on the server and through hydration, so it opens onto the page once it knows to. */}
       <Collapsible open={model.shown}>
         <CollapsiblePanel className='p-0'>

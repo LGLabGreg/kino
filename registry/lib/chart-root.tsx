@@ -2,7 +2,7 @@
 
 import { AnimatedNumber } from '@/registry/components/kino/animated-number'
 import { Button, buttonVariants } from '@/registry/components/kino/button'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import {
   type ChartConfig,
   type ChartDatum,
@@ -1848,7 +1848,6 @@ function ChartStatusOverlay({ empty }: { empty?: ReactNode }) {
   const { status, series, setHidden, label, messages, error, onRetry } =
     useChartRootValue()
   const overlay = useRef<HTMLDivElement>(null)
-  const { announce, region } = useAnnouncer()
   const was = useRef(status)
   useEffect(() => {
     if (was.current === status) return
@@ -1869,7 +1868,6 @@ function ChartStatusOverlay({ empty }: { empty?: ReactNode }) {
   }
   return (
     <>
-      {region}
       {(status === 'empty' || status === 'hidden' || status === 'error') && (
         <div
           ref={overlay}

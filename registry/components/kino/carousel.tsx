@@ -3,7 +3,7 @@
 import { AnimatedNumber } from '@/registry/components/kino/animated-number'
 import { buttonVariants } from '@/registry/components/kino/button'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { deck } from '@/registry/lib/deck'
 import { withoutTransition } from '@/registry/lib/resize'
 import type { ChangeDetails } from '@ui-sdk/core'
@@ -165,7 +165,6 @@ function CarouselScope({
   )
   // ui-sdk's slides are a live region; the deck's cards under the top one are
   // inert, so it says the card that comes up instead. Nothing on load.
-  const { announce, region } = useAnnouncer()
   const announced = useRef<number | null>(null)
   useEffect(() => {
     if (variant !== 'deck' || pageCount === null) return
@@ -173,13 +172,8 @@ function CarouselScope({
     if (announced.current === page) return
     announced.current = page
     announce(`Slide ${page} of ${pageCount}`)
-  }, [variant, page, pageCount, announce])
-  return (
-    <CarouselContext value={value}>
-      {children}
-      {variant === 'deck' ? region : null}
-    </CarouselContext>
-  )
+  }, [variant, page, pageCount])
+  return <CarouselContext value={value}>{children}</CarouselContext>
 }
 
 /*
@@ -365,7 +359,7 @@ function CarouselIndicatorGroup({
         )}
         {...props}
       >
-        {/* ui-sdk's live region, or the deck's, says where it is; this is for the eye. */}
+        {/* ui-sdk's live region, or the deck's announcement, says where it is; this is for the eye. */}
         <span aria-hidden className='flex items-center gap-1'>
           <AnimatedNumber value={page} locale='en-US' className='text-foreground' />
           <span>/</span>

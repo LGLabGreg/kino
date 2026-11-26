@@ -7,7 +7,7 @@ import {
 } from '@/registry/components/kino/slider'
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { insetsOf, translateOf } from '@/registry/lib/highlight'
 import { mergeRefs } from '@/registry/lib/refs'
 import {
@@ -636,7 +636,6 @@ interface ImageCropperContextValue {
   handle: PrimitiveHandle<typeof imageCropper>
   feed: CropperFeed
   src: string | undefined
-  announce: (text: string) => void
 }
 
 const ImageCropperContext = createContext<ImageCropperContextValue | null>(null)
@@ -687,7 +686,6 @@ function ImageCropper({
   const following = useRef(false)
   const covering = useRef<Crop | null>(null)
   const [committed] = useState(() => new Set<() => void>())
-  const { announce, region } = useAnnouncer()
   const handle = usePrimitive(imageCropper, {
     src,
     crop,
@@ -756,9 +754,8 @@ function ImageCropper({
       ...props,
       className: cn('flex w-full min-w-0 flex-col gap-3', className),
       children: (
-        <ImageCropperContext value={{ handle, feed, src, announce }}>
+        <ImageCropperContext value={{ handle, feed, src }}>
           {children}
-          {region}
         </ImageCropperContext>
       ),
     },
@@ -1109,12 +1106,10 @@ const INSTRUCTIONS: Record<ImageCropperMode, string> = {
   box: 'Drag or use the arrow keys to move the selection, Tab to its edges and corners to resize it, press plus and minus to zoom, and press R to rotate, or Shift and R to rotate back.',
 }
 
-/** Says the image failed, in the cropper's status region, once. */
+/** Says the image failed, once. */
 function LoadFailed() {
-  const { announce } = useImageCropper()
-  const announced = useRef(announce)
   useEffect(() => {
-    announced.current('The image couldn’t be loaded.')
+    announce('The image couldn’t be loaded.')
   }, [])
   return (
     <div className='text-muted-foreground absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-sm [&_svg]:size-5'>
@@ -1218,7 +1213,7 @@ function ImageCropperZoom({
   /** For the row's layout: the buttons and the slider sit in it. */
   className?: string
 }) {
-  const { handle, feed, announce } = useImageCropper()
+  const { handle, feed } = useImageCropper()
   const ends = useSyncExternalStore(
     feed.subscribe,
     () => zoomEnds(feed.read(), handle.api.getZoom()),

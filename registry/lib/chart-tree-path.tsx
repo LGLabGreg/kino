@@ -8,7 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/registry/components/kino/breadcrumb'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import type { ChartConfig } from '@/registry/lib/chart-math'
 import {
   type ChartRootProps,
@@ -19,7 +19,7 @@ import {
 import { tileAncestors, type TileNode, tileNodeAt } from '@/registry/lib/chart-tiles'
 import { useControllable } from '@/registry/lib/controllable'
 import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
-import { type ComponentProps, createContext, Fragment, type ReactNode, use } from 'react'
+import { type ComponentProps, createContext, Fragment, use } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -59,7 +59,6 @@ function useTreeZoomRoot(
   /** A part's value as written, or the chart's word for none. */
   valueOf: (node: TileNode) => string
   zoomTo: (path: readonly string[]) => void
-  region: ReactNode
 } {
   const { config, messages, categoryFormat } = props
   const groups: ChartConfig = { ...config }
@@ -81,7 +80,6 @@ function useTreeZoomRoot(
   )
   const asked = tileNodeAt(tree, zoom)
   const view = hidden.includes(asked.path[0] ?? '') ? tree : asked
-  const { announce, region } = useAnnouncer()
   const state = useChartRoot(
     {
       ...props,
@@ -120,7 +118,7 @@ function useTreeZoomRoot(
     setZoom([...next.path])
     announce(state.messages.zoomedTo(nameOf(next)))
   }
-  return { state, groups, hidden, view, nameOf, valueOf, zoomTo, region }
+  return { state, groups, hidden, view, nameOf, valueOf, zoomTo }
 }
 
 interface TreeZoomValue {

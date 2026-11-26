@@ -227,7 +227,6 @@ function Changelog({
           ) : null}
         </div>
       </div>
-      {filter.region}
     </section>
   )
 }

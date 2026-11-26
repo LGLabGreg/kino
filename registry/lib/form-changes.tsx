@@ -5,7 +5,7 @@ import {
   formValues,
   useFormSubmission,
 } from '@/registry/components/kino/field'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { isComposing, matchesShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { refuse } from '@/registry/lib/refuse'
 import { transitionsQuiet } from '@/registry/lib/resize'
@@ -406,7 +406,6 @@ export function useSaveBar({
   const [released, setReleased] = useState(0)
   const holding = status === 'saved' && current && !changed && released !== savedCount
   const open = changed || saving || holding
-  const { announce, region } = useAnnouncer()
 
   // The warning holds until a new change, a save or a discard answers it.
   const moment = [
@@ -455,7 +454,7 @@ export function useSaveBar({
     else if (view === 'saved' && last.view !== 'saved' && open)
       announce(SAVE_BAR_TEXT.saved)
     else if (open && !last.open) announce(SAVE_BAR_TEXT.changed)
-  }, [open, status, view, announce])
+  }, [open, status, view])
 
   // The control the person last used in the form, to hand focus back to, and
   // its place among the form's controls, which a discard's remount keeps.
@@ -671,8 +670,6 @@ export function useSaveBar({
     /** Whether Discard and Save are off: while it saves, and as it leaves once saved. */
     locked: saving || view === 'saved',
     discard,
-    /** The status region the bar speaks through. It goes in the page from the start, outside the bar. */
-    region,
     /** Where the bar renders, and how focus goes round it when that is away from its form. */
     placement: {
       /** Whether it renders in place, inside a top-layer popup; `false` until the page has loaded. */

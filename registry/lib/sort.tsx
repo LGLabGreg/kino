@@ -1,6 +1,6 @@
 'use client'
 
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { translateOf } from '@/registry/lib/highlight'
 import { transitionsQuiet } from '@/registry/lib/resize'
 import {
@@ -1282,7 +1282,6 @@ export interface UseSortListOptions {
 function useSortList(children: ReactNode, options: UseSortListOptions) {
   const items = valuedChildren(children)
   const present = items.map((item) => item.props.value)
-  const { announce, region } = useAnnouncer()
   const handle = usePrimitive(sortList, {
     value: options.value,
     defaultValue: options.defaultValue,
@@ -1302,7 +1301,6 @@ function useSortList(children: ReactNode, options: UseSortListOptions) {
       <p id={instructionsId} hidden>
         {sortInstructions}
       </p>
-      {region}
     </>
   )
   return { context, handle, ordered, extras }
@@ -1330,7 +1328,6 @@ function inside(el: Element, x: number, y: number) {
  * `root` to the group's element, which `ListsMove` glides across.
  */
 function useSortGroup(options: UseSortGroupOptions) {
-  const { announce, region } = useAnnouncer()
   const [present, setPresent] = useState<TransferLists>({})
   const [elements] = useState(() => new Map<string, Valued>())
   const { onValueChange } = options
@@ -1375,7 +1372,6 @@ function useSortGroup(options: UseSortGroupOptions) {
       <p id={instructionsId} hidden>
         {groupInstructions}
       </p>
-      {region}
     </>
   )
   return { context, handle, root, extras }

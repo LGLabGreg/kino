@@ -22,7 +22,7 @@ import {
   type SocialProvider,
   type SocialSignInLayout,
 } from '@/registry/components/kino/social-sign-in'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { markMounted } from '@/registry/lib/refs'
 import { Swap } from '@/registry/lib/swap'
 import {
@@ -355,7 +355,6 @@ function AuthResend({
   children: ReactNode
   className?: string
 }) {
-  const { announce, region } = useAnnouncer()
   const waiting = left > 0
   return (
     <div
@@ -380,7 +379,6 @@ function AuthResend({
       >
         {waiting ? `Resend in ${countdownLabel(left)}` : children}
       </Button>
-      {region}
     </div>
   )
 }

@@ -12,7 +12,7 @@ import {
   ComboboxList,
   ComboboxValue,
 } from '@/registry/components/kino/combobox'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { isComposing } from '@/registry/lib/keys'
 import { createComboboxController } from '@ui-sdk/react/combobox'
 import {
@@ -150,7 +150,6 @@ function TagInput({
   const tags = valueProp ?? ownTags
   const [ownQuery, setOwnQuery] = useState(defaultQuery)
   const query = queryProp ?? ownQuery
-  const { announce, region } = useAnnouncer()
   const [flash, setFlash] = useState<{ tag: string; key: number }>()
   const repeatedRef = useRef<readonly string[]>([])
 
@@ -227,8 +226,6 @@ function TagInput({
       >
         {children}
       </Combobox>
-      {/* Mounted from the start, so a screen reader hears what changes in it. */}
-      {region}
     </TagInputContext>
   )
 }

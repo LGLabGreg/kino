@@ -2,7 +2,7 @@
 
 import { CheckboxMark } from '@/registry/components/kino/checkbox'
 import { Meter, MeterLabel, MeterValue } from '@/registry/components/kino/meter'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { choiceMarkBoxClassName } from '@/registry/lib/choice'
 import { graphemes, Swap } from '@/registry/lib/swap'
 import { FieldDescription, useFieldControl } from '@ui-sdk/react/field'
@@ -60,7 +60,6 @@ function PasswordStrength({
     : null
   const word = level === null ? null : levels[level]
 
-  const { announce, region } = useAnnouncer()
   const announced = useRef(word)
   const said = `${label}: ${word ?? emptyLabel}`
   useEffect(() => {
@@ -137,7 +136,6 @@ function PasswordStrength({
           </ul>
         )
       ) : null}
-      {region}
     </div>
   )
 }

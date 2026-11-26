@@ -2,7 +2,7 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { CutTooltip } from '@/registry/lib/cut'
 import { noticeIcon } from '@/registry/lib/notice'
 import { settle } from '@/registry/lib/settle'
@@ -104,7 +104,6 @@ function ConfirmButton({
   const [undoFailed, setUndoFailed] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
-  const { announce, region } = useAnnouncer()
   const questionId = useId()
   const rootRef = useRef<HTMLSpanElement>(null)
   // Focus follows the change when it was inside, so it never falls to the page.
@@ -329,7 +328,6 @@ function ConfirmButton({
       <Swap align='start' block id={viewOf(status)} className='max-w-full'>
         {view}
       </Swap>
-      {region}
     </span>
   )
 }

@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
+import { announce } from '@/registry/lib/announce'
 import { settle } from '@/registry/lib/settle'
 import { Swap } from '@/registry/lib/swap'
 import { type ComponentProps, type ReactNode, useId, useState } from 'react'
@@ -228,7 +229,7 @@ function InboxRow({ item }: { item: NotificationItem }) {
  * fails leaves them as they were, and says so.
  */
 function FeedActions({ item }: { item: NotificationItem }) {
-  const { act, announce, focusRow } = useCenter()
+  const { act, focusRow } = useCenter()
   const { titleId } = useRow()
   const [running, setRunning] = useState<number | null>(null)
   // The one that failed last, said under the buttons until it works or another is pressed.

@@ -195,20 +195,19 @@ function SunburstChart(props: SunburstChartProps) {
     ref,
   } = props
   const tree = tileTree(data, index, dataKey)
-  const { state, groups, hidden, view, nameOf, valueOf, zoomTo, region } =
-    useTreeZoomRoot(
-      {
-        ...props,
-        messages: {
-          series: 'Branches',
-          allHidden: 'Every branch is hidden',
-          showAll: (count) => `Show all ${count} branches`,
-          ...messages,
-        },
+  const { state, groups, hidden, view, nameOf, valueOf, zoomTo } = useTreeZoomRoot(
+    {
+      ...props,
+      messages: {
+        series: 'Branches',
+        allHidden: 'Every branch is hidden',
+        showAll: (count) => `Show all ${count} branches`,
+        ...messages,
       },
-      tree,
-      { entrance: entrance !== 'none' },
-    )
+    },
+    tree,
+    { entrance: entrance !== 'none' },
+  )
   const { messages: words, locale, direction } = state
 
   // The arcs in view, in the order the keys step through them.
@@ -419,7 +418,6 @@ function SunburstChart(props: SunburstChartProps) {
           <IndexActive items={reader.items} active={props} toldRef={toldRef}>
             <SunburstArcs labels={labels} phase={phase} />
             {props.children}
-            {region}
             {load.placeholder && <SunburstPlaceholder />}
           </IndexActive>
         </ChartFrame>

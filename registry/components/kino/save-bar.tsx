@@ -63,7 +63,7 @@ function SaveBar({
 }) {
   const frame = useRef<HTMLDivElement>(null)
   const contextContainer = use(SaveBarContainerContext)
-  const { barRef, open, view, text, texts, saving, locked, discard, region, placement } =
+  const { barRef, open, view, text, texts, saving, locked, discard, placement } =
     useSaveBar({
       frame,
       onDiscard,
@@ -172,7 +172,6 @@ function SaveBar({
 
   return (
     <>
-      {region}
       <span ref={anchorRef} hidden />
       {away ? (
         <>

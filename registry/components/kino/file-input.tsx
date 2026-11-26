@@ -7,7 +7,7 @@ import { emptyVariants } from '@/registry/components/kino/empty'
 import { InputInvalidIcon, inputBoxClassName } from '@/registry/components/kino/input'
 import { Progress } from '@/registry/components/kino/progress'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useLocale } from '@/registry/lib/dates'
 import { FieldValues } from '@/registry/lib/field-control'
 import { useFlow } from '@/registry/lib/flow'
@@ -266,7 +266,6 @@ interface FileInputContextValue {
   controller: FileInputController
   /** Opens the picker from a press on a drop target, unless it landed on a control of its own. */
   openPicker: (event: MouseEvent<HTMLElement>) => void
-  announce: (text: string) => void
 }
 
 const FileInputContext = createContext<FileInputContextValue | null>(null)
@@ -344,7 +343,6 @@ function FileInput({
   const controller = controllerProp ?? ownController
   const rootRef = useRef<HTMLDivElement>(null)
   const refs = useMemo(() => mergeRefs(rootRef, ref), [ref])
-  const { announce, region } = useAnnouncer()
   // The last change put a file in another's place.
   const [swapping, setSwapping] = useState(false)
   const [rejected, setRejected] = useState<FileRejection[]>([])
@@ -429,7 +427,7 @@ function FileInput({
     }
     form.addEventListener('submit', onSubmit, { capture: true })
     return () => form.removeEventListener('submit', onSubmit, { capture: true })
-  }, [announce, upload])
+  }, [upload])
   const resumed = useRef<typeof waiting>(null)
   useEffect(() => {
     if (!waiting || summary.active > 0 || resumed.current === waiting) return
@@ -476,7 +474,6 @@ function FileInput({
         locale,
         controller,
         openPicker,
-        announce,
       }}
     >
       <FileInputPrimitive
@@ -533,7 +530,6 @@ function FileInput({
           </>
         )}
       </FileInputPrimitive>
-      {region}
     </FileInputContext>
   )
 }
@@ -839,7 +835,7 @@ function FileInputItem({
 }) {
   const file = use(FileItemContext)
   if (!file) throw new Error('A FileInputItem goes inside a FileInputList.')
-  const { disabled, locale, announce, uploads, retry } = useFileInput()
+  const { disabled, locale, uploads, retry } = useFileInput()
   // Its own upload, when the FileInput runs them and nothing is given in its place.
   const upload = uploads.get(file)
   const progress =
@@ -880,7 +876,7 @@ function FileInputItem({
     if (lastState.current === state) return
     lastState.current = state
     if (!own) announce(uploadAnnouncement(file.name, state))
-  }, [state, file, announce, own])
+  }, [state, file, own])
 
   // A control that goes with a state, such as Retry, takes the focus with
   // it: the row keeps it.

@@ -2,7 +2,7 @@
 
 import { Field, FieldDescription, FieldLabel } from '@/registry/components/kino/field'
 import { Switch } from '@/registry/components/kino/switch'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import {
   type Consent,
   type ConsentCategory,
@@ -52,7 +52,6 @@ function useCookieConsent<Id extends string>(
   surfaceRef: RefObject<HTMLElement | null>,
 ) {
   const { state, save } = useConsent(consent)
-  const { announce, region } = useAnnouncer()
   // Where focus was when a link opened the banner, to go back to once it's answered.
   const returnTo = useRef<HTMLElement | null>(null)
 
@@ -139,7 +138,6 @@ function useCookieConsent<Id extends string>(
     ready,
     shown,
     customising,
-    region,
     categories: consent.categories,
     isOn: (category: ConsentCategory<Id>) => isGranted(category, { granted }, gpc),
     /** Kept off by the browser's Global Privacy Control. */

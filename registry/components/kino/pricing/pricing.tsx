@@ -26,7 +26,7 @@ import {
   type PricingHeading,
   usePricing,
 } from '@/registry/components/kino/pricing/pricing-parts'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
 import { type ComponentProps, type MouseEvent, type ReactNode, useId } from 'react'
@@ -104,7 +104,6 @@ function Pricing({
     defaultPlan ?? recommended ?? plans[0]?.value ?? '',
     onPlanChange,
   )
-  const { announce, region } = useAnnouncer()
   const titleId = useId()
   const featuresId = useId()
   const Subheading = HEADING_BELOW[heading]
@@ -165,7 +164,6 @@ function Pricing({
             />
           </div>
         ) : null}
-        {region}
       </section>
     </PricingContext>
   )

@@ -57,7 +57,6 @@ function CookieConsent<Id extends string>({
       )}
       {...props}
     >
-      {model.region}
       <section
         ref={surfaceRef}
         aria-labelledby={titleId}

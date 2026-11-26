@@ -8,7 +8,7 @@ import {
   SegmentedControlItem,
 } from '@/registry/components/kino/segmented-control'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import { formatDate } from '@/registry/lib/dates'
 import { FeatureStage } from '@/registry/lib/feature-parts'
@@ -105,7 +105,7 @@ function releaseCount(total: number): string {
 
 /**
  * The tag a Changelog shows and the releases under it. Picking a tag says
- * how many releases it holds, in the status region the block renders.
+ * how many releases it holds.
  * `show` brings a release back into view for a link to it, picking All
  * when the tag shown hides it.
  */
@@ -117,7 +117,6 @@ function useReleaseFilter({
   onTagChange,
 }: ReleaseFilterOptions) {
   const [tag, setTag] = useControllable(tagProp, defaultTag, onTagChange)
-  const { announce, region } = useAnnouncer()
   const inUse = tagsInUse(tags, releases)
   // A tag that files nothing, or none given, shows every release.
   const shownTag = inUse.some((each) => each.value === tag) ? tag : ALL
@@ -143,7 +142,6 @@ function useReleaseFilter({
     pick,
     has,
     show,
-    region,
   }
 }
 

@@ -8,7 +8,7 @@ import {
   TooltipTrigger,
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { mergeProps } from '@ui-sdk/react/primitive'
 import {
   cloneElement,
@@ -74,7 +74,6 @@ function CopyButton({
 }) {
   const [status, setStatus] = useState<CopyStatus>('idle')
   const [waiting, setWaiting] = useState(false)
-  const { announce, region } = useAnnouncer()
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -159,23 +158,15 @@ function CopyButton({
 
   if (iconOnly) {
     return (
-      <>
-        {/* It stays open on the press, so the tooltip can say how it went. */}
-        <Tooltip closeOnPress={false}>
-          <TooltipTrigger render={button} />
-          <TooltipContent {...tooltipProps}>{result ?? name}</TooltipContent>
-        </Tooltip>
-        {region}
-      </>
+      // It stays open on the press, so the tooltip can say how it went.
+      <Tooltip closeOnPress={false}>
+        <TooltipTrigger render={button} />
+        <TooltipContent {...tooltipProps}>{result ?? name}</TooltipContent>
+      </Tooltip>
     )
   }
 
-  return (
-    <>
-      {button}
-      {region}
-    </>
-  )
+  return button
 }
 
 /**

@@ -216,13 +216,9 @@ function CirclePackingChart(props: CirclePackingChartProps) {
     ref,
   } = props
   const tree = tileTree(data, index, dataKey)
-  const { state, hidden, view, nameOf, valueOf, zoomTo, region } = useTreeZoomRoot(
-    props,
-    tree,
-    {
-      entrance: entrance !== 'none',
-    },
-  )
+  const { state, hidden, view, nameOf, valueOf, zoomTo } = useTreeZoomRoot(props, tree, {
+    entrance: entrance !== 'none',
+  })
   const { messages: words, valueText, locale, direction } = state
 
   const load = useChartLoad(props)
@@ -592,7 +588,6 @@ function CirclePackingChart(props: CirclePackingChartProps) {
                 stepEmphasis={colorKey ? stepEmphasis : null}
               />
               {props.children}
-              {region}
               {load.placeholder && <CirclePackingPlaceholder />}
             </IndexActive>
           </ChartFrame>

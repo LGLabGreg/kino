@@ -42,7 +42,7 @@ import {
   TooltipTrigger,
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useAnnouncer } from '@/registry/lib/announce'
+import { announce } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
 import {
   clockTime,
@@ -139,8 +139,6 @@ interface CenterContextValue {
   open: (item: NotificationItem, event: MouseEvent) => void
   /** Whether a row can be opened: it has a link, or the app listens. */
   opens: (item: NotificationItem) => boolean
-  /** Says `text` in the panel's status region. */
-  announce: (text: string) => void
 }
 
 const CenterContext = createContext<CenterContextValue | null>(null)
@@ -269,30 +267,27 @@ function NotificationShell({
   useLayoutEffect(() => {
     latest.current = { items, tab }
   })
-  const announcer = useAnnouncer()
   const unread = unreadCount(items)
 
   // A notification that arrives is heard, with how many are unread now; one
   // marked unread again, or put back, is not new.
   const known = useRef<Set<string> | null>(null)
-  const { announce: announceArrival, region: arrivalRegion } = useAnnouncer()
   useEffect(() => {
     const seen = known.current
     known.current = new Set([...(seen ?? []), ...items.map((item) => item.id)])
     if (!seen) return
     const arrived = items.filter((item) => !item.read && !seen.has(item.id)).length
     if (arrived === 0) return
-    announceArrival(
+    announce(
       `${arrived === 1 ? 'New notification' : `${arrived} new notifications`}. ${unreadCount(items)} unread`,
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `announceArrival` is a new function each render
   }, [items])
 
   const change = (next: NotificationItem[], what: NotificationChange) => {
     setItems(next)
     latest.current = { ...latest.current, items: next }
     onNotificationsChange?.(next, what)
-    announcer.announce(changeMessage(what))
+    announce(changeMessage(what))
   }
 
   // Where focus goes once a row that had it leaves.
@@ -365,7 +360,6 @@ function NotificationShell({
       onOpenNotification?.(item, event)
     },
     opens: (item) => item.href !== undefined || onOpenNotification !== undefined,
-    announce: announcer.announce,
   }
 
   const markAllRead = () => {
@@ -454,10 +448,8 @@ function NotificationShell({
             // From the start edge, as in the popover, not a dialog's buttons at the end.
             <PopoverFooter className='@xs:justify-start'>{footer}</PopoverFooter>
           ) : null}
-          {announcer.region}
         </PopoverContent>
       </Popover>
-      {arrivalRegion}
     </CenterContext>
   )
 }
