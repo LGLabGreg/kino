@@ -33,9 +33,9 @@ import {
   type IntegrationsSectionProps,
   IntegrationTile,
 } from '@/registry/lib/integrations-parts'
-import { matchRange } from '@/registry/lib/match'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { HEADING_BELOW, SectionHeading } from '@/registry/lib/section-heading'
+import { matchRanges } from '@ui-sdk/core/text-match'
 import { type ComponentProps, type ReactNode, useId, useMemo, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -357,7 +357,7 @@ function filterIntegrations(
       labels.get(integration.category) ?? '',
       integration.description,
     ].join(' ')
-    return words.every((word) => matchRange(text, word) !== null)
+    return words.every((word) => matchRanges(text, word, 'contains').length > 0)
   })
 }
 
