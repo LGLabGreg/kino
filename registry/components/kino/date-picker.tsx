@@ -1,59 +1,76 @@
 'use client'
 
 import { Button } from '@/registry/components/kino/button'
-import { Calendar, type CalendarDayProps } from '@/registry/components/kino/calendar'
+import { CalendarMonths } from '@/registry/components/kino/calendar'
 import {
   focusControl,
   InputInvalidIcon,
   inputBoxClassName,
+  inputControlClassName,
 } from '@/registry/components/kino/input'
 import {
   InputGroupButton,
   inputGroupPresence,
 } from '@/registry/components/kino/input-group'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+  PopoverBox,
+  usePopoverContent,
+  usePopoverPresentation,
 } from '@/registry/components/kino/popover'
-import {
-  SegmentedControl,
-  SegmentedControlItem,
-} from '@/registry/components/kino/segmented-control'
-import { TimeInput } from '@/registry/components/kino/time-input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
-  dateGranularity,
-  type DateMatchers,
+  CALENDAR_LABELS,
+  type CalendarLabels,
+  type CalendarLook,
+  CalendarLookContext,
+  type DayContent,
+} from '@/registry/lib/calendar-grid'
+import {
+  boundDay,
   type DateRange,
-  dateSpan,
+  datePlaceholder,
   formatDate,
   formatDateRange,
-  formatValue,
-  type Granularity,
-  type HourCycle,
-  isISODate,
-  isISODateTime,
-  joinDateTime,
-  rangeLength,
-  matchesDate,
-  monthOf,
-  splitDateTime,
-  timeGranularity,
   useLocale,
+  useToday,
+  type Weekday,
+  weekStart,
 } from '@/registry/lib/dates'
-import { OutsideField, useField, useFieldProps } from '@/registry/lib/field-control'
-import { mergeRefs } from '@/registry/lib/refs'
+import { useField } from '@/registry/lib/field-control'
+import {
+  followPick,
+  followPointer,
+  highlightClassName,
+  itemMatching,
+  pickClassName,
+} from '@/registry/lib/highlight'
+import {
+  pillBackdropClassName,
+  pillClassName,
+  pillItemClassName,
+  pillItemLayout,
+  pillRowClassName,
+  pillTrackClassName,
+} from '@/registry/lib/pill'
+import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { useRoomy } from '@/registry/lib/roomy'
-import { splitSegmentProps, useSegments } from '@/registry/lib/segment-field'
-import { SegmentRow, segmentRowPadding } from '@/registry/lib/segmented-input'
-import { dateScheme, dateTimeScheme } from '@/registry/lib/segments'
+import {
+  DatePicker as DatePickerPrimitive,
+  DatePickerClear as DatePickerClearPrimitive,
+  DatePickerContent as DatePickerContentPrimitive,
+  DatePickerInput as DatePickerInputPrimitive,
+  DatePickerPreset as DatePickerPresetPrimitive,
+  type DatePickerState,
+  DatePickerTrigger as DatePickerTriggerPrimitive,
+  type DatePickerValue,
+  createDatePickerController,
+} from '@ui-sdk/react/date-picker'
 import {
   type ComponentProps,
   createContext,
   type ReactNode,
-  type Ref,
-  useContext,
+  use,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -63,845 +80,558 @@ import {
 import { cn } from '@/lib/utils'
 
 /*
- * A date typed into the Date input's segments, or picked from the Calendar
- * in a Popover that opens from the field's calendar button. One day, or a
- * range typed as two dates in one box and picked as a range on the
- * calendar. The popover closes on the pick, and a range's once both ends are
- * in. To the month or the year, the Calendar picks one from twelve; with a
- * time, the Time input sits under the calendar, and the popover closes once
- * both are in. Every date comes from `dates`.
+ * ui-sdk's Date picker in Kino's look: a date typed in the page's language
+ * into a field, or picked from the Calendar in a popover that opens from the
+ * field's calendar button. One day, or a range typed as two dates in one box
+ * and picked as a range on the calendar. ui-sdk reads what is typed, holds
+ * the value, sends it with a form and checks it; Kino draws the box, the
+ * popover and the Calendar's months in it.
  */
 
-/** The names the picker's own buttons and fields take, in place of the English ones. */
+/** The names the picker's own parts take, in place of the English ones. */
 interface DatePickerLabels {
-  /** The calendar button. */
-  open: string
+  /** The calendar button, before the date it holds; ui-sdk's "Choose date" when not given. */
+  open?: string
+  /** The clear button. */
   clear: string
-  /** A range's first date. */
-  start: string
-  /** A range's last date. */
+  /** A range's last date, after the field's name. */
   end: string
-  /** A range with one date in, which fails the form's check. */
-  incomplete: string
-  /** A date without its time, or a time without its date, which fails the form's check. */
-  incompleteDateTime: string
-  /** The Time input under the calendar. */
-  time: string
-  /** A range whose end comes before its start. */
-  backwards: string
-  /** A typed day that can't be picked. */
-  unavailable: string
-  /** A range shorter than `minDays`. */
-  tooShort: string
-  /** A range longer than `maxDays`. */
-  tooLong: string
 }
 
-const ENGLISH: DatePickerLabels = {
-  open: 'Choose from a calendar',
-  clear: 'Clear',
-  start: 'Start date',
-  end: 'End date',
-  incomplete: 'Enter both dates.',
-  incompleteDateTime: 'Enter a date and a time.',
-  time: 'Time',
-  backwards: 'The end date comes before the start date.',
-  unavailable: 'That day can’t be picked.',
-  tooShort: 'That range is too short.',
-  tooLong: 'That range is too long.',
-}
-
-interface DatePickerOptions {
-  /** The earliest value that can be typed or picked, in the value's form, or a day. */
-  min?: string
-  /** The latest value that can be typed or picked, in the value's form, or a day, which allows all of it. */
-  max?: string
-  /** Days the calendar won't let you pick, as the Calendar's `unavailable` takes them. */
-  unavailable?: DateMatchers
-  /** A range's fewest days, both ends counted. */
-  minDays?: number
-  /** A range's most days, both ends counted. */
-  maxDays?: number
-  /** Sets the segments' order and the calendar's names and first weekday. The browser's language by default. */
-  locale?: string
-  /** With a time, a 12-hour clock with AM and PM, or a 24-hour one. The locale's by default. */
-  hourCycle?: HourCycle
-  open?: boolean
-  defaultOpen?: boolean
-  onOpenChange?: (open: boolean) => void
-  /** Closes the calendar once a day is picked, or a range is. */
-  closeOnSelect?: boolean
-  disabled?: boolean
-  /** The date shows and can't be changed. */
-  readOnly?: boolean
-  /** A form can't be sent until a date is in, or both of a range's are. */
-  required?: boolean
-  /** The form the dates go with, when the picker sits outside it. */
-  form?: string
-  labels?: Partial<DatePickerLabels>
-  children?: ReactNode
-}
-
-interface DatePickerSingle {
-  mode?: 'single'
-  /**
-   * The smallest unit picked, which sets the value's form: `year` (`yyyy`),
-   * `month` (`yyyy-mm`), `day` (`yyyy-mm-dd`, the default), or a date and
-   * time to the `hour`, `minute` or `second` (`yyyy-mm-ddTHH:mm`, with
-   * `:ss` to the second).
-   */
-  granularity?: Granularity
-  /** The value, in the form `granularity` sets. */
-  value?: string | null
-  defaultValue?: string | null
-  /** Called with the new value once one is whole, or with null once the field is empty. */
-  onValueChange?: (value: string | null) => void
-  /** Sends the date with a form under this name. Falls back to the Field's name. */
-  name?: string
-}
-
-interface DatePickerRange {
-  mode: 'range'
-  /** A range is picked to the day. */
-  granularity?: 'day'
-  /** The range, start first; null until both ends are in. */
-  value?: DateRange | null
-  defaultValue?: DateRange | null
-  onValueChange?: (value: DateRange | null) => void
-  /**
-   * Sends the start with a form under this name. Without `startName` and
-   * `endName`, both dates go under the Field's name, start first.
-   */
-  startName?: string
-  /** Sends the end with a form under this name. */
-  endName?: string
-}
-
-type DatePickerProps = DatePickerOptions & (DatePickerSingle | DatePickerRange)
-
-type DatePickerValue = string | DateRange | null
-
-/**
- * What the two fields hold: a value, or a range's start and end as typed,
- * either of which can be missing. With a time, the value can be half in
- * (`2026-11-14T`, `T09:30`), as the field, the calendar and the time each
- * fill their part.
- */
-type Drafts = readonly [string | null, string | null]
+const ENGLISH: DatePickerLabels = { clear: 'Clear', end: 'End date' }
 
 interface DatePickerContextValue {
-  mode: 'single' | 'range'
-  granularity: Granularity
-  hourCycle?: HourCycle
-  drafts: Drafts
-  value: DatePickerValue
-  /** Sets one field's date, as typed. */
-  type: (index: 0 | 1, date: string | null) => void
-  /** Sets the whole value, from the calendar or a preset, and closes once it is whole. */
-  pick: (value: DatePickerValue) => void
-  open: boolean
-  setOpen: (open: boolean) => void
-  min?: string
-  max?: string
-  unavailable?: DateMatchers
-  minDays?: number
-  maxDays?: number
+  state: DatePickerState
   locale: string
-  disabled?: boolean
-  readOnly?: boolean
-  required?: boolean
-  form?: string
-  names: readonly [string | undefined, string | undefined]
   labels: DatePickerLabels
-  /** The field's box, where the calendar hangs from. */
-  anchor: HTMLElement | null
-  setAnchor: (node: HTMLElement | null) => void
+  /** What the Calendar inside draws by, but for the parts the content sets. */
+  look: Omit<CalendarLook, 'showWeekNumbers' | 'dayContent' | 'labels'>
+  /** The field's box, where the popover hangs from. */
+  box: HTMLElement | null
+  setBox: (element: HTMLElement | null) => void
 }
 
 const DatePickerContext = createContext<DatePickerContextValue | null>(null)
 
 function useDatePicker(part: string) {
-  const context = useContext(DatePickerContext)
+  const context = use(DatePickerContext)
   if (!context) throw new Error(`${part} must be inside a DatePicker.`)
   return context
 }
 
-function DatePicker(props: DatePickerProps) {
-  const {
-    min,
-    max,
-    unavailable,
-    minDays,
-    maxDays,
-    locale: localeProp,
-    hourCycle,
-    open: openProp,
-    defaultOpen = false,
-    onOpenChange,
-    closeOnSelect = true,
-    readOnly,
-    required,
-    form,
-    labels,
-    children,
-  } = props
-  // A disabled Field disables the picker's buttons and calendar, not just its segments.
-  const field = useField()
-  const fieldDisabled = field?.disabled
-  const disabled = Boolean(props.disabled) || fieldDisabled === true
-  const mode = props.mode ?? 'single'
-  const granularity = props.granularity ?? 'day'
-  const locale = useLocale(localeProp)
-  const controlled = props.value !== undefined
-  const given = (controlled ? props.value : props.defaultValue) ?? null
+type DatePickerPrimitiveProps = ComponentProps<typeof DatePickerPrimitive>
 
-  const [held, setHeld] = useState(() => ({
-    drafts: draftsOf(given),
-    source: valueKey(given),
-  }))
-  // A value from outside that isn't the one the fields add up to moves them to it.
-  if (controlled && valueKey(given) !== held.source) {
-    setHeld({ drafts: draftsOf(given), source: valueKey(given) })
-  }
-  const value = useMemo(
-    () => pickerValue(mode, held.drafts, granularity),
-    [mode, held.drafts, granularity],
-  )
+/** Why the value changed, as `onValueChange` hears it. */
+type DatePickerChangeDetails = Parameters<
+  NonNullable<DatePickerPrimitiveProps['onValueChange']>
+>[1]
 
-  const [openState, setOpenState] = useState(defaultOpen)
-  const open = openProp ?? openState
-  const setOpen = (next: boolean) => {
-    if (next && (disabled || readOnly)) return
-    setOpenState(next)
-    onOpenChange?.(next)
-  }
-
-  const write = (drafts: Drafts) => {
-    const next = pickerValue(mode, drafts, granularity)
-    const key = valueKey(next)
-    setHeld({ drafts, source: key })
-    if (key !== valueKey(value)) emit(props, next)
-  }
-
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const context: DatePickerContextValue = {
-    mode,
-    granularity,
-    hourCycle,
-    drafts: held.drafts,
-    value,
-    type: (index, date) =>
-      write(index === 0 ? [date, held.drafts[1]] : [held.drafts[0], date]),
-    pick: (next) => {
-      write(draftsOf(next))
-      // With a time, a date picked alone waits for its time.
-      const whole = pickerValue(mode, draftsOf(next), granularity) !== null
-      if (closeOnSelect && whole) setOpen(false)
-    },
-    open,
-    setOpen,
-    min,
-    max,
-    unavailable,
-    minDays,
-    maxDays,
-    locale,
-    disabled,
-    readOnly,
-    required,
-    form,
-    names:
-      props.mode === 'range'
-        ? // Without names of its own, a range sends both dates under its Field's name, start first.
-          props.startName || props.endName
-          ? [props.startName, props.endName]
-          : [field?.name, field?.name]
-        : [props.name, undefined],
-    labels: { ...ENGLISH, ...labels },
-    anchor,
-    setAnchor,
-  }
-
-  return (
-    <DatePickerContext value={context}>
-      <Popover open={open} onOpenChange={setOpen}>
-        {children}
-      </Popover>
-    </DatePickerContext>
-  )
+interface DatePickerSingle {
+  mode?: 'single'
+  /** The date, as `yyyy-mm-dd`. */
+  value?: string | null
+  defaultValue?: string | null
+  onValueChange?: (value: string | null, details: DatePickerChangeDetails) => void
 }
 
-function emit(props: DatePickerProps, value: DatePickerValue) {
-  if (props.mode === 'range') props.onValueChange?.(isRange(value) ? value : null)
-  else props.onValueChange?.(typeof value === 'string' ? value : null)
+interface DatePickerRange {
+  mode: 'range'
+  /** The range, start first; null until both ends are in. */
+  value?: DateRange | null
+  defaultValue?: DateRange | null
+  onValueChange?: (value: DateRange | null, details: DatePickerChangeDetails) => void
 }
 
-/** The calendar button: in the field's box, it opens the calendar. */
-function DatePickerTrigger({
-  className,
-  ...props
-}: Omit<ComponentProps<typeof PopoverTrigger>, 'className'> & {
+type DatePickerProps = Omit<
+  DatePickerPrimitiveProps,
+  | 'children'
+  | 'weekStartsOn'
+  | 'className'
+  | 'mode'
+  | 'value'
+  | 'defaultValue'
+  | 'onValueChange'
+> & {
+  /** The first day of the week, 0 for Sunday. The locale's by default. */
+  weekStartsOn?: Weekday
+  labels?: Partial<DatePickerLabels>
   className?: string
-}) {
-  const picker = useDatePicker('DatePickerTrigger')
+  children?: ReactNode
+} & (DatePickerSingle | DatePickerRange)
+
+/**
+ * Holds the date, whether the calendar is open and what a form sends.
+ * Several months show side by side on a screen wider than a phone and one on
+ * a phone. `presentation` is a popover by default; `auto` opens a sheet from
+ * the bottom edge on a small touch screen, as the Popover does.
+ */
+function DatePicker({
+  locale: localeProp,
+  weekStartsOn,
+  months = 1,
+  fixedWeeks = true,
+  monthFormat = 'long',
+  min,
+  max,
+  today: todayProp,
+  timeZone,
+  presentation = 'popover',
+  controller: controllerProp,
+  labels,
+  className,
+  children,
+  value,
+  defaultValue,
+  onValueChange,
+  ...props
+}: DatePickerProps) {
+  const [own] = useState(createDatePickerController)
+  const controller = controllerProp ?? own
+  const locale = useLocale(localeProp)
+  const first = weekStartsOn ?? weekStart(locale)
+  const clock = useToday(timeZone)
+  const today = todayProp ?? clock
+  const bounds = useMemo(
+    () => ({ min: boundDay(min, 'start'), max: boundDay(max, 'end') }),
+    [min, max],
+  )
+  // Two months side by side don't fit a phone's width: it shows one.
+  const roomy = useRoomy()
+  const shown = roomy ? months : 1
+  const [box, setBox] = useState<HTMLElement | null>(null)
+  const words = useMemo(() => ({ ...ENGLISH, ...labels }), [labels])
+
   return (
-    <PopoverTrigger
-      data-date-picker-trigger=''
-      disabled={picker.disabled || picker.readOnly}
-      render={
-        <InputGroupButton
-          size='icon-xs'
-          aria-label={picker.labels.open}
-          className={cn('text-muted-foreground', className)}
-        />
-      }
+    <DatePickerPrimitive
       {...props}
+      value={value as DatePickerValue | undefined}
+      defaultValue={defaultValue as DatePickerValue | undefined}
+      onValueChange={onValueChange as DatePickerPrimitiveProps['onValueChange']}
+      controller={controller}
+      locale={locale}
+      weekStartsOn={first}
+      months={shown}
+      fixedWeeks={fixedWeeks}
+      monthFormat={monthFormat}
+      min={bounds.min}
+      max={bounds.max}
+      today={today ?? undefined}
+      timeZone={timeZone}
+      presentation={usePopoverPresentation(presentation, box)}
+      className={className}
+    >
+      {(state) => (
+        <DatePickerContext
+          value={{
+            state,
+            locale,
+            labels: words,
+            look: {
+              mode: state.mode,
+              disabled: state.disabled,
+              locale,
+              weekStartsOn: first,
+              months: shown,
+              monthFormat,
+              full: null,
+              bounds,
+              today,
+              showMonth: (month) => controller.setMonth(month),
+            },
+            box,
+            setBox,
+          }}
+        >
+          {children}
+        </DatePickerContext>
+      )}
+    </DatePickerPrimitive>
+  )
+}
+
+/** The calendar button at the end of the field's box, named in `labels.open` with the date it holds when given. */
+function BoxTrigger() {
+  const { state, locale, labels } = useDatePicker('DatePickerInput')
+  const { value } = state
+  const written =
+    value === null
+      ? null
+      : typeof value === 'string'
+        ? formatDate(value, locale, { dateStyle: 'full' })
+        : formatDateRange(value[0], value[1], locale, { dateStyle: 'full' })
+  const named = labels.open && (written ? `${labels.open}, ${written}` : labels.open)
+  return (
+    <DatePickerTriggerPrimitive
+      data-date-picker-box-trigger=''
+      render={(own: ComponentProps<typeof InputGroupButton>) => (
+        <InputGroupButton
+          {...own}
+          aria-label={named || own['aria-label']}
+          size='icon-xs'
+          className='text-muted-foreground'
+        />
+      )}
     >
       <PickerIcon />
-    </PopoverTrigger>
+    </DatePickerTriggerPrimitive>
   )
 }
 
 /**
- * The field: the date typed a segment at a time, or a range's two dates in
- * one box, with the calendar button at its end. Children (a `DatePickerClear`)
- * sit before the button.
+ * A range's two dates, each as wide as what it shows, so they read as one
+ * pair from the box's start, and shrink together where there isn't room.
+ * Where a field can't size to its text, they share the box and meet at the
+ * dash. Their placeholders take the small text even on a phone, so both fit.
+ */
+const rangeDateClassName =
+  'w-0 supports-[field-sizing:content]:w-auto supports-[field-sizing:content]:flex-[0_1_auto] supports-[field-sizing:content]:[field-sizing:content]'
+
+/**
+ * The field: ui-sdk's input in the box, reading the date typed in the
+ * locale's order on Enter or blur, or a range's two inputs, with the
+ * calendar button at its end. Children (a `DatePickerClear`) sit before the
+ * button. `className` goes to the box, every other prop to the input, or a
+ * range's first.
  */
 function DatePickerInput({
   className,
   children,
-  monthFormat,
-  ref,
+  placeholder,
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledBy,
-  'aria-describedby': ariaDescribedBy,
-  id,
   ...props
-}: Omit<ComponentProps<'div'>, 'className'> & {
+}: Omit<ComponentProps<typeof DatePickerInputPrimitive>, 'className' | 'end'> & {
   className?: string
-  /** Shows the month as a short name (Nov) in place of its number. */
-  monthFormat?: 'numeric' | 'short'
+  children?: ReactNode
 }) {
-  const picker = useDatePicker('DatePickerInput')
-  const { setAnchor } = picker
-  const boxRef = useMemo(() => mergeRefs(ref, setAnchor), [ref, setAnchor])
-  const ownId = useId()
-  // Read here for a range's group and its end, which sits outside the Field: the start is its control.
-  const {
-    invalid: fieldInvalid,
-    props: { 'aria-labelledby': fieldLabel, 'aria-describedby': fieldDescribedBy },
-  } = useFieldProps({})
-  const range = picker.mode === 'range'
-  const startScheme = useMemo(() => {
-    const time = timeGranularity(picker.granularity)
-    // Half a date and time counts here, so the calendar and the time can fill the other half.
-    return time
-      ? dateTimeScheme({
-          locale: picker.locale,
-          monthFormat,
-          hourCycle: picker.hourCycle,
-          granularity: time,
-          min: picker.min,
-          max: picker.max,
-          partial: true,
-        })
-      : dateScheme({
-          locale: picker.locale,
-          monthFormat,
-          granularity: dateGranularity(picker.granularity),
-          min: picker.min,
-          max: picker.max,
-        })
-  }, [
-    picker.locale,
-    monthFormat,
-    picker.hourCycle,
-    picker.granularity,
-    picker.min,
-    picker.max,
-  ])
-  // A range's end can't come before its start.
-  const endMin = range ? latest(picker.min, picker.drafts[0]) : picker.min
-  const endScheme = useMemo(
-    () =>
-      dateScheme({
-        locale: picker.locale,
-        monthFormat,
-        min: endMin,
-        max: picker.max,
-      }),
-    [picker.locale, monthFormat, endMin, picker.max],
-  )
-  const [startUnavailable, endUnavailable] = picker.drafts.map((draft) => {
-    const day = splitDateTime(draft).date
-    return day !== null && matchesDate(day, picker.unavailable)
-  })
-  const halfIn = !range && picker.drafts[0] !== null && picker.value === null
-  const problem = range
-    ? rangeProblem(picker.drafts, picker)
-    : startUnavailable
-      ? 'unavailable'
-      : halfIn
-        ? 'incompleteDateTime'
-        : null
-  const wrongLength = problem === 'tooShort' || problem === 'tooLong'
-  const shared = {
-    disabled: picker.disabled,
-    readOnly: picker.readOnly,
-    required: picker.required,
-    form: picker.form,
+  const { state, locale, labels, setBox } = useDatePicker('DatePickerInput')
+  const range = state.mode === 'range'
+  const hint = placeholder ?? datePlaceholder(locale)
+  const endNameId = useId()
+  // The end isn't the Field's control, so it takes the Field's naming itself:
+  // its name, then "End date", its description and error, and its invalid state.
+  const field = useField()
+  const fieldProps = (field?.props({}) ?? {}) as {
+    'aria-labelledby'?: string
+    'aria-describedby'?: string
+    'aria-invalid'?: 'true'
   }
-  // A range names each date after the field: "Trip, Start date".
-  const startNameId = `${ownId}-start`
-  const endNameId = `${ownId}-end`
-  const labelledBy = ariaLabelledBy ?? fieldLabel
-  const naming = (nameId: string) =>
-    ariaLabel
-      ? {
-          'aria-label': `${ariaLabel}, ${picker.labels[nameId === startNameId ? 'start' : 'end']}`,
-        }
-      : { 'aria-labelledby': [labelledBy, nameId].filter(Boolean).join(' ') }
-
-  const start = useSegments(startScheme, {
-    ...shared,
-    value: picker.drafts[0],
-    onValueChange: (date) => picker.type(0, date),
-    name: picker.names[0],
-    id,
-    invalid: startUnavailable || wrongLength,
-    // The start is the Field's control, so it fails the form's check for anything wrong with the range.
-    customError: problem ? picker.labels[problem] : '',
-    'aria-describedby': ariaDescribedBy,
-    ...(range
-      ? naming(startNameId)
-      : { 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy }),
-  })
+  const endNaming = {
+    ...(ariaLabel
+      ? { 'aria-label': `${ariaLabel}, ${labels.end}` }
+      : {
+          'aria-labelledby':
+            [ariaLabelledBy ?? fieldProps['aria-labelledby'], endNameId]
+              .filter(Boolean)
+              .join(' ') || undefined,
+        }),
+    'aria-describedby': props['aria-describedby'] ?? fieldProps['aria-describedby'],
+    'aria-invalid': state.invalid ? ('true' as const) : fieldProps['aria-invalid'],
+  }
 
   return (
     <div
-      ref={boxRef}
-      data-slot='date-picker-input'
+      ref={setBox}
+      data-date-picker-box=''
       data-range={range ? '' : undefined}
-      {...props}
-      {...(range
-        ? {
-            role: 'group',
-            'aria-label': ariaLabel,
-            'aria-labelledby': labelledBy,
-          }
-        : start.groupProps)}
-      onPointerDown={(event) => {
-        props.onPointerDown?.(event)
-        if (!event.defaultPrevented) focusControl(event)
-      }}
-      className={cn(
-        inputBoxClassName,
-        'h-(--control-height) cursor-text text-base md:text-sm',
-        segmentRowPadding,
-        className,
-      )}
+      onPointerDown={focusControl}
+      className={cn(inputBoxClassName, 'cursor-text', className)}
     >
-      {range ? (
+      <DatePickerInputPrimitive
+        placeholder={hint}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        className={cn(
+          inputControlClassName,
+          'tabular-nums',
+          range && [rangeDateClassName, 'pe-0 text-end placeholder:text-sm'],
+        )}
+        {...props}
+      />
+      {range && (
         <>
-          <span id={startNameId} hidden>
-            {picker.labels.start}
+          <span aria-hidden className='shrink-0 px-1 text-muted-foreground'>
+            –
           </span>
           <span id={endNameId} hidden>
-            {picker.labels.end}
+            {labels.end}
           </span>
-          {/* The end isn't the Field's control: the start is, so the label focuses it. */}
-          <OutsideField>
-            <RangeRow
-              start={start}
-              scheme={endScheme}
-              shared={shared}
-              naming={naming(endNameId)}
-              describedBy={
-                [ariaDescribedBy, fieldDescribedBy].filter(Boolean).join(' ') || undefined
-              }
-              invalid={fieldInvalid || endUnavailable || wrongLength}
-            />
-          </OutsideField>
+          <DatePickerInputPrimitive
+            end
+            placeholder={hint}
+            {...endNaming}
+            className={cn(
+              inputControlClassName,
+              rangeDateClassName,
+              'px-0 text-start tabular-nums placeholder:text-sm',
+            )}
+          />
         </>
-      ) : (
-        <SegmentRow
-          slot='date-picker'
-          compact={timeGranularity(picker.granularity) !== null}
-          fields={[{ key: 'value', parts: start.parts, hidden: start.hidden }]}
-        />
       )}
-      <span
-        data-slot='date-picker-end'
-        className='ms-auto flex shrink-0 items-center gap-0.5 ps-1 pe-1.5'
-      >
+      <span data-date-picker-end='' className='flex shrink-0 items-center gap-0.5 pe-1.5'>
         <InputInvalidIcon className='pe-1' />
         {children}
-        <DatePickerTrigger />
+        <BoxTrigger />
       </span>
     </div>
   )
 }
 
-/** A range's two dates in one row, with one highlight across both. */
-function RangeRow({
-  start,
-  scheme,
-  shared,
-  naming,
-  describedBy,
-  invalid,
-}: {
-  start: ReturnType<typeof useSegments>
-  scheme: ReturnType<typeof dateScheme>
-  shared: object
-  naming: object
-  describedBy: string | undefined
-  invalid: boolean
-}) {
-  const picker = useDatePicker('DatePickerInput')
-  const [segmentProps] = splitSegmentProps({
-    ...shared,
-    value: picker.drafts[1],
-    onValueChange: (date: string | null) => picker.type(1, date),
-    name: picker.names[1],
-    'aria-describedby': describedBy,
-    invalid,
-    ...naming,
-  })
-  const end = useSegments(scheme, segmentProps)
-  return (
-    <SegmentRow
-      slot='date-picker'
-      between='–'
-      compact
-      fields={[
-        {
-          key: 'start',
-          parts: start.parts,
-          groupProps: start.groupProps,
-          hidden: start.hidden,
-        },
-        {
-          key: 'end',
-          parts: end.parts,
-          groupProps: end.groupProps,
-          hidden: end.hidden,
-        },
-      ]}
-    />
-  )
-}
-
 /**
- * A button that shows the date in words and opens the calendar, for a date
- * picked rather than typed. Children show when no date is picked.
+ * A button that writes the date in words and opens the calendar, for a
+ * date picked rather than typed. Children show while no date is picked.
  */
-function DatePickerButton({
+function DatePickerTrigger({
   className,
   children,
   format,
+  'aria-label': ariaLabel,
+  ref,
   ...props
-}: Omit<ComponentProps<typeof PopoverTrigger>, 'className' | 'children'> & {
+}: Omit<ComponentProps<typeof DatePickerTriggerPrimitive>, 'className' | 'children'> & {
   className?: string
   /** Shown while no date is picked, such as "Pick a date". */
   children?: ReactNode
-  /** How the value is written, as `Intl.DateTimeFormat` takes it. As the locale writes it by default: 14 Nov 2026, November 2026. */
+  /** How the value is written, as `Intl.DateTimeFormat` takes it: 14 Nov 2026 by default, and 2–8 Nov 2026 for a range. */
   format?: Omit<Intl.DateTimeFormatOptions, 'timeZone'>
 }) {
-  const picker = useDatePicker('DatePickerButton')
-  const { setAnchor } = picker
-  const written = writtenValue(picker.value, picker.locale, format, picker.hourCycle)
+  const picker = useDatePicker('DatePickerTrigger')
+  // Without a box, the button is where the popup hangs from and whose motion setting it follows.
+  const own = useMemo(() => mergeRefs(ref, picker.setBox), [ref, picker.setBox])
+  const { value } = picker.state
+  const style = format ?? { dateStyle: 'medium' }
+  const written =
+    value === null
+      ? null
+      : typeof value === 'string'
+        ? formatDate(value, picker.locale, style)
+        : formatDateRange(value[0], value[1], picker.locale, style)
   return (
-    <PopoverTrigger
-      data-date-picker-button=''
+    <DatePickerTriggerPrimitive
+      ref={own}
+      data-date-picker-trigger=''
       data-placeholder={written ? undefined : ''}
-      ref={setAnchor}
-      disabled={picker.disabled || picker.readOnly}
-      render={
+      // Named by what it shows, the date or its children, as a button's text names it:
+      // the label given here, even none, replaces ui-sdk's "Choose date".
+      render={(own: ComponentProps<typeof Button>) => (
         <Button
+          {...own}
+          aria-label={ariaLabel}
           variant='outline'
           className={cn(
             'justify-start font-normal tabular-nums data-placeholder:text-muted-foreground',
             className,
           )}
         />
-      }
+      )}
       {...props}
     >
-      {/* The icon stays put in the button's start slot; only the date changes, crossfading in place. */}
       <span data-icon='inline-start' className='flex'>
         <PickerIcon />
       </span>
       {written ?? children}
-    </PopoverTrigger>
+    </DatePickerTriggerPrimitive>
   )
 }
 
-/** Clears the date, or both of a range's; shown once there is something to clear. */
+/** Clears the date, or a range's; shown once there is something to clear. Focus goes back to the field. */
 function DatePickerClear({
   className,
-  onClick,
   ...props
-}: Omit<ComponentProps<typeof InputGroupButton>, 'children'>) {
+}: Omit<ComponentProps<typeof DatePickerClearPrimitive>, 'className' | 'children'> & {
+  className?: string
+}) {
   const picker = useDatePicker('DatePickerClear')
-  const filled = picker.drafts.some((date) => date !== null)
-  const shown = filled && !picker.disabled && !picker.readOnly
   return (
-    <span data-shown={shown ? '' : undefined} className={cn(inputGroupPresence, 'flex')}>
-      <InputGroupButton
-        data-date-picker-clear=''
-        size='icon-xs'
-        aria-label={picker.labels.clear}
-        className={cn('text-muted-foreground', className)}
-        onClick={(event, details) => {
-          onClick?.(event, details)
-          if (event.defaultPrevented) return
-          picker.pick(null)
-          // The button leaves with the date: focus goes back to the field's first segment.
-          event.currentTarget
-            .closest('[data-slot=date-picker-input]')
-            ?.querySelector<HTMLElement>('[role=spinbutton]')
-            ?.focus()
-        }}
-        {...props}
-      >
-        <IconPlaceholder
-          lucide='XIcon'
-          tabler='IconX'
-          hugeicons='Cancel01Icon'
-          phosphor='XIcon'
-          remixicon='RiCloseLine'
-          aria-hidden
-        />
-      </InputGroupButton>
-    </span>
+    <DatePickerClearPrimitive
+      data-date-picker-clear=''
+      aria-label={picker.labels.clear}
+      render={(clearProps, state) => (
+        <span
+          data-shown={state.empty || state.disabled ? undefined : ''}
+          className={cn(inputGroupPresence, 'flex')}
+        >
+          <InputGroupButton
+            {...(clearProps as ComponentProps<typeof InputGroupButton>)}
+            size='icon-xs'
+            className={cn('text-muted-foreground', className)}
+          />
+        </span>
+      )}
+      {...props}
+    >
+      <IconPlaceholder
+        lucide='XIcon'
+        tabler='IconX'
+        hugeicons='Cancel01Icon'
+        phosphor='XIcon'
+        remixicon='RiCloseLine'
+        aria-hidden
+      />
+    </DatePickerClearPrimitive>
   )
 }
 
 /**
- * The popover the calendar opens in, from the field's start. Focus goes to
- * the picked day, or today, ready for the arrow keys, and back to the button
- * once it closes. Its children sit side by side: presets, then the calendar.
+ * The popover the calendar opens in, from the field's start, on the
+ * Popover's look. Focus goes to the picked day, or today, ready for the
+ * arrow keys, and back to the field once it closes. Without children it
+ * holds the Calendar's months; children sit side by side, such as presets
+ * and then the Calendar's `CalendarMonths`.
  */
 function DatePickerContent({
   className,
   children,
+  showWeekNumbers = false,
+  dayContent,
+  labels,
   ref,
   ...props
-}: Omit<ComponentProps<typeof PopoverContent>, 'anchor'> & {
-  ref?: Ref<HTMLDivElement>
+}: Omit<ComponentProps<typeof DatePickerContentPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+  /** Shows each week's number before its days. */
+  showWeekNumbers?: boolean
+  /** What each day shows, under its full date, which a screen reader hears first. */
+  dayContent?: DayContent
+  /** The Calendar's own words, as the Calendar's `labels` takes them. */
+  labels?: Partial<CalendarLabels>
 }) {
   const picker = useDatePicker('DatePickerContent')
+  const content = usePopoverContent(ref)
+  const look: CalendarLook = {
+    ...picker.look,
+    labels: { ...CALENDAR_LABELS, ...labels },
+    showWeekNumbers,
+    dayContent,
+  }
   return (
-    <PopoverContent
-      ref={ref}
-      anchor={picker.anchor}
+    <DatePickerContentPrimitive
+      {...content.props}
+      side='bottom'
       align='start'
-      aria-label={props['aria-label'] ?? picker.labels.open}
-      initialFocus='[data-slot=calendar-day][tabindex="0"], [data-slot=calendar-choice][tabindex="0"]'
-      className={cn(
-        'w-auto flex-row flex-wrap items-start max-sm:justify-center',
-        className,
-      )}
+      anchor={picker.box ?? undefined}
       {...props}
     >
-      {/* The field's Field holds the value; what picks it in here isn't its control. */}
-      <OutsideField>{children}</OutsideField>
-    </PopoverContent>
+      {({ presentation }) => (
+        <PopoverBox
+          presentation={presentation}
+          layer={content.layer}
+          className={cn(
+            'w-auto flex-row flex-wrap items-start gap-(--surface-gap) max-sm:justify-center',
+            className,
+          )}
+        >
+          <CalendarLookContext value={look}>
+            {children ?? <CalendarMonths className='w-auto' />}
+          </CalendarLookContext>
+        </PopoverBox>
+      )}
+    </DatePickerContentPrimitive>
   )
 }
 
-/**
- * The Calendar, holding the picker's date: it shows its month, its `min`,
- * `max`, `unavailable` and language, and a pick sets the field. Other props
- * go to the Calendar, such as `months={2}` for a range. To the month or the
- * year, it picks one of twelve; with a time, the Time input sits under it.
- */
-function DatePickerCalendar(
-  props: Omit<
-    CalendarDayProps,
-    | 'mode'
-    | 'value'
-    | 'defaultValue'
-    | 'onValueChange'
-    | 'name'
-    | 'form'
-    | 'required'
-    | 'granularity'
-  >,
-) {
-  const picker = useDatePicker('DatePickerCalendar')
-  // Two months side by side don't fit a phone's width: it shows one.
-  const roomy = useRoomy()
-  const date = dateGranularity(picker.granularity)
-  const timeUnit = timeGranularity(picker.granularity)
-  const shown = splitDateTime(picker.drafts[0] ?? picker.drafts[1]).date
-  const common = {
-    min: picker.min,
-    max: picker.max,
-    locale: picker.locale,
-    disabled: picker.disabled,
-    readOnly: picker.readOnly,
-  }
-  if (date !== 'day') {
-    return (
-      <Calendar
-        {...common}
-        className={props.className}
-        labels={props.labels}
-        today={props.today}
-        timeZone={props.timeZone}
-        granularity={date}
-        value={typeof picker.value === 'string' ? picker.value : null}
-        onValueChange={(value) => picker.pick(value)}
-      />
-    )
-  }
-  const day = {
-    ...common,
-    unavailable: picker.unavailable,
-    defaultMonth: shown ? monthOf(shown) : undefined,
-    ...props,
-    months: roomy ? props.months : 1,
-  }
-  if (picker.mode === 'range') {
-    return (
-      <Calendar
-        minDays={picker.minDays}
-        maxDays={picker.maxDays}
-        {...day}
-        mode='range'
-        value={isRange(picker.value) ? picker.value : null}
-        onValueChange={(value) => picker.pick(value)}
-      />
-    )
-  }
-  if (!timeUnit) {
-    return (
-      <Calendar
-        {...day}
-        value={typeof picker.value === 'string' ? picker.value : null}
-        onValueChange={(value) => picker.pick(value)}
-      />
-    )
-  }
-  return <DateTimeCalendar day={day} granularity={timeUnit} />
-}
+/** The pill's copy of the presets: inside it, a preset is only its label. */
+const PresetCopyContext = createContext(false)
 
-/** The calendar and, under it, the time: each fills its half of the value, and a day picked without a time moves on to the time. */
-function DateTimeCalendar({
-  day,
-  granularity,
-}: {
-  day: Omit<CalendarDayProps, 'mode' | 'value' | 'defaultValue' | 'onValueChange'>
-  granularity: 'hour' | 'minute' | 'second'
-}) {
-  const picker = useDatePicker('DatePickerCalendar')
-  const { date, time } = splitDateTime(picker.drafts[0])
-  const labelId = useId()
-  const timeRef = useRef<HTMLDivElement>(null)
-  const calendarRef = useRef<HTMLDivElement>(null)
+const PRESET = '[data-date-picker-preset]'
+
+const presetLayout = cn(
+  pillItemLayout,
+  'h-auto min-h-[calc(var(--control-height)_-_6px)] justify-start py-1.5 text-start whitespace-normal',
+)
+
+/**
+ * A column of presets beside the calendar, such as Today or Last 7 days,
+ * drawn as a vertical Segmented control: the pill slides to the one the
+ * value matches. On a phone, where they don't fit beside the calendar, they
+ * sit above it as wide as it.
+ */
+function DatePickerPresets({
+  className,
+  children,
+  'aria-label': ariaLabel = 'Presets',
+  ...props
+}: ComponentProps<'div'>) {
+  const areaRef = useRef<HTMLDivElement>(null)
+  const areaRefs = useMemo(() => mergeRefs(areaRef, markMounted), [])
+  const pillRef = useRef<HTMLSpanElement>(null)
+  const backdropRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const area = areaRef.current
+    if (!area || !pillRef.current || !backdropRef.current) return
+    const stopPick = followPick(area, pillRef.current, {
+      picked: () => area.querySelector<HTMLElement>(`${PRESET}[data-selected]`),
+      attributes: ['data-selected'],
+    })
+    const stopHover = followPointer(area, backdropRef.current, {
+      itemOf: itemMatching(area, PRESET),
+      focus: true,
+    })
+    return () => {
+      stopPick()
+      stopHover()
+    }
+  }, [])
   return (
-    <div data-slot='date-picker-date-time' className='flex flex-col gap-(--surface-gap)'>
-      <Calendar
-        {...day}
-        ref={calendarRef}
-        value={date}
-        onValueChange={(next) => {
-          // Clearing the day keeps the time; the field clears both.
-          if (next === null) return picker.type(0, joinDateTime(null, time))
-          picker.pick(joinDateTime(next, time))
-          if (time === null)
-            timeRef.current?.querySelector<HTMLElement>('[role=spinbutton]')?.focus()
-        }}
-      />
+    <div
+      role='group'
+      aria-label={ariaLabel}
+      data-date-picker-presets=''
+      className={cn(pillTrackClassName, 'w-fit max-w-full max-sm:w-full', className)}
+      {...props}
+    >
       <div
-        data-slot='date-picker-time'
-        className='flex items-center gap-2 border-t pt-(--surface-gap)'
+        ref={areaRefs}
+        className={cn('relative isolate flex flex-col', pillRowClassName)}
       >
-        <span id={labelId} className='text-sm text-muted-foreground'>
-          {picker.labels.time}
-        </span>
-        <TimeInput
-          ref={timeRef}
-          aria-labelledby={labelId}
-          locale={picker.locale}
-          hourCycle={picker.hourCycle}
-          granularity={granularity}
-          disabled={picker.disabled}
-          readOnly={picker.readOnly}
-          value={time}
-          // Enter takes the time as a day's Enter takes the day: it closes once both are
-          // in, and goes up to the calendar while the day is missing.
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter' || time === null) return
-            event.preventDefault()
-            if (picker.value !== null) picker.setOpen(false)
-            else
-              calendarRef.current
-                ?.querySelector<HTMLElement>('[data-slot=calendar-day][tabindex="0"]')
-                ?.focus()
-          }}
-          onValueChange={(next) => {
-            const joined = joinDateTime(date, next)
-            // The time that makes the value whole closes the calendar, as a day picked
-            // after its time does; one stepped once it is whole leaves it open.
-            if (picker.value === null) picker.pick(joined)
-            else picker.type(0, joined)
-          }}
-          className='flex-1'
+        {children}
+        <span
+          ref={backdropRef}
+          aria-hidden
+          className={cn(highlightClassName, pillBackdropClassName)}
         />
+        <span
+          ref={pillRef}
+          aria-hidden
+          inert
+          className={cn(pickClassName, pillClassName, 'z-10')}
+        >
+          <span className={cn('flex flex-col', pillRowClassName)}>
+            <PresetCopyContext value>{children}</PresetCopyContext>
+          </span>
+        </span>
       </div>
     </div>
   )
 }
 
-/** A column of presets beside the calendar, such as Today or Last 7 days, marking the one the date matches. */
-function DatePickerPresets({
-  className,
-  'aria-label': ariaLabel = 'Presets',
-  ...props
-}: Omit<
-  ComponentProps<typeof SegmentedControl<string>>,
-  'value' | 'defaultValue' | 'onValueChange' | 'orientation'
->) {
-  const picker = useDatePicker('DatePickerPresets')
-  return (
-    <SegmentedControl<string>
-      data-date-picker-presets=''
-      aria-label={ariaLabel}
-      orientation='vertical'
-      disabled={picker.disabled || picker.readOnly}
-      value={valueKey(picker.value) || null}
-      onValueChange={(key) => picker.pick(key ? fromKey(key) : null)}
-      // On a phone, where they don't fit beside the calendar, they sit above it as wide as it.
-      className={cn('max-sm:w-full', className)}
-      {...props}
-    />
-  )
-}
-
-/** One preset: a day, or a range as `[start, end]`. */
+/** One preset, ui-sdk's: a press sets its day, or its range as `[start, end]`, and closes the calendar. */
 function DatePickerPreset({
-  value,
-  onClick,
+  className,
+  children,
   ...props
-}: Omit<ComponentProps<typeof SegmentedControlItem>, 'value'> & {
-  value: string | DateRange
+}: Omit<ComponentProps<typeof DatePickerPresetPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
 }) {
-  const picker = useDatePicker('DatePickerPreset')
-  const key = valueKey(value)
+  if (use(PresetCopyContext)) {
+    return <span className={cn(presetLayout, className)}>{children}</span>
+  }
   return (
-    <SegmentedControlItem
+    <DatePickerPresetPrimitive
       data-date-picker-preset=''
-      value={key}
-      // Pressed again, it still sets the date and closes the calendar.
-      onClick={(event) => {
-        onClick?.(event)
-        if (!event.defaultPrevented && key === valueKey(picker.value)) picker.pick(value)
-      }}
+      className={cn(
+        presetLayout,
+        pillItemClassName,
+        // Until the page runs and the pill is placed, the pick draws itself.
+        '[[data-date-picker-presets]_div:not([data-mounted])>&]:data-[selected]:bg-primary [[data-date-picker-presets]_div:not([data-mounted])>&]:data-[selected]:text-primary-foreground',
+        className,
+      )}
       {...props}
-    />
+    >
+      {children}
+    </DatePickerPresetPrimitive>
   )
 }
 
@@ -918,102 +648,13 @@ function PickerIcon() {
   )
 }
 
-function isRange(value: DatePickerValue): value is DateRange {
-  return typeof value === 'object' && value !== null
-}
-
-/** The fields' dates for a value: a day in the first, a range's ends in both. */
-function draftsOf(value: DatePickerValue): Drafts {
-  if (value === null) return [null, null]
-  if (typeof value === 'string') return [value, null]
-  return [value[0], value[1]]
-}
-
-/** What the fields add up to: the value, a date and time once both halves are in, or the range once both ends are in, in order. */
-function pickerValue(
-  mode: 'single' | 'range',
-  [start, end]: Drafts,
-  granularity: Granularity = 'day',
-): DatePickerValue {
-  if (mode === 'single') {
-    if (timeGranularity(granularity)) return isISODateTime(start) ? start : null
-    return start
-  }
-  return start !== null && end !== null && start <= end ? [start, end] : null
-}
-
-/** A value as one string, to compare and to key a preset: `2026-11-27`, or `2026-11-02/2026-11-08` for a range. */
-function valueKey(value: DatePickerValue): string {
-  if (value === null) return ''
-  return typeof value === 'string' ? value : `${value[0]}/${value[1]}`
-}
-
-function fromKey(key: string): DatePickerValue {
-  if (!key) return null
-  const [start, end] = key.split('/')
-  return end ? [start, end] : start
-}
-
-type RangeProblem = 'incomplete' | 'backwards' | 'unavailable' | 'tooShort' | 'tooLong'
-
-/** What is wrong with a range as typed, if anything: an end missing, the ends the wrong way round, an end that can't be picked, or too few or too many days. */
-function rangeProblem(
-  [start, end]: Drafts,
-  rules: { unavailable?: DateMatchers; minDays?: number; maxDays?: number },
-): RangeProblem | null {
-  if (start === null && end === null) return null
-  if (start === null || end === null) return 'incomplete'
-  if (start > end) return 'backwards'
-  if (matchesDate(start, rules.unavailable) || matchesDate(end, rules.unavailable))
-    return 'unavailable'
-  const days = rangeLength([start, end])
-  if (rules.minDays !== undefined && days < rules.minDays) return 'tooShort'
-  if (rules.maxDays !== undefined && days > rules.maxDays) return 'tooLong'
-  return null
-}
-
-/** The later of two dates, either of which can be missing. */
-function latest(a: string | null | undefined, b: string | null | undefined) {
-  if (!a) return b ?? undefined
-  if (!b) return a
-  return a > b ? a : b
-}
-
-/**
- * The value in words: 27 Nov 2026, November 2026, 27 Nov 2026, 09:30, or
- * 2–8 Nov 2026 for a range. With `format`, written that way: a month or a
- * year as its first day.
- */
-function writtenValue(
-  value: DatePickerValue,
-  locale: string,
-  format?: Omit<Intl.DateTimeFormatOptions, 'timeZone'>,
-  hourCycle?: HourCycle,
-): string | null {
-  if (value === null) return null
-  if (typeof value !== 'string')
-    return formatDateRange(value[0], value[1], locale, format ?? { dateStyle: 'medium' })
-  if (!format) return formatValue(value, locale, hourCycle)
-  const at = isISODate(value) || isISODateTime(value) ? value : dateSpan(value)?.[0]
-  return at ? formatDate(at, locale, format) : null
-}
-
 export {
   DatePicker,
-  DatePickerButton,
-  DatePickerCalendar,
   DatePickerClear,
   DatePickerContent,
   DatePickerInput,
   DatePickerPreset,
   DatePickerPresets,
   DatePickerTrigger,
-  draftsOf,
-  fromKey,
-  latest,
-  pickerValue,
-  rangeProblem,
-  valueKey,
-  writtenValue,
 }
-export type { DatePickerLabels, DatePickerProps }
+export type { DatePickerChangeDetails, DatePickerLabels, DatePickerProps }

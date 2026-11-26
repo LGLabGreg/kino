@@ -34,6 +34,7 @@ import {
   type ComponentProps,
   createContext,
   type ReactNode,
+  type Ref,
   use,
   useMemo,
   useRef,
@@ -65,16 +66,11 @@ function Popover({
   ...props
 }: ComponentProps<typeof PopoverPrimitive>) {
   const [trigger, setTrigger] = useState<HTMLElement | null>(null)
-  const reduced = useSyncExternalStore(
-    watchReducedMotion,
-    () => reducesMotion(trigger),
-    () => false,
-  )
   return (
     <TriggerContext value={setTrigger}>
       <PopoverPrimitive
         delay={delay}
-        presentation={popoverPresentation(presentation, reduced)}
+        presentation={usePopoverPresentation(presentation, trigger)}
         {...props}
       />
     </TriggerContext>
@@ -100,6 +96,55 @@ const popoverFooterClassName = cn(
   '[--popover-footer-safe:0px] [--popover-footer-y:--spacing(2)] [--popover-footer:transparent] data-[presentation=sheet]:[--popover-footer-safe:env(safe-area-inset-bottom)] data-[presentation=sheet]:[--popover-footer-y:var(--surface-padding)] data-[presentation=sheet]:[--popover-footer:var(--panel-footer)]',
 )
 
+/** What every popup on Popover's look puts on ui-sdk's content: placed, and as a sheet, as wide as the screen up to 40rem. */
+const popoverContentClassName = cn(
+  popupPlacedClassName,
+  panelSheetBackdropClassName,
+  // The browser's own popover look, which ui-sdk resets for its Popover but not for every popup on this look, such as the Date picker's.
+  'overflow-visible border-0 bg-transparent p-0 text-inherit',
+  'flex max-h-(--available-height) max-w-(--available-width) flex-col text-sm data-[presentation=sheet]:max-h-[calc(100dvh-(--spacing(12)))] data-[presentation=sheet]:w-full data-[presentation=sheet]:max-w-160 data-[presentation=sheet]:self-center',
+  popoverFooterClassName,
+)
+
+/**
+ * The box inside ui-sdk's content, and what's in it: it grows out from under
+ * its trigger and folds back into it, or as a sheet, it has a handle. For a
+ * popup of ui-sdk's on the Popover's look, such as the Date picker's, as a
+ * function of its content's state.
+ */
+function PopoverBox({
+  presentation,
+  layer,
+  className,
+  children,
+}: {
+  presentation: 'popover' | 'sheet'
+  /** The popup's own layer, from `useOwnPopupLayer`, which popups opened inside it open in. */
+  layer: HTMLElement | null
+  className?: string
+  children?: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        'flex min-h-0 flex-1 flex-col',
+        presentation === 'sheet'
+          ? cn(panelSheetClassName, 'pb-[env(safe-area-inset-bottom)]')
+          : cn(
+              'relative rounded-(--surface-radius)',
+              popupSurfaceClassName,
+              popupGrowBoxClassName,
+            ),
+      )}
+    >
+      {presentation === 'sheet' ? <PanelHandle /> : null}
+      <PopoverScroller sheet={presentation === 'sheet'} className={className}>
+        <PopupLayerContext value={layer}>{children}</PopupLayerContext>
+      </PopoverScroller>
+    </div>
+  )
+}
+
 /**
  * The box and what's in it. It grows out from under its trigger and folds
  * back into it; as a sheet, it is as wide as the screen up to 40rem.
@@ -120,43 +165,24 @@ function PopoverContent({
   className?: string
   children?: ReactNode
 }) {
-  const [layer, setLayer] = useOwnPopupLayer(!inline)
-  const own = useMemo(() => mergeRefs(ref, setLayer), [ref, setLayer])
+  const content = usePopoverContent(ref, !inline)
   return (
     <PopoverContentPrimitive
-      ref={own}
+      {...content.props}
       side={side}
       align={align}
       sideOffset={sideOffset}
-      collisionPadding={POPUP_COLLISION_PADDING}
-      arrowPadding={0}
       inline={inline}
-      className={cn(
-        popupPlacedClassName,
-        panelSheetBackdropClassName,
-        'flex max-h-(--available-height) max-w-(--available-width) flex-col text-sm data-[presentation=sheet]:max-h-[calc(100dvh-(--spacing(12)))] data-[presentation=sheet]:w-full data-[presentation=sheet]:max-w-160 data-[presentation=sheet]:self-center',
-        popoverFooterClassName,
-      )}
       {...props}
     >
       {({ presentation }) => (
-        <div
-          className={cn(
-            'flex min-h-0 flex-1 flex-col',
-            presentation === 'sheet'
-              ? cn(panelSheetClassName, 'pb-[env(safe-area-inset-bottom)]')
-              : cn(
-                  'relative rounded-(--surface-radius)',
-                  popupSurfaceClassName,
-                  popupGrowBoxClassName,
-                ),
-          )}
+        <PopoverBox
+          presentation={presentation}
+          layer={content.layer}
+          className={className}
         >
-          {presentation === 'sheet' ? <PanelHandle /> : null}
-          <PopoverScroller sheet={presentation === 'sheet'} className={className}>
-            <PopupLayerContext value={layer}>{children}</PopupLayerContext>
-          </PopoverScroller>
-        </div>
+          {children}
+        </PopoverBox>
       )}
     </PopoverContentPrimitive>
   )
@@ -321,9 +347,43 @@ function popoverPresentation(
   return presentation === 'auto' && reduced ? 'popover' : presentation
 }
 
+/** The presentation a popup on the Popover's look takes, with motion reduced or not around `element`, its trigger. */
+function usePopoverPresentation(
+  presentation: PopoverPresentation,
+  element: HTMLElement | null,
+): PopoverPresentation {
+  const reduced = useSyncExternalStore(
+    watchReducedMotion,
+    () => reducesMotion(element),
+    () => false,
+  )
+  return popoverPresentation(presentation, reduced)
+}
+
+/**
+ * What a popup on the Popover's look puts on ui-sdk's content part: its ref,
+ * which gives it a layer of its own for what opens inside it (`layer`), its
+ * offset and padding from the screen's edges, and its class.
+ */
+function usePopoverContent(ref: Ref<HTMLDivElement> | undefined, ownLayer = true) {
+  const [layer, setLayer] = useOwnPopupLayer(ownLayer)
+  const own = useMemo(() => mergeRefs(ref, setLayer), [ref, setLayer])
+  return {
+    layer,
+    props: {
+      ref: own,
+      sideOffset: 6,
+      collisionPadding: POPUP_COLLISION_PADDING,
+      arrowPadding: 0,
+      className: popoverContentClassName,
+    },
+  }
+}
+
 export {
   Popover,
   PopoverBody,
+  PopoverBox,
   PopoverClose,
   PopoverContent,
   PopoverDescription,
@@ -332,5 +392,7 @@ export {
   PopoverTitle,
   PopoverTrigger,
   popoverPresentation,
+  usePopoverContent,
+  usePopoverPresentation,
 }
 export type { PopoverOpenChangeDetails }

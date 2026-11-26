@@ -1,47 +1,107 @@
 'use client'
 
-import {
-  focusControl,
-  InputInvalidIcon,
-  inputBoxClassName,
-} from '@/registry/components/kino/input'
+import { InputInvalidIcon, inputBoxClassName } from '@/registry/components/kino/input'
+import { dayPeriodNames } from '@/registry/lib/dates'
 import { followFocus, highlightClassName } from '@/registry/lib/highlight'
 import { Roll } from '@/registry/lib/roll'
 import { revealInRow } from '@/registry/lib/scroll'
-import {
-  type Segment,
-  type SegmentFieldPart,
-  type SegmentsComponentProps,
-  splitSegmentProps,
-  useSegments,
-} from '@/registry/lib/segment-field'
-import type { SegmentScheme } from '@/registry/lib/segments'
-import { type CSSProperties, Fragment, type ReactNode, useEffect, useRef } from 'react'
+import type { DateInputSegment, DateInputSegmentData } from '@ui-sdk/react/date-input'
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * The box a value typed a segment at a time is drawn in, for the Date input
- * and the Time input alike: one highlight marks the segment you are in and
- * glides to the next, and each number rolls up or down to its new value,
- * however it changed. What the segments hold comes from the scheme.
+ * How the Date input and the Time input draw ui-sdk's segments: one
+ * highlight marks the segment you are in and glides to the next, and each
+ * number rolls up or down to its new value, however it changed. ui-sdk
+ * holds the segments, the keys and the value; this is only their look.
  */
+
+/** ui-sdk's segment part: the Date input's or the Time input's. */
+type SegmentPart = (props: ComponentProps<typeof DateInputSegment>) => ReactNode
 
 const segmentClassName =
   'relative inline-grid h-(--control-height-xs) min-w-6 place-items-center px-(--segment-padding,0.375rem) tabular-nums'
 
+/** What a segment can show at its widest, so typing never moves what follows. */
+function segmentSizes(segment: DateInputSegmentData, locale: string): string[] {
+  if (segment.type === 'dayPeriod') return dayPeriodNames(locale)
+  return ['0'.repeat(String(segment.max).length)]
+}
+
+type Trend = 1 | -1
+
+/**
+ * Which way each segment's number rolls after a change; a segment that
+ * didn't change keeps its last way. Several that change together roll the
+ * way the whole value went (`whole`), as an odometer's wheels do: 11:45 to
+ * 12:00 rolls the minutes up too. One stepped by a key rolls the key's way
+ * (`step`), past its end too: 23 up to 00 rolls up. Otherwise a number rolls
+ * up as it rises and down as it falls, with an empty segment counted as 0.
+ */
+function segmentTrends(
+  from: Record<string, number | null>,
+  to: Record<string, number | null>,
+  last: Record<string, Trend>,
+  { whole, step }: { whole: Trend | null; step: Trend | null },
+): Record<string, Trend> {
+  const changed = Object.keys(to).filter((key) => (from[key] ?? null) !== to[key])
+  const trends = { ...last }
+  for (const key of changed) {
+    const own: Trend = (to[key] ?? 0) >= (from[key] ?? 0) ? 1 : -1
+    trends[key] =
+      changed.length > 1 ? (whole ?? own) : changed.length === 1 ? (step ?? own) : own
+  }
+  return trends
+}
+
+/** Which way a whole value went: later is 1. ISO dates and times sort as text in the order of time. */
+function valueTrend(from: string | null, to: string | null): Trend | null {
+  if (from === null || to === null || from === to) return null
+  return to > from ? 1 : -1
+}
+
+const LATIN_LETTER: Record<string, string> = { day: 'd', month: 'm', year: 'y' }
+
+/**
+ * What an empty segment shows: a date's segment repeats the first letter of
+ * its name in the locale, lower case (tt.mm.jjjj in German), or the Latin
+ * letter in a script without capitals; a time's segment shows dashes.
+ */
+function segmentPlaceholder(type: string, locale: string): string {
+  const latin = LATIN_LETTER[type]
+  if (!latin) return '––'
+  let letter = latin
+  try {
+    const name = new Intl.DisplayNames(locale, { type: 'dateTimeField' }).of(type)
+    const code = name?.codePointAt(0)
+    const first = code === undefined ? undefined : String.fromCodePoint(code)
+    if (first && first.toLocaleUpperCase(locale) !== first.toLocaleLowerCase(locale)) {
+      letter = first.toLocaleLowerCase(locale)
+    }
+  } catch {
+    // An engine without dateTimeField names keeps the Latin letters.
+  }
+  return letter.repeat(type === 'year' ? 4 : 2)
+}
+
+/** A segment's face: its placeholder until it holds a number, which rolls in. */
 function SegmentFace({
   segment,
+  locale,
+  trend,
   placeholderClassName,
 }: {
-  segment: Segment
+  segment: DateInputSegmentData
+  locale: string
+  trend: Trend
   placeholderClassName: string
 }) {
-  const { text, placeholder, sizes, trend } = segment
+  const placeholder = segmentPlaceholder(segment.type, locale)
   return (
     <>
-      {/* As wide as the widest it can show, so typing never moves what follows. Its characters stand apart, split as the roll splits them into columns, so a name's width matches theirs without kerning. */}
-      {sizes.map((size) => (
+      {/* Its characters stand apart, split as the roll splits them into columns, so a name's width matches theirs without kerning. */}
+      {[...segmentSizes(segment, locale), placeholder].map((size) => (
         <span key={size} aria-hidden className='invisible col-start-1 row-start-1 flex'>
           {size.split('').map((char, index) => (
             // oxlint-disable-next-line react/no-array-index-key -- a name's characters keep their places.
@@ -55,78 +115,104 @@ function SegmentFace({
           'absolute inset-0 flex items-center justify-center whitespace-nowrap',
           placeholderClassName,
           // Gone before the first digit has rolled in; back once the number has mostly rolled away.
-          text
+          segment.text
             ? 'opacity-0 transition-opacity duration-[calc(var(--motion-exit-duration)*0.4)] ease-(--motion-exit-easing)'
             : 'transition-opacity delay-[calc(var(--motion-exit-duration)*0.8)] duration-(--motion-enter-duration) ease-(--motion-enter-easing)',
         )}
       >
         {placeholder}
       </span>
-      <Roll value={text} trend={trend} typed className='col-start-1 row-start-1' />
+      <Roll
+        value={segment.text}
+        trend={trend}
+        typed
+        className='col-start-1 row-start-1'
+      />
     </>
   )
 }
 
-function SegmentBox({
-  segment,
-  slot,
-  style,
-}: {
-  segment: Segment
-  slot: string
-  style: CSSProperties | undefined
-}) {
-  return (
-    <span
-      data-slot={`${slot}-segment`}
-      data-type={segment.type}
-      style={style}
-      className={cn(
-        segmentClassName,
-        'rounded-(--control-radius-xs) has-[input:read-only]:text-muted-foreground',
-      )}
-    >
-      <SegmentFace segment={segment} placeholderClassName='text-muted-foreground' />
-      <input
-        {...segment.inputProps}
-        className='absolute inset-0 size-full cursor-text rounded-[inherit] bg-transparent text-center text-transparent forced-color-adjust-none caret-transparent selection:bg-transparent focus-visible:outline-hidden'
-      />
-    </span>
-  )
-}
-
-/** One field's segments in a row: its parts, the props of the group around them, and what it renders once (its names, its form input). */
-interface SegmentRowField {
-  key: string
-  parts: SegmentFieldPart[]
-  /** On the group that holds this field's segments, when the row holds several fields; with one field, the box takes them. */
-  groupProps?: object
-  hidden: ReactNode
+/** Which way `locale`'s text runs: `rtl` for Hebrew and Arabic. */
+function localeDirection(locale: string): 'ltr' | 'rtl' {
+  try {
+    const info = new Intl.Locale(locale) as Intl.Locale & {
+      getTextInfo?: () => { direction?: string }
+      textInfo?: { direction?: string }
+    }
+    return (info.getTextInfo?.() ?? info.textInfo)?.direction === 'rtl' ? 'rtl' : 'ltr'
+  } catch {
+    return 'ltr'
+  }
 }
 
 /**
- * The segments of one field or several, such as a range's start and end,
- * in one row with one highlight: it glides from segment to segment, and from
- * one field's last segment on to the next field's first.
+ * The segments in the order the row shows them, left to right. A
+ * right-to-left language writes AM or PM after the time, which shows on its
+ * left (م ٢:٣٠ in Arabic), so it and the space before it come first: the
+ * arrow keys and Tab then move the way the row reads on screen.
+ */
+function segmentsOnScreen<Segment extends { type: string }>(
+  segments: readonly Segment[],
+  rtl: boolean,
+): Segment[] {
+  const last = segments.at(-1)
+  if (!rtl || last?.type !== 'dayPeriod') return [...segments]
+  const gap = segments.at(-2)?.type === 'literal' ? 1 : 0
+  const time = segments.slice(0, segments.length - 1 - gap)
+  return [last, ...segments.slice(time.length, segments.length - 1), ...time]
+}
+
+const STEP_KEYS: Record<string, Trend> = {
+  ArrowUp: 1,
+  PageUp: 1,
+  ArrowDown: -1,
+  PageDown: -1,
+}
+
+/**
+ * A field's segments in a row with one highlight, which glides from segment
+ * to segment. `compact` segments are tighter, and a row too long for its box
+ * scrolls, with its edges fading, and focus brings each segment into view,
+ * as text does in a text field.
  */
 function SegmentRow({
-  slot,
-  fields,
-  between,
+  segments,
+  Segment,
+  value,
+  locale,
   compact,
 }: {
-  /** The component's `data-slot`, which its segments and highlight take as a prefix. */
-  slot: string
-  fields: SegmentRowField[]
-  /** Shown between two fields, such as an en dash between a range's ends. */
-  between?: ReactNode
-  /**
-   * Tighter segments, for two fields that share a box. A row too long for
-   * its box scrolls, with its edges fading, and focus brings each segment
-   * into view, as text does in a text field.
-   */
+  segments: DateInputSegmentData[]
+  Segment: SegmentPart
+  /** The whole value, as ui-sdk's state holds it. */
+  value: string | null
+  locale: string
   compact?: boolean
 }) {
+  const numbers = Object.fromEntries(
+    segments.map((segment) => [segment.key, segment.value]),
+  )
+  // The last step key pressed, which a change in the same press reads; any other key clears it.
+  const [step, setStep] = useState<Trend | null>(null)
+  const [seen, setSeen] = useState({
+    numbers,
+    value,
+    trends: {} as Record<string, Trend>,
+  })
+  let trends = seen.trends
+  if (segments.some((segment) => seen.numbers[segment.key] !== segment.value)) {
+    trends = segmentTrends(seen.numbers, numbers, seen.trends, {
+      whole: valueTrend(seen.value, value),
+      step,
+    })
+    setSeen({ numbers, value, trends })
+    if (step !== null) setStep(null)
+  } else if (seen.value !== value) setSeen({ ...seen, value })
+  const trendOf = (segment: DateInputSegmentData) => trends[segment.key] ?? 1
+  const shown = segmentsOnScreen(segments, localeDirection(locale) === 'rtl')
+  const onKeyDownCapture = (event: { key: string }) =>
+    setStep(STEP_KEYS[event.key] ?? null)
+
   const scrollerRef = useRef<HTMLDivElement>(null)
   const rowRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLSpanElement>(null)
@@ -134,7 +220,7 @@ function SegmentRow({
   useEffect(() => {
     const scroller = scrollerRef.current
     if (!scroller || !compact) return
-    return revealInRow(scroller, { item: '[data-type]', fade: '--segment-row-fade' })
+    return revealInRow(scroller, { item: '[data-segment]', fade: '--segment-row-fade' })
   }, [compact])
 
   useEffect(() => {
@@ -142,89 +228,74 @@ function SegmentRow({
     if (!row || !layerRef.current) return
     return followFocus(row, layerRef.current, (node) => {
       const segment =
-        node instanceof Element ? node.closest<HTMLElement>('[data-type]') : null
+        node instanceof Element ? node.closest<HTMLElement>('[data-segment]') : null
       return segment && row.contains(segment) ? segment : null
     })
   }, [])
 
-  // The real row and the highlight's copy of it are laid out alike, so the copy lines up under the window the highlight cuts.
-  const row = (copy: boolean) =>
-    fields.map((field, index) => {
-      const places = screenPlaces(field.parts)
-      const parts = field.parts.map((part, at) =>
-        part.type === 'literal' ? (
-          // oxlint-disable-next-line react/no-array-index-key -- separators keep their place in the locale's order.
+  const content = (
+    <>
+      {shown.map((segment) =>
+        segment.editable ? (
           <span
-            key={at}
-            aria-hidden={copy ? undefined : true}
-            style={places[at]}
-            // Pre, so a separator's space (the one after the comma in 27/11/2026, 14:30) keeps its width.
-            className={
-              copy
-                ? 'whitespace-pre text-primary-foreground forced-colors:text-[HighlightText]'
-                : 'whitespace-pre text-muted-foreground'
-            }
+            key={segment.key}
+            data-segment={segment.type}
+            className={cn(
+              segmentClassName,
+              'rounded-(--control-radius-xs) has-[input:read-only]:text-muted-foreground',
+            )}
           >
-            {part.text}
-          </span>
-        ) : copy ? (
-          <span key={part.type} style={places[at]} className={segmentClassName}>
             <SegmentFace
-              segment={part}
-              placeholderClassName='text-primary-foreground forced-colors:text-[HighlightText]'
+              segment={segment}
+              locale={locale}
+              trend={trendOf(segment)}
+              placeholderClassName='text-muted-foreground'
+            />
+            <Segment
+              segment={segment}
+              className='absolute inset-0 size-full cursor-text rounded-[inherit] bg-transparent text-center text-transparent forced-color-adjust-none caret-transparent selection:bg-transparent placeholder:text-transparent focus-visible:outline-hidden'
             />
           </span>
         ) : (
-          <SegmentBox key={part.type} segment={part} slot={slot} style={places[at]} />
+          // Pre, so a separator's space (the one after the comma in 27/11/2026, 14:30) keeps its width.
+          <Segment
+            key={segment.key}
+            segment={segment}
+            className='whitespace-pre text-muted-foreground'
+          />
         ),
-      )
-      return (
-        <Fragment key={field.key}>
-          {index > 0 ? (
-            <span
-              aria-hidden={copy ? undefined : true}
-              className={cn(
-                'flex shrink-0 items-center px-0.5',
-                copy
-                  ? 'text-primary-foreground forced-colors:text-[HighlightText]'
-                  : 'text-muted-foreground',
-              )}
-            >
-              {between}
-            </span>
-          ) : null}
-          {field.groupProps || fields.length > 1 ? (
-            <span
-              {...(copy ? undefined : field.groupProps)}
-              className='relative flex shrink-0 items-center'
-            >
-              {parts}
-              {copy ? null : field.hidden}
-            </span>
-          ) : (
-            <>
-              {parts}
-              {copy ? null : field.hidden}
-            </>
-          )}
-        </Fragment>
-      )
-    })
-
-  const content = (
-    <>
-      {row(false)}
+      )}
       {/* The highlight carries a copy of the row in its own colours, so what it covers reads at full contrast as it glides. */}
       <span
         ref={layerRef}
         aria-hidden
-        data-slot={`${slot}-highlight`}
+        data-segment-highlight=''
         className={cn(
           highlightClassName,
           'flex items-center bg-primary text-primary-foreground forced-color-adjust-none forced-colors:bg-[Highlight] forced-colors:text-[HighlightText]',
         )}
       >
-        {row(true)}
+        {shown.map((segment) =>
+          segment.editable ? (
+            <span key={segment.key} className={segmentClassName}>
+              <SegmentFace
+                segment={segment}
+                locale={locale}
+                trend={trendOf(segment)}
+                placeholderClassName='text-primary-foreground forced-colors:text-[HighlightText]'
+              />
+            </span>
+          ) : (
+            <span
+              key={segment.key}
+              className={cn(
+                'whitespace-pre text-primary-foreground forced-colors:text-[HighlightText]',
+              )}
+            >
+              {segment.text}
+            </span>
+          ),
+        )}
       </span>
     </>
   )
@@ -237,12 +308,21 @@ function SegmentRow({
       dir='ltr'
       className='scrollbar-none flex min-w-0 overflow-x-auto [--segment-padding:0.25rem] [mask-image:linear-gradient(to_right,transparent,black_var(--segment-row-fade-left,0px),black_calc(100%-var(--segment-row-fade-right,0px)),transparent)]'
     >
-      <div ref={rowRef} className='relative flex w-max shrink-0 items-center'>
+      <div
+        ref={rowRef}
+        onKeyDownCapture={onKeyDownCapture}
+        className='relative flex w-max shrink-0 items-center'
+      >
         {content}
       </div>
     </div>
   ) : (
-    <div ref={rowRef} dir='ltr' className='relative flex min-w-0 items-center'>
+    <div
+      ref={rowRef}
+      dir='ltr'
+      onKeyDownCapture={onKeyDownCapture}
+      className='relative flex min-w-0 items-center'
+    >
       {content}
     </div>
   )
@@ -251,60 +331,34 @@ function SegmentRow({
 /** The segments' own padding makes up the rest of the control's, so their digits line up with other fields' text. */
 const segmentRowPadding = 'ps-[calc(var(--control-padding)-0.375rem)]'
 
-function SegmentedInput({
-  scheme,
-  slot,
-  compact,
-  className,
-  ref,
-  onPointerDown,
-  ...props
-}: SegmentsComponentProps & {
-  scheme: SegmentScheme
-  /** The component's `data-slot`, which its segments and highlight take as a prefix. */
-  slot: string
-  /** Tighter segments that scroll in a box too narrow for them, for a long value such as a date and its time. */
-  compact?: boolean
-}) {
-  const [segmentProps, rest] = splitSegmentProps(props)
-  const { parts, groupProps, hidden } = useSegments(scheme, segmentProps)
+/**
+ * The box ui-sdk's segmented root is drawn as: what its `className` takes,
+ * with its row inside and the invalid mark at its end. ui-sdk puts focus in
+ * the nearest segment on a press outside them.
+ */
+const segmentedBoxClassName = cn(
+  inputBoxClassName,
+  'h-(--control-height) cursor-text text-base md:text-sm',
+  // The box is the control a Field marks invalid, so it reads its own state as well as its segments'.
+  'aria-invalid:border-destructive aria-invalid:has-focus-visible:border-destructive aria-invalid:has-focus-visible:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-offset-1 forced-colors:aria-invalid:outline-dashed dark:aria-invalid:border-destructive/70 dark:aria-invalid:has-focus-visible:ring-destructive/40',
+  segmentRowPadding,
+)
 
+/** What goes inside the root: the row, then the invalid mark. */
+function SegmentedBody(props: ComponentProps<typeof SegmentRow>) {
   return (
-    <div
-      ref={ref}
-      data-slot={slot}
-      {...rest}
-      {...groupProps}
-      onPointerDown={(event) => {
-        onPointerDown?.(event)
-        if (!event.defaultPrevented) focusControl(event)
-      }}
-      className={cn(
-        inputBoxClassName,
-        'h-(--control-height) cursor-text text-base md:text-sm',
-        segmentRowPadding,
-        className,
-      )}
-    >
-      <SegmentRow
-        slot={slot}
-        compact={compact}
-        fields={[{ key: 'value', parts, hidden }]}
-      />
+    <>
+      <SegmentRow {...props} />
       <InputInvalidIcon className='ms-auto' />
-    </div>
+    </>
   )
 }
 
-/**
- * Where each piece shows in the row: the pieces that lead (a right-to-left
- * language's AM or PM and the space before it) come first, the last of them
- * leftmost, while the DOM keeps the order typing, Tab and screen readers go.
- */
-function screenPlaces(parts: SegmentFieldPart[]): (CSSProperties | undefined)[] {
-  let leading = 0
-  return parts.map((part) => (part.lead ? { order: -++leading } : undefined))
+export {
+  segmentedBoxClassName,
+  SegmentedBody,
+  segmentsOnScreen,
+  segmentPlaceholder,
+  segmentTrends,
+  valueTrend,
 }
-
-export { SegmentedInput, SegmentRow, segmentRowPadding }
-export type { SegmentRowField }

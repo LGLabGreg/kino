@@ -1,3 +1,4 @@
+import * as plain from '@ui-sdk/core/date'
 import { useSyncExternalStore } from 'react'
 
 /*
@@ -22,45 +23,31 @@ export interface DateFields {
 
 export const EMPTY_DATE: DateFields = { year: null, month: null, day: null }
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const ISO_MONTH = /^(\d{4})-(\d{2})$/
 
 const pad = (value: number, length: number) => String(value).padStart(length, '0')
 
 /** How many days `month` (1 to 12) has, in a leap year when the year isn't known yet. */
 export function daysInMonth(month: number, year: number | null): number {
-  if (month === 2) {
-    const leap =
-      year === null || (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0))
-    return leap ? 29 : 28
-  }
-  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31
+  // 2000 was a leap year.
+  return plain.daysInMonth(year ?? 2000, month)
 }
 
 /** The date as `yyyy-mm-dd`, or null until every part holds a day that exists, from year 1 to 9999. */
 export function toISODate(fields: DateFields): string | null {
   const { year, month, day } = fields
   if (year === null || month === null || day === null) return null
-  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1) return null
-  if (day > daysInMonth(month, year)) return null
-  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`
+  return plain.isoDate(year, month, day) ?? null
 }
 
 /** The parts of a `yyyy-mm-dd` date, or all empty when it isn't a day that exists. */
 export function fromISODate(value: string | null | undefined): DateFields {
-  const match = value ? ISO_DATE.exec(value) : null
-  if (!match) return EMPTY_DATE
-  const fields = {
-    year: Number(match[1]),
-    month: Number(match[2]),
-    day: Number(match[3]),
-  }
-  return toISODate(fields) === value ? fields : EMPTY_DATE
+  return plain.dateParts(value) ?? EMPTY_DATE
 }
 
 /** Whether `value` is a `yyyy-mm-dd` day that exists. */
 export function isISODate(value: unknown): value is string {
-  return typeof value === 'string' && fromISODate(value).year !== null
+  return plain.isISODate(value)
 }
 
 /** Whether `value` is a `yyyy-mm` month, from 0001-01 to 9999-12. */
@@ -75,56 +62,24 @@ export function isISOMonth(value: unknown): value is string {
   )
 }
 
-/*
- * Days are counted from 1 January of year 1, in whole days. `Date.UTC` reads
- * years 0 to 99 as 1900 to 1999, so the epoch is built with `setUTCFullYear`.
- */
-const DAY_MS = 86_400_000
-const EPOCH = (() => {
-  const date = new Date(0)
-  date.setUTCFullYear(1, 0, 1)
-  date.setUTCHours(0, 0, 0, 0)
-  return date.getTime()
-})()
-
-function dayCount(date: string): number {
-  const { year, month, day } = fromISODate(date)
-  if (year === null || month === null || day === null) {
-    throw new RangeError(`Not a yyyy-mm-dd date: ${date}`)
-  }
-  const at = new Date(0)
-  at.setUTCFullYear(year, month - 1, day)
-  at.setUTCHours(0, 0, 0, 0)
-  return Math.round((at.getTime() - EPOCH) / DAY_MS)
-}
-
-const FIRST_DAY = 0
-const LAST_DAY = dayCount('9999-12-31')
-
-function fromDayCount(count: number): string {
-  const at = new Date(EPOCH + Math.min(Math.max(count, FIRST_DAY), LAST_DAY) * DAY_MS)
-  return `${pad(at.getUTCFullYear(), 4)}-${pad(at.getUTCMonth() + 1, 2)}-${pad(at.getUTCDate(), 2)}`
-}
-
 /** The date `count` days after `date` (before, when negative), held between years 1 and 9999. */
-export function addDays(date: string, count: number): string {
-  return fromDayCount(dayCount(date) + count)
+export function addDays(value: string, count: number): string {
+  return plain.addDays(value, count)
 }
 
 /** How many days from `from` to `to`: 1 for the next day, -1 for the day before. */
 export function daysBetween(from: string, to: string): number {
-  return dayCount(to) - dayCount(from)
+  return plain.daysBetween(from, to)
 }
 
 /** Its day of the week. */
-export function weekday(date: string): Weekday {
-  // 1 January of year 1 was a Monday.
-  return ((((dayCount(date) + 1) % 7) + 7) % 7) as Weekday
+export function weekday(value: string): Weekday {
+  return plain.weekday(value) as Weekday
 }
 
 /** The month a date is in, as `yyyy-mm`. */
-export function monthOf(date: string): string {
-  return date.slice(0, 7)
+export function monthOf(value: string): string {
+  return value.slice(0, 7)
 }
 
 /** A `yyyy-mm` month as its year and its number, 1 to 12. */
@@ -135,12 +90,7 @@ export function monthParts(month: string): { year: number; month: number } {
 
 /** The month `count` months after `month` (before, when negative), held between 0001-01 and 9999-12. */
 export function shiftMonth(month: string, count: number): string {
-  const parts = monthParts(month)
-  const index = Math.min(
-    Math.max(parts.year * 12 + parts.month - 1 + count, 12),
-    9999 * 12 + 11,
-  )
-  return `${pad(Math.floor(index / 12), 4)}-${pad((index % 12) + 1, 2)}`
+  return monthOf(plain.addMonths(firstOfMonth(month), count))
 }
 
 /** How many months from `from` to `to`, both `yyyy-mm`: 1 for the next month. */
@@ -151,17 +101,13 @@ export function monthsBetween(from: string, to: string): number {
 }
 
 /** The same day `count` months on, or that month's last day when it is shorter: 31 January and a month is 28 or 29 February. */
-export function addMonths(date: string, count: number): string {
-  const { day } = fromISODate(date)
-  if (day === null) throw new RangeError(`Not a yyyy-mm-dd date: ${date}`)
-  const parts = monthParts(shiftMonth(monthOf(date), count))
-  const last = daysInMonth(parts.month, parts.year)
-  return `${pad(parts.year, 4)}-${pad(parts.month, 2)}-${pad(Math.min(day, last), 2)}`
+export function addMonths(value: string, count: number): string {
+  return plain.addMonths(value, count)
 }
 
 /** The same day `count` years on; 29 February becomes 28 February outside a leap year. */
-export function addYears(date: string, count: number): string {
-  return addMonths(date, count * 12)
+export function addYears(value: string, count: number): string {
+  return plain.addYears(value, count)
 }
 
 /** The first day of a `yyyy-mm` month. */
@@ -172,18 +118,17 @@ export function firstOfMonth(month: string): string {
 
 /** The last day of a `yyyy-mm` month: 28 February 2026, 29 February 2028. */
 export function lastOfMonth(month: string): string {
-  const { year, month: number } = monthParts(month)
-  return `${month}-${pad(daysInMonth(number, year), 2)}`
+  return plain.endOfMonth(firstOfMonth(month))
 }
 
 /** The first day of the week `date` is in, for weeks that start on `first`. */
-export function startOfWeek(date: string, first: Weekday): string {
-  return addDays(date, -((weekday(date) - first + 7) % 7))
+export function startOfWeek(value: string, first: Weekday): string {
+  return plain.startOfWeek(value, first)
 }
 
 /** The last day of the week `date` is in, for weeks that start on `first`. */
-export function endOfWeek(date: string, first: Weekday): string {
-  return addDays(startOfWeek(date, first), 6)
+export function endOfWeek(value: string, first: Weekday): string {
+  return plain.endOfWeek(value, first)
 }
 
 /**
@@ -192,10 +137,10 @@ export function endOfWeek(date: string, first: Weekday): string {
  * year's first Thursday. Any other week is numbered as in the United States:
  * week 1 holds 1 January.
  */
-export function weekOfYear(date: string, first: Weekday): number {
+export function weekOfYear(value: string, first: Weekday): number {
   // How many of a week's days must fall in a year for it to be that year's.
   const fewest = first === 1 ? 4 : 1
-  const start = startOfWeek(date, first)
+  const start = startOfWeek(value, first)
   const year = fromISODate(addDays(start, 7 - fewest)).year ?? 1
   const opening = startOfWeek(`${pad(year, 4)}-01-01`, first)
   const firstWeek =
@@ -215,24 +160,16 @@ export function monthGrid(
   first: Weekday,
   { fixedWeeks = false }: { fixedWeeks?: boolean } = {},
 ): string[][] {
-  const start = startOfWeek(`${month}-01`, first)
-  const { year, month: number } = monthParts(month)
-  const end = endOfWeek(`${month}-${pad(daysInMonth(number, year), 2)}`, first)
-  const weeks = fixedWeeks ? 6 : (daysBetween(start, end) + 1) / 7
-  return Array.from({ length: weeks }, (_, week) =>
-    Array.from({ length: 7 }, (_, day) => addDays(start, week * 7 + day)),
-  )
+  return plain.monthGrid(firstOfMonth(month), { weekStartsOn: first, fixedWeeks })
 }
 
 /** The date moved inside `min` and `max`, either of which may be missing. */
 export function clampDate(
-  date: string,
+  value: string,
   min?: string | null,
   max?: string | null,
 ): string {
-  if (min && date < min) return min
-  if (max && date > max) return max
-  return date
+  return plain.clampDate(value, min, max)
 }
 
 const zoneFormats = new Map<string, Intl.DateTimeFormat>()
@@ -304,6 +241,20 @@ export function browserLocale(): string {
 
 /** The browser's locale never changes while the page is open. */
 const noChange = () => () => {}
+
+/** Today in `timeZone`; null while the server renders, which can't know the visitor's day. */
+export function useToday(timeZone?: string): string | null {
+  return useSyncExternalStore(
+    noChange,
+    () => today(timeZone),
+    () => null,
+  )
+}
+
+/** How the locale writes an empty date to type, such as `DD/MM/YYYY` or `MM/DD/YYYY`. */
+export function datePlaceholder(locale?: string): string {
+  return plain.datePattern(locale).placeholder
+}
 
 /**
  * The locale a field uses: the one given, else the browser's. The server
@@ -394,7 +345,11 @@ function instant(value: string): number {
   if (date === null) throw new RangeError(`Not a date: ${value}`)
   const parts = time === null ? null : timeParts(time)
   const seconds = parts ? parts.hours * 3600 + parts.minutes * 60 + parts.seconds : 0
-  return EPOCH + dayCount(date) * DAY_MS + seconds * 1000
+  const { year, month, day } = fromISODate(date)
+  // `Date.UTC` reads years 0 to 99 as 1900 to 1999.
+  const at = new Date(0)
+  at.setUTCFullYear(year ?? 1, (month ?? 1) - 1, day ?? 1)
+  return at.getTime() + seconds * 1000
 }
 
 /**

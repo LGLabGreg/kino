@@ -1,44 +1,49 @@
 'use client'
 
-import { type HourCycle, type TimeGranularity, useLocale } from '@/registry/lib/dates'
-import type { SegmentsComponentProps } from '@/registry/lib/segment-field'
-import { SegmentedInput } from '@/registry/lib/segmented-input'
-import { timeScheme } from '@/registry/lib/segments'
-import { useMemo } from 'react'
+import { useLocale } from '@/registry/lib/dates'
+import { SegmentedBody, segmentedBoxClassName } from '@/registry/lib/segmented-input'
+import {
+  TimeInput as TimeInputPrimitive,
+  TimeInputSegment,
+} from '@ui-sdk/react/time-input'
+import type { ComponentProps } from 'react'
+
+import { cn } from '@/lib/utils'
 
 /*
- * A time typed a segment at a time, on the locale's clock. It looks and
- * moves as the Date input does: one highlight marks the segment you are in
- * and glides to the next, and each number rolls up or down to its new value.
+ * ui-sdk's Time input: a time typed a segment at a time, on the locale's
+ * clock. It looks and moves as the Date input does: one highlight marks the
+ * segment you are in and glides to the next, and each number rolls up or
+ * down to its new value.
  */
-
-interface TimeInputOwnProps {
-  /** Sets the clock, the segments' order and the names of AM and PM. The browser's language by default. */
-  locale?: string
-  /** A 12-hour clock with AM and PM, or a 24-hour one. The locale's by default. */
-  hourCycle?: HourCycle
-  /** The smallest unit shown: `hour` leaves out the minutes (its value is `HH:00`), and `second` adds a seconds segment. */
-  granularity?: TimeGranularity
-  /** The earliest time allowed, as `HH:mm`. A `min` later than `max` runs over midnight. */
-  min?: string
-  /** The latest time allowed, as `HH:mm`. */
-  max?: string
-}
-
 function TimeInput({
   locale,
-  hourCycle,
-  granularity,
-  min,
-  max,
+  className,
   ...props
-}: SegmentsComponentProps<TimeInputOwnProps>) {
+}: Omit<ComponentProps<typeof TimeInputPrimitive>, 'className' | 'children'> & {
+  className?: string
+}) {
   const resolved = useLocale(locale)
-  const scheme = useMemo(
-    () => timeScheme({ locale: resolved, hourCycle, granularity, min, max }),
-    [resolved, hourCycle, granularity, min, max],
+  return (
+    <TimeInputPrimitive
+      locale={resolved}
+      className={cn(segmentedBoxClassName, className)}
+      // A group's disabled state, which ui-sdk shows only on its segments, so its label reads as inactive too.
+      render={(own: ComponentProps<'div'>, state: { disabled: boolean }) => (
+        <div {...own} aria-disabled={state.disabled || undefined} />
+      )}
+      {...props}
+    >
+      {(state) => (
+        <SegmentedBody
+          segments={state.segments}
+          value={state.value}
+          Segment={TimeInputSegment}
+          locale={resolved}
+        />
+      )}
+    </TimeInputPrimitive>
   )
-  return <SegmentedInput slot='time-input' scheme={scheme} {...props} />
 }
 
 export { TimeInput }
