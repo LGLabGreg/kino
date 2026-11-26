@@ -77,7 +77,8 @@ function SettingsChannel({
         ) : null}
         <Switch checked={on} onCheckedChange={setOn} className='[grid-area:control]' />
       </Field>
-      <Collapsible open={on}>
+      {/* The switch opens it, so an agent turns that on, as a person does. */}
+      <Collapsible open={on} disabled role='group' aria-labelledby={labelId}>
         <CollapsiblePanel keepMounted className='p-0'>
           <div className='flex min-w-0 flex-col divide-y border-t'>{children}</div>
         </CollapsiblePanel>

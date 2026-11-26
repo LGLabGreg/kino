@@ -252,6 +252,8 @@ function SearchField({
               size='icon-xs'
               aria-label='Clear search'
               tabIndex={-1}
+              // An agent clears the field with the field's own `clear`, so an empty state's Clear search names one control.
+              data-agent-hidden
               // Pressing it leaves focus in the field, so a phone's keyboard stays up.
               onPointerDown={(event: PointerEvent) => event.preventDefault()}
               // ui-sdk's clear, so the change reaches `onValueChange` as a `clear-press`.

@@ -534,13 +534,17 @@ function TableHead({
     width: number | undefined,
     details: ChangeDetails<ColumnResizeReason>,
   ) => void
-  /** The handle's name: “Resize” and the label by default. */
+  /** The handle’s name: “Resize”, the label and “column” by default, so no column’s name sits inside another’s, as Customer’s would in Customer since. */
   resizeLabel?: string
 }) {
   // In the body, a row's header reads as a cell of its row.
   const inBody = use(InBodyContext)
   const sorted = sort === 'ascending' || sort === 'descending'
   const resizable = onWidthChange !== undefined && !inBody
+  // With a sort button or a resize handle in it, the column is named by its
+  // label alone, never by what those say they do.
+  const labelId = useId()
+  const ownName = onSort !== undefined || resizable
   return (
     <th
       data-slot='table-head'
@@ -548,6 +552,7 @@ function TableHead({
       data-resizable={resizable ? '' : undefined}
       // Only the column that sorts first is named as sorted.
       aria-sort={sorted && (sortIndex ?? 1) === 1 ? sort : undefined}
+      aria-labelledby={ownName ? labelId : undefined}
       style={
         width === undefined
           ? style
@@ -563,6 +568,11 @@ function TableHead({
       )}
       {...props}
     >
+      {ownName ? (
+        <span id={labelId} hidden>
+          {children}
+        </span>
+      ) : null}
       {onSort ? (
         <TableSortButton
           sort={sort ?? 'none'}
@@ -589,7 +599,7 @@ function TableHead({
         <TableResizeHandle
           label={
             resizeLabel ??
-            (typeof children === 'string' ? `Resize ${children}` : 'Resize column')
+            (typeof children === 'string' ? `Resize ${children} column` : 'Resize column')
           }
           name={typeof children === 'string' ? children : 'Column'}
           width={width}
@@ -710,7 +720,8 @@ function TableSortButton({
           onClick={(event) => onSort({ shiftKey: event.shiftKey })}
         >
           {numeric ? arrow : null}
-          {children}
+          {/* Says what a press does, and names it apart from a filter on the same column. */}
+          <span className='sr-only'>Sort by</span> {children}
           {/* `aria-sort` names only the column sorted first; a later one says its place itself. */}
           {sortIndex !== undefined && sortIndex > 1 && sorted ? (
             <span className='sr-only'>

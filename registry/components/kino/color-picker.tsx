@@ -842,6 +842,7 @@ function ColorPickerPalette({
   return (
     <Collapsible
       open={custom}
+      role='group'
       aria-label='Custom colour controls'
       // Custom and the presets open and close it, so an agent can't either.
       disabled

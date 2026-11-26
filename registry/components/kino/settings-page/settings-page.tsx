@@ -33,6 +33,7 @@ import { useControllable } from '@/registry/lib/controllable'
 import { revealBehavior, scrollerOf } from '@/registry/lib/scroll'
 import {
   Children,
+  cloneElement,
   type ComponentProps,
   createContext,
   isValidElement,
@@ -517,9 +518,12 @@ const rowLayouts: Record<SettingsRowLayout, string> = {
  * One setting: its label and description at the start, its control at the
  * end. It is a Field, so the label names the control, the description
  * describes it, and `name` is what Save sends. A control made of options,
- * such as a Segmented control, takes `group`: the label then names the
- * group, and each option keeps its own name.
+ * such as a Segmented control, takes `group`: the label then names that
+ * control, and each option keeps its own name.
  */
+/** What names and describes a group of options, which a row with `group` hands its control. */
+type GroupNameProps = { 'aria-labelledby'?: string; 'aria-describedby'?: string }
+
 function SettingsRow({
   name,
   label,
@@ -560,9 +564,6 @@ function SettingsRow({
         <FieldLabel className={labelClass}>{label}</FieldLabel>
       )}
       <div
-        role={group ? 'group' : undefined}
-        aria-labelledby={group ? labelId : undefined}
-        aria-describedby={group && description ? descriptionId : undefined}
         data-slot='settings-row-control'
         className={cn(
           'flex min-w-0 [grid-area:control]',
@@ -573,7 +574,13 @@ function SettingsRow({
               'items-center self-center *:max-w-full *:min-w-0 @md:justify-end',
         )}
       >
-        {children}
+        {group && isValidElement<GroupNameProps>(children)
+          ? // The row's label names the group itself, so a screen reader and an agent find it by it.
+            cloneElement(children, {
+              'aria-labelledby': labelId,
+              'aria-describedby': description ? descriptionId : undefined,
+            })
+          : children}
       </div>
       {description ? (
         <FieldDescription

@@ -248,7 +248,8 @@ function CodeBlock({
           <CopyButton
             value={active.code}
             size='icon-sm'
-            aria-label='Copy code'
+            // Named after its code, so a page of several blocks names each one apart.
+            aria-label={`Copy ${active.title ?? languageName(active.language)} code`}
             tooltipProps={tooltipProps}
             onClick={() => onCopy?.(active)}
             disabled={streaming}

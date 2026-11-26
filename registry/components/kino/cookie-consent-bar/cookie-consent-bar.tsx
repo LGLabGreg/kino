@@ -53,7 +53,8 @@ function CookieConsentBar<Id extends string>({
       {...props}
     >
       {/* Closed on the server and through hydration, so it opens onto the page once it knows to. */}
-      <Collapsible open={model.shown}>
+      {/* The page opens it and an answer closes it, so an agent answers, as a person does. */}
+      <Collapsible open={model.shown} disabled role='group' aria-labelledby={titleId}>
         <CollapsiblePanel className='p-0'>
           <section
             ref={surfaceRef}
@@ -96,7 +97,13 @@ function CookieConsentBar<Id extends string>({
                 </Button>
               </div>
             </div>
-            <Collapsible open={model.customising}>
+            {/* The Customise button opens it, so an agent presses that, as a person does. */}
+            <Collapsible
+              open={model.customising}
+              disabled
+              role='group'
+              aria-label='Cookie categories'
+            >
               <CollapsiblePanel className='p-0'>
                 <div
                   className={cn(

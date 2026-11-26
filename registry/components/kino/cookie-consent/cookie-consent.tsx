@@ -77,7 +77,13 @@ function CookieConsent<Id extends string>({
           description={description}
           policyHref={policyHref}
         />
-        <Collapsible open={model.customising}>
+        {/* The Customise button opens it, so an agent presses that, as a person does. */}
+        <Collapsible
+          open={model.customising}
+          disabled
+          role='group'
+          aria-label='Cookie categories'
+        >
           <CollapsiblePanel className='p-0'>
             <div
               ref={fades}

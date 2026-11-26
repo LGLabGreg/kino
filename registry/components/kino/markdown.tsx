@@ -149,9 +149,11 @@ function blockElement(block: MarkdownBlock, scope: Scope, tight = false): ReactN
       return tight ? (
         inlines(block.children, scope)
       ) : (
-        <p data-slot='markdown-paragraph' dir='auto'>
+        // A div with the paragraph's role, since what its words hold can open in place, such
+        // as a citation's card, whose blocks a <p> can't hold.
+        <div role='paragraph' data-slot='markdown-paragraph' dir='auto'>
           {inlines(block.children, scope)}
-        </p>
+        </div>
       )
     case 'heading': {
       const Heading =
@@ -318,7 +320,7 @@ const alignClassName = (align: MarkdownAlign) =>
 /** A task's box: a mark, not a control, since a reply can't be ticked. The item's text says which. */
 function TaskCheck({ checked }: { checked: boolean }) {
   return (
-    <span inert className='contents'>
+    <span inert data-agent-hidden className='contents'>
       <Checkbox checked={checked} readOnly className='mt-[calc((1lh-1rem)/2)]' />
     </span>
   )
