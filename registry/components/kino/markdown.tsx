@@ -289,7 +289,7 @@ function blockElement(block: MarkdownBlock, scope: Scope, tight = false): ReactN
       )
     }
     case 'rule':
-      return <Separator data-slot='markdown-rule' className='my-1' />
+      return <Separator data-markdown-rule='' className='my-1' />
     case 'html':
       return (
         <p data-slot='markdown-paragraph' dir='auto' className='whitespace-pre-wrap'>

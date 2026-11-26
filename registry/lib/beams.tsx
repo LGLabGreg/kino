@@ -3,8 +3,7 @@
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { FOLLOWS_TRANSITION, transitionTiming } from '@/registry/lib/resize'
 import { onScreen, type SceneSeen, useSeen } from '@/registry/lib/scene'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import {
   type ComponentProps,
   createContext,
@@ -246,17 +245,18 @@ function BeamSpot({
   style,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className' | 'style'> & {
   node: string
   className?: string
+  style?: CSSProperties
 }) {
   const layout = use(BeamLayoutContext)
   if (!layout) throw new Error('A BeamSpot goes inside a BeamField.')
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'beam-spot',
         style: { ...spotPlace(layout, node), ...style },
         className: cn(
           'absolute -translate-x-1/2 -translate-y-1/2 rtl:translate-x-1/2',
@@ -265,8 +265,8 @@ function BeamSpot({
       },
       props,
     ),
-    state: { slot: 'beam-spot' },
-  })
+    render,
+  )
 }
 
 /** Node `node`'s point, or a thrown error naming it, since a beam to nowhere is a mistake in the layout. */
@@ -315,7 +315,11 @@ function pulseDash(
   // Going forward, the front is the tail's far end, so the head sits that much further on.
   const ahead = way === 'forward' && part === 'head' ? PULSE_LENGTH - PULSE_HEAD : 0
   const [from, to] = way === 'forward' ? [PULSE_LENGTH, -1] : [-1, PULSE_LENGTH]
-  return { dash: `${length} 2`, from: round(from - ahead), to: round(to - ahead) }
+  return {
+    dash: `${length} 2`,
+    from: round(from - ahead),
+    to: round(to - ahead),
+  }
 }
 
 /** Where the beams are, from whether the field was off screen as the page showed it and whether it has been seen since. */

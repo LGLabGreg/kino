@@ -1,9 +1,8 @@
 'use client'
 
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -57,11 +56,16 @@ function useArrived(show: boolean | undefined) {
 }
 
 /** A long unbroken word breaks rather than run out of the box. */
-function EmptyTitle({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+function EmptyTitle({
+  className,
+  render,
+  ...props
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'empty-title',
         className: cn(
           'text-base leading-snug font-medium text-balance wrap-anywhere',
           className,
@@ -70,19 +74,19 @@ function EmptyTitle({ className, render, ...props }: useRender.ComponentProps<'d
       props,
     ),
     render,
-    state: { slot: 'empty-title' },
-  })
+  )
 }
 
 function EmptyDescription({
   className,
   render,
   ...props
-}: useRender.ComponentProps<'p'>) {
-  return useRender({
-    defaultTagName: 'p',
-    props: mergeProps<'p'>(
+}: Omit<PartProps<'p'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'p',
+    mergeProps(
       {
+        'data-slot': 'empty-description',
         className: cn(
           'text-muted-foreground *:[a]:hover:text-foreground text-sm text-pretty wrap-anywhere *:[a]:underline *:[a]:underline-offset-3',
           className,
@@ -91,8 +95,7 @@ function EmptyDescription({
       props,
     ),
     render,
-    state: { slot: 'empty-description' },
-  })
+  )
 }
 
 function Empty({
@@ -101,8 +104,9 @@ function Empty({
   show,
   render,
   ...props
-}: useRender.ComponentProps<'div'> &
-  VariantProps<typeof emptyVariants> & {
+}: Omit<PartProps<'div'>, 'className'> & { className?: string } & VariantProps<
+    typeof emptyVariants
+  > & {
     /**
      * Whether it shows. Given, it stays mounted while hidden and plays its
      * entrance when it comes back, such as when a list loses its last row or
@@ -112,23 +116,31 @@ function Empty({
     show?: boolean
   }) {
   const arrived = useArrived(show)
-  const element = useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
-      { className: cn(emptyVariants({ variant }), className) },
+  const element = renderElement(
+    'div',
+    mergeProps(
+      {
+        'data-slot': 'empty',
+        'data-arrived': arrived ? '' : undefined,
+        className: cn(emptyVariants({ variant }), className),
+      },
       props,
     ),
     render,
-    state: { slot: 'empty', arrived },
-  })
+  )
   return show === false ? null : element
 }
 
-function EmptyHeader({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+function EmptyHeader({
+  className,
+  render,
+  ...props
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'empty-header',
         className: cn(
           'flex w-full max-w-sm min-w-0 flex-col items-center gap-1.5 transition-[opacity,translate] [transition-delay:calc(var(--motion-exit-duration)*var(--empty-wait,0))] duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-arrived/empty:starting:opacity-0 motion-safe:group-data-arrived/empty:starting:translate-y-(--empty-rise,0.5rem)',
           className,
@@ -137,8 +149,7 @@ function EmptyHeader({ className, render, ...props }: useRender.ComponentProps<'
       props,
     ),
     render,
-    state: { slot: 'empty-header' },
-  })
+  )
 }
 
 /** An outlined row: a picture's place and two lines of text. */
@@ -194,11 +205,16 @@ function EmptyMedia({
   render,
   children,
   ...props
-}: useRender.ComponentProps<'div'> & VariantProps<typeof emptyMediaVariants>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+} & VariantProps<typeof emptyMediaVariants>) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'empty-media',
+        'data-variant': variant ?? 'default',
         className: cn(emptyMediaVariants({ variant }), className),
         'aria-hidden': true,
         children:
@@ -223,16 +239,20 @@ function EmptyMedia({
       props,
     ),
     render,
-    state: { slot: 'empty-media', variant: variant ?? 'default' },
-  })
+  )
 }
 
 /** The next step: one action, a second where there are two real paths, and a link. */
-function EmptyContent({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+function EmptyContent({
+  className,
+  render,
+  ...props
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'empty-content',
         className: cn(
           'flex w-full max-w-sm min-w-0 flex-wrap items-center justify-center gap-2 text-sm transition-[opacity,translate] [transition-delay:calc(var(--motion-exit-duration)*var(--empty-wait,0)+var(--motion-enter-duration)*0.15)] duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-arrived/empty:starting:opacity-0 motion-safe:group-data-arrived/empty:starting:translate-y-(--empty-rise,0.5rem)',
           className,
@@ -241,8 +261,7 @@ function EmptyContent({ className, render, ...props }: useRender.ComponentProps<
       props,
     ),
     render,
-    state: { slot: 'empty-content' },
-  })
+  )
 }
 
 export {

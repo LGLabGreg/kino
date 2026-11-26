@@ -9,8 +9,9 @@ import {
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps } from '@ui-sdk/react/primitive'
 import {
+  cloneElement,
   type ComponentProps,
   type ReactElement,
   type ReactNode,
@@ -23,6 +24,14 @@ type CopyStatus = 'idle' | 'copied' | 'failed'
 
 /** What goes on the clipboard: the text, or a function read at the press that returns it or a promise of it. */
 type CopyValue = string | (() => string | Promise<string>)
+
+/** The Copy button's element, or the one `render` gives, which takes its props and keeps its own. */
+function Rendered({
+  element,
+  ...props
+}: Record<string, unknown> & { element: ReactElement<Record<string, unknown>> }) {
+  return cloneElement(element, mergeProps(props, element.props))
+}
 
 /*
  * A Button that copies a value. Its icon rolls to a tick, its label changes to
@@ -122,33 +131,31 @@ function CopyButton({
   const result =
     status === 'copied' ? copiedLabel : status === 'failed' ? failedLabel : undefined
 
-  const button = useRender({
-    render: render ?? <Button />,
-    props: {
-      'data-copy-button': '',
-      'data-copied': status === 'copied' ? '' : undefined,
-      'data-failed': status === 'failed' ? '' : undefined,
-      // A rendered button keeps its own look unless one is asked for, as a
-      // Split button's action takes the group's.
-      ...(variant || !render ? { variant: variant ?? 'ghost' } : null),
-      ...(size ? { size } : null),
-      ...(waiting ? { loading: true } : null),
-      'aria-label': iconOnly ? name : ariaLabel,
-      // The copy shows its own wait, so the Button never goes pending on its promise.
-      onClick: (...args: Parameters<NonNullable<typeof onClick>>) => {
-        void copy(...args)
-      },
-      ...props,
-      children: iconOnly ? (
-        shownIcon
-      ) : (
-        <>
-          {shownIcon}
-          {result ?? children}
-        </>
-      ),
+  const buttonProps = {
+    'data-copy-button': '',
+    'data-copied': status === 'copied' ? '' : undefined,
+    'data-failed': status === 'failed' ? '' : undefined,
+    // A rendered button keeps its own look unless one is asked for, as a
+    // Split button's action takes the group's.
+    ...(variant || !render ? { variant: variant ?? 'ghost' } : null),
+    ...(size ? { size } : null),
+    ...(waiting ? { loading: true } : null),
+    'aria-label': iconOnly ? name : ariaLabel,
+    // The copy shows its own wait, so the Button never goes pending on its promise.
+    onClick: (...args: Parameters<NonNullable<typeof onClick>>) => {
+      void copy(...args)
     },
-  })
+    ...props,
+    children: iconOnly ? (
+      shownIcon
+    ) : (
+      <>
+        {shownIcon}
+        {result ?? children}
+      </>
+    ),
+  }
+  const button = <Rendered element={render ?? <Button />} {...buttonProps} />
 
   if (iconOnly) {
     return (

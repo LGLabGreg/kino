@@ -1,8 +1,7 @@
 'use client'
 
 import { SwapText, SwapTextStack } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { useState } from 'react'
 
@@ -90,7 +89,7 @@ function TextShimmer({
   children,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'span'>, 'className' | 'children'> &
+}: Omit<PartProps<'span'>, 'className' | 'children'> &
   VariantProps<typeof layerVariants> & {
     className?: string
     /** The status, such as "Thinking…". One line: it truncates, with the whole text as its `title`. */
@@ -103,11 +102,14 @@ function TextShimmer({
   const [pass, setPass] = useState({ text: children, second: false })
   if (loading && pass.text !== children) setPass({ text: children, second: !pass.second })
   const look = { variant: variant ?? 'sweep' }
-  return useRender({
-    defaultTagName: 'span',
-    render,
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'text-shimmer',
+        'data-variant': look.variant,
+        'data-loading': loading ? '' : undefined,
+        'data-pass': pass.second ? 'b' : 'a',
         className: cn(
           'group/text-shimmer relative inline-flex w-fit max-w-full min-w-0 overflow-x-clip align-bottom [--text-shimmer-dir:1] rtl:[--text-shimmer-dir:-1]',
           className,
@@ -131,13 +133,8 @@ function TextShimmer({
       },
       props,
     ),
-    state: {
-      slot: 'text-shimmer',
-      variant: look.variant,
-      loading,
-      pass: pass.second ? 'b' : 'a',
-    },
-  })
+    render,
+  )
 }
 
 export { TextShimmer }

@@ -6,8 +6,7 @@ import {
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
 import { transitionsSettled } from '@/registry/lib/resize'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -35,16 +34,19 @@ function Skeleton({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
-      { 'aria-hidden': true, className: cn(shapeClassName, className) },
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
+      {
+        'data-slot': 'skeleton',
+        'aria-hidden': true,
+        className: cn(shapeClassName, className),
+      },
       props,
     ),
-    state: { slot: 'skeleton' },
-  })
+    render,
+  )
 }
 
 /**
@@ -57,16 +59,16 @@ function SkeletonText({
   lines = 1,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'span'>, 'className'> & {
+}: Omit<PartProps<'span'>, 'className'> & {
   className?: string
   /** How many lines of text it stands in for. */
   lines?: number
 }) {
-  return useRender({
-    defaultTagName: 'span',
-    render,
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'skeleton-text',
         'aria-hidden': true,
         className: cn('flex max-w-full flex-col', className),
         children: Array.from({ length: lines }, (_, line) => (
@@ -84,8 +86,8 @@ function SkeletonText({
       },
       props,
     ),
-    state: { slot: 'skeleton-text' },
-  })
+    render,
+  )
 }
 
 /**
@@ -98,7 +100,7 @@ function SkeletonContent({
   placeholder,
   children,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className'> & {
   className?: string
   /** Whether the content is still loading. */
   loading: boolean
@@ -159,7 +161,7 @@ function SkeletonContentSide({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className'> & {
   className?: string
   sideRef: RefObject<HTMLDivElement | null> | undefined
   placeholder: boolean
@@ -167,12 +169,13 @@ function SkeletonContentSide({
   busy: boolean
   fades: boolean
 }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    ref: sideRef,
-    props: mergeProps<'div'>(
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'skeleton-content',
+        ref: sideRef,
+        'data-loading': placeholder ? '' : undefined,
         // The placeholder says nothing to a screen reader; a status region says what loads.
         'aria-hidden': placeholder || leaving || undefined,
         'aria-busy': (busy && !leaving) || undefined,
@@ -187,8 +190,8 @@ function SkeletonContentSide({
       },
       props,
     ),
-    state: { slot: 'skeleton-content', loading: placeholder },
-  })
+    render,
+  )
 }
 
 export { Skeleton, SkeletonContent, SkeletonText }

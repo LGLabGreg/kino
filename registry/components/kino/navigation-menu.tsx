@@ -3,6 +3,7 @@
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
   GLIDE_GROUP_CLOSE_DELAY,
+  GlideClip,
   GlideContent,
   GlideGroupMemory,
   type GlideInstant,
@@ -17,29 +18,29 @@ import {
   pickClassName,
   rowTintClassName,
 } from '@/registry/lib/highlight'
-import {
-  HOVER_DELAY,
-  basePositionerProps,
-  basePopupGrow,
-  usePopupLayer,
-} from '@/registry/lib/popup'
+import { HOVER_DELAY, POPUP_COLLISION_PADDING } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { transitionsSettled, withoutTransition } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { NavigationMenu as NavigationMenuPrimitive } from '@base-ui/react/navigation-menu'
+import {
+  NavigationMenuContent as NavigationMenuContentPrimitive,
+  NavigationMenuItem as NavigationMenuItemPrimitive,
+  NavigationMenuLink as NavigationMenuLinkPrimitive,
+  NavigationMenuList as NavigationMenuListPrimitive,
+  NavigationMenu as NavigationMenuPrimitive,
+  NavigationMenuTrigger as NavigationMenuTriggerPrimitive,
+  NavigationMenuViewport as NavigationMenuViewportPrimitive,
+} from '@ui-sdk/react/navigation-menu'
 import {
   type ComponentProps,
   createContext,
   type Dispatch,
   type ReactNode,
-  type RefObject,
   type SetStateAction,
   use,
   useCallback,
   useId,
   useMemo,
-  useRef,
   useState,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -56,12 +57,6 @@ import { cn } from '@/lib/utils'
  * shows the picture of the link the highlight is on, and a picture settles
  * from a little zoomed in as it comes into view or as its link is pointed at.
  */
-
-/** Base UI's own wait: a click this soon after a hover opened the panel keeps it open. */
-const PATIENT_CLICK_MS = 500
-
-/** When a hover last moved the panel to a trigger, from `performance.now()`. */
-const HoveredAtContext = createContext<RefObject<number> | null>(null)
 
 /*
  * The highlight's layer, in the list or a panel: `as` is `li` inside the
@@ -115,7 +110,7 @@ function Current({ items }: { items: string }) {
       if (!layer || !area) return
       return followPick(area, layer, {
         picked: () => area.querySelector<HTMLElement>(items),
-        attributes: ['data-active'],
+        attributes: ['data-current'],
       })
     },
     [items],
@@ -135,159 +130,126 @@ function Current({ items }: { items: string }) {
 }
 
 /**
- * The menu and its one panel. A hover waits 200ms before it opens the panel,
- * as every popup that opens on hover does. Every prop goes to Base UI's Root. New content
- * slides in from the side the pointer moved towards, by
- * `--navigation-menu-slide` (28px by default).
+ * The menu and its one panel, ui-sdk's viewport. A hover waits 200ms before
+ * it opens the panel, as every popup that opens on hover does. Every prop
+ * goes to ui-sdk's NavigationMenu. New content slides in from the side the
+ * pointer moved towards, by `--navigation-menu-slide` (28px by default).
  */
 function NavigationMenu({
   className,
   children,
   delay = HOVER_DELAY,
   closeDelay = GLIDE_GROUP_CLOSE_DELAY,
-  onValueChange,
   ...props
-}: Omit<NavigationMenuPrimitive.Root.Props, 'className'> & { className?: string }) {
-  // Base UI marks every new positioner `data-instant` for a frame, but only
-  // a panel open on first paint should skip the grow.
+}: Omit<ComponentProps<typeof NavigationMenuPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
+  // Only a panel open on first paint skips the grow.
   const [instant] = useState<GlideInstant>(() => {
     let openOnMount = (props.value ?? props.defaultValue ?? null) !== null
-    const instant: GlideInstant = ({ placed, first }) => {
-      const now = placed.hasAttribute('data-instant')
-      if (!first) return now
-      const skip = now && openOnMount
-      openOnMount = false
+    const instant: GlideInstant = ({ first }) => {
+      const skip = first && openOnMount
+      if (first) openOnMount = false
       return skip
     }
     return instant
   })
-  const hoveredAt = useRef(0)
-  const { dir, anchor } = basePopupGrow(useDirection())
   return (
-    <HoveredAtContext value={hoveredAt}>
-      <GlideGroupMemory>
-        <NavigationMenuPrimitive.Root
-          data-slot='navigation-menu'
-          delay={delay}
-          closeDelay={closeDelay}
-          onValueChange={(value, details) => {
-            if (value != null && details.reason === 'trigger-hover') {
-              hoveredAt.current = performance.now()
-            }
-            onValueChange?.(value, details)
-          }}
-          className={cn('relative flex max-w-max items-center', className)}
-          {...props}
+    <GlideGroupMemory>
+      <NavigationMenuPrimitive
+        delay={delay}
+        closeDelay={closeDelay}
+        className={cn('relative flex max-w-max items-center', className)}
+        {...props}
+      >
+        {children}
+        <NavigationMenuViewportPrimitive
+          side='bottom'
+          align='center'
+          sideOffset={8}
+          collisionPadding={POPUP_COLLISION_PADDING}
+          arrowPadding={0}
+          className={cn(
+            glidePopupClassName,
+            // ui-sdk renders each panel into it and sizes it to the open one.
+            'text-popover-foreground h-(--viewport-height) w-(--viewport-width) max-w-(--available-width) text-sm outline-hidden [--glide-radius:var(--surface-radius)] [--popup-available-height:var(--available-height)] data-ending-style:delay-[calc(var(--motion-exit-duration)*0.35)]',
+          )}
         >
-          {children}
-          <NavigationMenuPrimitive.Portal container={usePopupLayer()}>
-            <NavigationMenuPrimitive.Positioner
-              {...basePositionerProps}
-              side='bottom'
-              align='center'
-              sideOffset={8}
-              // A tall panel stays below the header and scrolls, rather than
-              // flipping over the page above it.
-              collisionAvoidance={{ side: 'none' }}
-              positionMethod='fixed'
-            >
-              <NavigationMenuPrimitive.Popup
-                data-slot='navigation-menu-popup'
-                // Portalled out of the page's tree, so it takes the reading direction with it.
-                dir={dir}
-                className={cn(
-                  glidePopupClassName,
-                  'text-popover-foreground max-w-(--available-width) text-sm outline-hidden [--glide-radius:var(--surface-radius)] data-ending-style:delay-[calc(var(--motion-exit-duration)*0.35)]',
-                )}
-              >
-                <GlideSurface
-                  fill='bg-popover forced-colors:bg-[Canvas]'
-                  ring='bg-foreground/10 forced-colors:bg-[CanvasText]'
-                  shadow
-                />
-                {/* Opened again soon after it folded, it grows from where it went. */}
-                <GlideContent reopen='grow' instant={instant} placedBy='base-ui'>
-                  <NavigationMenuPrimitive.Viewport className='relative' />
-                </GlideContent>
-                <NavigationMenuPrimitive.Arrow {...anchor} />
-              </NavigationMenuPrimitive.Popup>
-            </NavigationMenuPrimitive.Positioner>
-          </NavigationMenuPrimitive.Portal>
-        </NavigationMenuPrimitive.Root>
-      </GlideGroupMemory>
-    </HoveredAtContext>
+          <GlideSurface
+            fill='bg-popover forced-colors:bg-[Canvas]'
+            ring='bg-foreground/10 forced-colors:bg-[CanvasText]'
+            shadow
+          />
+          {/* Opened again soon after it folded, it grows from where it went. */}
+          <GlideContent reopen='grow' instant={instant} />
+        </NavigationMenuViewportPrimitive>
+      </NavigationMenuPrimitive>
+    </GlideGroupMemory>
   )
 }
 
 /**
  * The row of triggers and links, with one highlight that glides along it, and
- * a tint under the link marked `active`.
+ * a tint under the link marked `current`.
  */
 function NavigationMenuList({
   className,
   children,
   ...props
-}: Omit<NavigationMenuPrimitive.List.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NavigationMenuListPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   return (
-    <NavigationMenuPrimitive.List
-      data-slot='navigation-menu-list'
+    <NavigationMenuListPrimitive
       className={cn('relative isolate flex list-none items-center gap-0.5', className)}
       {...props}
     >
       <Highlight
         as='li'
         items='[data-slot=navigation-menu-trigger],[data-slot=navigation-menu-link]'
-        current='[data-slot=navigation-menu-trigger][data-popup-open]'
+        current='[data-slot=navigation-menu-trigger][data-open]'
       />
-      <Current items='[data-slot=navigation-menu-link][data-active]' />
+      <Current items='[data-slot=navigation-menu-link][data-current]' />
       {children}
-    </NavigationMenuPrimitive.List>
+    </NavigationMenuListPrimitive>
   )
 }
 
 function NavigationMenuItem({
   className,
   ...props
-}: Omit<NavigationMenuPrimitive.Item.Props, 'className'> & { className?: string }) {
-  return (
-    <NavigationMenuPrimitive.Item
-      data-slot='navigation-menu-item'
-      className={cn('relative', className)}
-      {...props}
-    />
-  )
+}: Omit<ComponentProps<typeof NavigationMenuItemPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return <NavigationMenuItemPrimitive className={cn('relative', className)} {...props} />
 }
 
 const listItemClassName =
-  'focus-visible:ring-ring/50 relative flex h-(--control-height) items-center gap-1 rounded-(--control-radius) px-(--control-padding) text-sm font-medium whitespace-nowrap select-none focus-visible:ring-3 focus-visible:outline-hidden data-disabled:pointer-events-none data-disabled:opacity-50 forced-colors:data-active:underline forced-colors:data-active:underline-offset-4 forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText]'
+  'focus-visible:ring-ring/50 relative flex h-(--control-height) items-center gap-1 rounded-(--control-radius) px-(--control-padding) text-sm font-medium whitespace-nowrap select-none focus-visible:ring-3 focus-visible:outline-hidden data-disabled:pointer-events-none data-disabled:opacity-50 forced-colors:data-current:underline forced-colors:data-current:underline-offset-4 forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText]'
 
 function NavigationMenuTrigger({
   className,
   children,
-  onClick,
   ...props
-}: Omit<NavigationMenuPrimitive.Trigger.Props, 'className'> & { className?: string }) {
-  const hoveredAt = use(HoveredAtContext)
+}: Omit<
+  ComponentProps<typeof NavigationMenuTriggerPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+  children?: ReactNode
+}) {
   return (
-    <NavigationMenuPrimitive.Trigger
-      data-slot='navigation-menu-trigger'
-      className={cn(listItemClassName, className)}
-      onClick={(event) => {
-        // Base UI keeps a panel open on a click just after a hover opened it,
-        // but not after a hover moved it here from another trigger.
-        const moved = hoveredAt ? performance.now() - hoveredAt.current : Infinity
-        if (
-          event.currentTarget.getAttribute('aria-expanded') === 'true' &&
-          moved < PATIENT_CLICK_MS
-        ) {
-          event.preventBaseUIHandler()
-        }
-        onClick?.(event)
-      }}
+    <NavigationMenuTriggerPrimitive
+      className={cn('group/navigation-menu-trigger', listItemClassName, className)}
       {...props}
     >
       {children}
-      <NavigationMenuPrimitive.Icon className="text-muted-foreground transition-transform duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-popup-open:rotate-180 motion-reduce:transition-none [&_svg:not([class*='size-'])]:size-4">
+      <span
+        aria-hidden
+        className="text-muted-foreground transition-transform duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-open/navigation-menu-trigger:rotate-180 motion-reduce:transition-none [&_svg:not([class*='size-'])]:size-4"
+      >
         <IconPlaceholder
           lucide='ChevronDownIcon'
           tabler='IconChevronDown'
@@ -296,8 +258,8 @@ function NavigationMenuTrigger({
           remixicon='RiArrowDownSLine'
           aria-hidden
         />
-      </NavigationMenuPrimitive.Icon>
-    </NavigationMenuPrimitive.Trigger>
+      </span>
+    </NavigationMenuTriggerPrimitive>
   )
 }
 
@@ -307,36 +269,56 @@ const PanelContext = createContext<{
   setFrame: Dispatch<SetStateAction<HTMLElement | null>>
 } | null>(null)
 
+/*
+ * A panel as ui-sdk renders it into the viewport: at the viewport's corner,
+ * at its own size, which ui-sdk measures, inside a layer that clips it to
+ * the glide's box.
+ */
+function ContentFrame({ ref, ...props }: ComponentProps<'div'>) {
+  return (
+    <GlideClip>
+      <div ref={ref} {...props} />
+    </GlideClip>
+  )
+}
+
 /**
  * A trigger's panel. New content slides in from the side the pointer moved
  * towards while the old leaves the other way, faster; on the first open and
  * on close it only fades. A panel taller than the space below scrolls.
  * `className` goes to the panel's layout inside; every other prop goes to
- * Base UI's Content.
+ * ui-sdk's NavigationMenuContent.
  */
 function NavigationMenuContent({
   className,
   children,
   ref,
   ...props
-}: Omit<NavigationMenuPrimitive.Content.Props, 'className'> & { className?: string }) {
+}: Omit<
+  ComponentProps<typeof NavigationMenuContentPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+  children?: ReactNode
+}) {
   const fades = useEdgeFades<HTMLDivElement>()
   const refs = useMemo(() => mergeRefs(fades, ref), [fades, ref])
   const [frame, setFrame] = useState<HTMLElement | null>(null)
   const panel = useMemo(() => ({ frame, setFrame }), [frame])
   return (
-    <NavigationMenuPrimitive.Content
+    <NavigationMenuContentPrimitive
       ref={refs}
-      data-slot='navigation-menu-content'
+      render={<ContentFrame />}
       className={cn(
-        'scrollbar-thin max-h-(--available-height) overflow-y-auto overscroll-contain',
+        'scrollbar-thin absolute start-0 top-0 max-h-(--popup-available-height) overflow-y-auto overscroll-contain',
         edgeFadeClassName,
         'transition-[opacity,translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-[glide=open]/popup:data-open:delay-[calc(var(--motion-morph-duration)*0.15)] motion-reduce:transition-opacity',
         'data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-[calc(var(--motion-exit-duration)*0.5)] data-ending-style:ease-(--motion-exit-easing)',
-        'data-[activation-direction=right]:data-starting-style:translate-x-(--navigation-menu-slide,28px) data-[activation-direction=left]:data-starting-style:-translate-x-(--navigation-menu-slide,28px)',
-        'data-[activation-direction=right]:data-ending-style:-translate-x-(--navigation-menu-slide,28px) data-[activation-direction=left]:data-ending-style:translate-x-(--navigation-menu-slide,28px)',
-        // Base UI pins the leaving content to the left; in RTL it belongs on the right.
-        'rtl:data-ending-style:right-0! rtl:data-ending-style:left-auto!',
+        // ui-sdk marks only the viewport as it closes, so the open panel fades with it.
+        'group-data-ending-style/popup:opacity-0 group-data-ending-style/popup:duration-[calc(var(--motion-exit-duration)*0.5)] group-data-ending-style/popup:ease-(--motion-exit-easing)',
+        // ui-sdk names the way in logical terms: the end is on the right, or on the left in right to left.
+        'data-[motion=from-end]:data-starting-style:translate-x-(--navigation-menu-slide,28px) data-[motion=from-start]:data-starting-style:-translate-x-(--navigation-menu-slide,28px) data-[motion=to-start]:data-ending-style:-translate-x-(--navigation-menu-slide,28px) data-[motion=to-end]:data-ending-style:translate-x-(--navigation-menu-slide,28px)',
+        'rtl:data-[motion=from-end]:data-starting-style:-translate-x-(--navigation-menu-slide,28px) rtl:data-[motion=from-start]:data-starting-style:translate-x-(--navigation-menu-slide,28px) rtl:data-[motion=to-start]:data-ending-style:translate-x-(--navigation-menu-slide,28px) rtl:data-[motion=to-end]:data-ending-style:-translate-x-(--navigation-menu-slide,28px)',
       )}
       {...props}
     >
@@ -350,24 +332,25 @@ function NavigationMenuContent({
           {children}
         </div>
       </PanelContext>
-    </NavigationMenuPrimitive.Content>
+    </NavigationMenuContentPrimitive>
   )
 }
 
 /**
  * A link: in the list, styled as a trigger; in a panel, a block the highlight
- * glides to, whose icons brighten as it arrives. Inside a panel it closes the
- * menu when followed, and its `preview` shows in the panel's
- * `NavigationMenuPreview` while the highlight is on it.
+ * glides to, whose icons brighten as it arrives. It closes the menu when
+ * followed, and inside a panel its `preview` shows in the panel's
+ * `NavigationMenuPreview` while the highlight is on it. `current` marks the
+ * page you are on.
  */
 function NavigationMenuLink({
   className,
-  closeOnClick,
   preview,
   children,
   ...props
-}: Omit<NavigationMenuPrimitive.Link.Props, 'className'> & {
+}: Omit<ComponentProps<typeof NavigationMenuLinkPrimitive>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
   /** What the panel's preview shows for this link, such as a `NavigationMenuImage`. */
   preview?: ReactNode
 }) {
@@ -376,10 +359,8 @@ function NavigationMenuLink({
   const frame = preview ? panel?.frame : null
   return (
     <>
-      <NavigationMenuPrimitive.Link
-        data-slot='navigation-menu-link'
+      <NavigationMenuLinkPrimitive
         data-preview-id={preview && panel ? id : undefined}
-        closeOnClick={closeOnClick ?? panel !== null}
         className={cn(
           panel
             ? "focus-visible:ring-ring/50 flex min-w-0 flex-col gap-1 rounded-(--list-radius) p-(--control-padding) focus-visible:ring-3 focus-visible:outline-hidden forced-colors:data-glided:text-[HighlightText] forced-colors:data-glided:forced-color-adjust-none forced-colors:data-glided:**:text-[HighlightText] [&_svg]:transition-colors [&_svg]:duration-(--motion-layout-duration) [&_svg]:ease-(--motion-layout-fade-easing) [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground data-glided:[&_svg:not([class*='text-'])]:text-foreground [&_.text-muted-foreground]:transition-colors [&_.text-muted-foreground]:duration-(--motion-layout-duration) [&_.text-muted-foreground]:ease-(--motion-layout-fade-easing) data-glided:[&_.text-muted-foreground]:text-foreground/80 forced-colors:data-glided:[&_.text-muted-foreground]:text-[HighlightText]"
@@ -389,7 +370,7 @@ function NavigationMenuLink({
         {...props}
       >
         {children}
-      </NavigationMenuPrimitive.Link>
+      </NavigationMenuLinkPrimitive>
       {/* Beside the link, not in it: the picture is drawn in the preview, so its events never reach the link. */}
       {frame
         ? createPortal(

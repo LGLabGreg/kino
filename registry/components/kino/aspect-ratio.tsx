@@ -1,7 +1,6 @@
 'use client'
 
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import type { CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -18,16 +17,17 @@ function AspectRatio({
   style,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className' | 'style'> & {
   className?: string
+  style?: CSSProperties
   /** Width over height, such as `16 / 9`. Without it, the `--ratio` variable's value, or 1. */
   ratio?: number
 }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'aspect-ratio',
         className: cn(
           // `min-h-0` and `shrink-0` keep the ratio when content is taller than the box or a
           // flex column is shorter than it, so a child sized `size-full` fills it. `--ratio` is
@@ -40,8 +40,8 @@ function AspectRatio({
       },
       props,
     ),
-    state: { slot: 'aspect-ratio' },
-  })
+    render,
+  )
 }
 
 export { AspectRatio }

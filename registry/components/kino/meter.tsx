@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  gaugeText,
   slidingFillClassName,
   slidingFillStyle,
   trackClassName,
@@ -9,13 +10,25 @@ import {
   trackRootClassName,
   valuePercent,
 } from '@/registry/lib/track'
-import { Meter as MeterPrimitive } from '@base-ui/react/meter'
-import type { ReactNode } from 'react'
+import {
+  MeterIndicator as MeterIndicatorPrimitive,
+  MeterLabel as MeterLabelPrimitive,
+  Meter as MeterPrimitive,
+  MeterTrack as MeterTrackPrimitive,
+  MeterValue as MeterValuePrimitive,
+} from '@ui-sdk/react/meter'
+import type { ComponentProps, ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
-type MeterProps = Omit<MeterPrimitive.Root.Props, 'className'> & {
+type MeterProps = Omit<
+  ComponentProps<typeof MeterPrimitive>,
+  'className' | 'format' | 'locale' | 'children'
+> & {
   className?: string
+  /** How `MeterValue` and the value read out are written: a percentage by default. */
+  format?: Intl.NumberFormatOptions
+  locale?: Intl.LocalesArgument
   /** Past this value the meter warns: the fill and the value turn red. A notch on the track marks it. */
   high?: number
   /** Below this value the meter warns, as past `high`: for a measure that should be high, such as a password's strength. */
@@ -34,16 +47,18 @@ function Meter({
   max = 100,
   high,
   low,
+  format,
+  locale,
   ...props
 }: MeterProps) {
   return (
-    <MeterPrimitive.Root
-      data-slot='meter'
+    <MeterPrimitive
       data-high={(high !== undefined && value > high) || undefined}
       data-low={(low !== undefined && value < low) || undefined}
       value={value}
       min={min}
       max={max}
+      format={(reading: number) => gaugeText(reading, { min, max, locale, format })}
       className={cn(trackRootClassName, 'group/meter', className)}
       {...props}
     >
@@ -52,12 +67,8 @@ function Meter({
           {children}
         </div>
       ) : null}
-      <MeterPrimitive.Track
-        data-slot='meter-track'
-        className={cn(trackClassName, 'overflow-hidden')}
-      >
-        <MeterPrimitive.Indicator
-          data-slot='meter-indicator'
+      <MeterTrackPrimitive className={cn(trackClassName, 'overflow-hidden')}>
+        <MeterIndicatorPrimitive
           style={slidingFillStyle(valuePercent(value, min, max))}
           className={cn(
             slidingFillClassName,
@@ -76,31 +87,28 @@ function Meter({
             />
           ),
         )}
-      </MeterPrimitive.Track>
-    </MeterPrimitive.Root>
+      </MeterTrackPrimitive>
+    </MeterPrimitive>
   )
 }
 
 function MeterLabel({
   className,
   ...props
-}: Omit<MeterPrimitive.Label.Props, 'className'> & { className?: string }) {
-  return (
-    <MeterPrimitive.Label
-      data-slot='meter-label'
-      className={cn(trackLabelClassName, className)}
-      {...props}
-    />
-  )
+}: Omit<ComponentProps<typeof MeterLabelPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return <MeterLabelPrimitive className={cn(trackLabelClassName, className)} {...props} />
 }
 
 function MeterValue({
   className,
   ...props
-}: Omit<MeterPrimitive.Value.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof MeterValuePrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <MeterPrimitive.Value
-      data-slot='meter-value'
+    <MeterValuePrimitive
       className={cn(
         'text-muted-foreground group-data-high/meter:text-destructive group-data-low/meter:text-destructive ms-auto shrink-0 tabular-nums transition-colors duration-(--motion-draw-duration) ease-(--motion-draw-fade-easing)',
         className,

@@ -32,7 +32,10 @@ import {
   trackDirClassName,
   valuePercent,
 } from '@/registry/lib/track'
-import { Meter as MeterPrimitive } from '@base-ui/react/meter'
+import {
+  Meter as MeterPrimitive,
+  MeterTrack as MeterTrackPrimitive,
+} from '@ui-sdk/react/meter'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -741,16 +744,16 @@ function KpiTarget({
       className={cn('flex flex-col gap-2', trackDirClassName, className)}
       {...props}
     >
-      <MeterPrimitive.Root
+      <MeterPrimitive
         value={now}
         min={0}
         max={max}
         aria-labelledby={labelId}
-        getAriaValueText={() => (empty ? statusText : `${ofText}, ${statusText}`)}
+        getValueLabel={() => (empty ? statusText : `${ofText}, ${statusText}`)}
         // Room above and below the bar for the target's notch.
         className='relative py-1'
       >
-        <MeterPrimitive.Track
+        <MeterTrackPrimitive
           className={cn(
             trackClassName,
             'overflow-hidden',
@@ -792,7 +795,7 @@ function KpiTarget({
               <span className='bg-card -me-px h-full w-0.5 forced-colors:bg-[Canvas]' />
             </span>
           )}
-        </MeterPrimitive.Track>
+        </MeterTrackPrimitive>
         {!loading && (
           <>
             {/* The target: a notch cut through the bar, standing past it above and below. */}
@@ -806,7 +809,7 @@ function KpiTarget({
             </span>
           </>
         )}
-      </MeterPrimitive.Root>
+      </MeterPrimitive>
       <div className='flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-xs'>
         {loading ? (
           <SkeletonText className='w-28' />
@@ -903,19 +906,19 @@ function KpiScore({
           </span>
         ) : null}
       </div>
-      <MeterPrimitive.Root
+      <MeterPrimitive
         value={Math.min(max, Math.max(min, value ?? min))}
         min={min}
         max={max}
         aria-labelledby={labelId}
-        getAriaValueText={() =>
+        getValueLabel={() =>
           value === null || !current
             ? messages.noData
             : `${write.format(value)}, ${current.label}`
         }
         className='relative py-1'
       >
-        <MeterPrimitive.Track
+        <MeterTrackPrimitive
           className={cn(
             trackClassName,
             'flex gap-0.5 bg-transparent forced-colors:outline-0',
@@ -937,7 +940,7 @@ function KpiScore({
               )}
             />
           ))}
-        </MeterPrimitive.Track>
+        </MeterTrackPrimitive>
         {!loading && value !== null && (
           <span
             aria-hidden
@@ -949,7 +952,7 @@ function KpiScore({
             <span className='bg-foreground ring-card -me-1.5 size-3 rounded-full ring-2 forced-colors:bg-[CanvasText]' />
           </span>
         )}
-      </MeterPrimitive.Root>
+      </MeterPrimitive>
       {/* Where each band ends, under the joins, so how close the value is to the next reads. */}
       <div
         aria-hidden

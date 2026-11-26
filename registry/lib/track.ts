@@ -1,3 +1,4 @@
+import { numberFormatter } from '@/registry/lib/number-format'
 import type { CSSProperties } from 'react'
 
 /**
@@ -60,16 +61,16 @@ export const trackFillClassName =
  * the compositor and its end stays round. Its track clips it.
  */
 export const slidingFillClassName =
-  'bg-primary absolute inset-y-0 rounded-full transition-[background-color,translate] duration-(--motion-draw-duration) ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[background-color] motion-reduce:ease-(--motion-draw-fade-easing) forced-colors:bg-[Highlight]!'
+  'bg-primary absolute inset-y-0 w-full! rounded-full transition-[background-color,translate] duration-(--motion-draw-duration) ease-[var(--motion-draw-fade-easing),var(--motion-draw-easing)] motion-reduce:transition-[background-color] motion-reduce:ease-(--motion-draw-fade-easing) forced-colors:bg-[Highlight]!'
 
 /**
- * Places a sliding fill at `percent`. Base UI sizes a fill with `width`, which
- * motion.md won't let us animate; this style wins over Base UI's.
+ * Places a sliding fill at `percent`. ui-sdk sizes its indicator with an
+ * inline `width`, which motion.md won't let us animate, so the fill's class
+ * keeps it as wide as the track and this moves it into place.
  */
 export function slidingFillStyle(percent: number): CSSProperties {
   return {
     insetInlineStart: 0,
-    width: '100%',
     translate: `calc(var(--track-dir) * ${percent - 100}%) 0`,
   }
 }
@@ -82,3 +83,29 @@ export function slidingFillStyle(percent: number): CSSProperties {
  */
 export const slidingMarkClassName =
   'pointer-events-none absolute inset-0 flex justify-end transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none'
+
+/**
+ * How a Meter or Progress writes its value, for its `format`: with `format`'s
+ * options, or where it sits between `min` and `max` as a percentage without
+ * them or with a percent style, as ui-sdk does, through `numberFormatter`.
+ */
+export function gaugeText(
+  value: number,
+  {
+    min,
+    max,
+    locale,
+    format,
+  }: {
+    min: number
+    max: number
+    locale?: Intl.LocalesArgument
+    format?: Intl.NumberFormatOptions
+  },
+) {
+  if (format && format.style !== 'percent')
+    return numberFormatter(locale, format).format(value)
+  return numberFormatter(locale, format ?? { style: 'percent' }).format(
+    valuePercent(value, min, max) / 100,
+  )
+}

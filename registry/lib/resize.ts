@@ -377,6 +377,40 @@ export function inertCopy(
   return copy
 }
 
+/** One hold per element, shared by everything that holds it. */
+const holds = new WeakMap<HTMLElement, { frame: number; holders: number }>()
+
+/**
+ * Marks `element` `data-resizing` from each `hold()` until two frames after
+ * the latest, so what changes meanwhile lands at once instead of gliding.
+ * Holders of one element share the mark; the last to `stop()` clears it.
+ */
+export function holdResizing(element: HTMLElement) {
+  const shared = holds.get(element) ?? { frame: 0, holders: 0 }
+  holds.set(element, shared)
+  shared.holders += 1
+  let stopped = false
+  return {
+    hold() {
+      element.dataset.resizing = ''
+      cancelAnimationFrame(shared.frame)
+      // Two frames: what places from a size measured by its own observer (ui-sdk's tab indicator) catches up a frame late.
+      shared.frame = requestAnimationFrame(() => {
+        shared.frame = requestAnimationFrame(() => delete element.dataset.resizing)
+      })
+    },
+    stop() {
+      if (stopped) return
+      stopped = true
+      shared.holders -= 1
+      if (shared.holders > 0) return
+      cancelAnimationFrame(shared.frame)
+      delete element.dataset.resizing
+      holds.delete(element)
+    },
+  }
+}
+
 /**
  * A ref that marks `element` `data-resizing` for two frames each time it changes
  * size, so what it places in `cqw` or `cqh`, which turn into pixels, moves at
@@ -384,19 +418,12 @@ export function inertCopy(
  */
 export function markResizing(element: HTMLElement | null) {
   if (!element) return
-  let frame = 0
-  const observer = new ResizeObserver(() => {
-    element.dataset.resizing = ''
-    cancelAnimationFrame(frame)
-    // Two frames: what places from a size measured by its own observer (ui-sdk's tab indicator) catches up a frame late.
-    frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => delete element.dataset.resizing)
-    })
-  })
+  const resizing = holdResizing(element)
+  const observer = new ResizeObserver(() => resizing.hold())
   observer.observe(element)
   return () => {
     observer.disconnect()
-    cancelAnimationFrame(frame)
+    resizing.stop()
   }
 }
 

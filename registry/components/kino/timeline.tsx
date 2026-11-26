@@ -11,9 +11,17 @@ import {
   stepTileClassName,
 } from '@/registry/lib/step'
 import { Swap } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
-import type { ComponentProps } from 'react'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
+import {
+  TimelineConnector as TimelineConnectorPrimitive,
+  TimelineDescription as TimelineDescriptionPrimitive,
+  TimelineItem as TimelineItemPrimitive,
+  TimelineMarker as TimelineMarkerPrimitive,
+  Timeline as TimelinePrimitive,
+  TimelineTime as TimelineTimePrimitive,
+  TimelineTitle as TimelineTitlePrimitive,
+} from '@ui-sdk/react/timeline'
+import { type ComponentProps, createContext, type ReactNode, use, useMemo } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -42,6 +50,9 @@ import { cn } from '@/lib/utils'
 
 type TimelineStatus = StepStatus
 
+/** The status of the event around it, which its title reads out. */
+const StatusContext = createContext<TimelineStatus | undefined>(undefined)
+
 /**
  * `className` is for the list itself, as `<ol>`'s; `containerClassName` for
  * the box around it, which follows the list's height as events come and go.
@@ -53,7 +64,8 @@ function Timeline({
   variant = 'default',
   ref,
   ...props
-}: ComponentProps<'ol'> & {
+}: Omit<ComponentProps<typeof TimelinePrimitive>, 'className'> & {
+  className?: string
   containerClassName?: string
   /**
    * `split` puts each event's `TimelineAside` on the other side of a centred
@@ -62,13 +74,14 @@ function Timeline({
    */
   variant?: 'default' | 'split'
 }) {
-  const { frame, row } = useFlow<HTMLDivElement, HTMLOListElement>(
+  const { frame, row } = useFlow<HTMLDivElement, HTMLDivElement>(
     '[data-slot=timeline-item]',
   )
+  const listRef = useMemo(() => mergeRefs(row, markMounted, ref), [row, ref])
   return (
     <div
       ref={frame}
-      data-slot='timeline'
+      data-timeline-frame=''
       className={cn(
         // A current marker's ring reaches past the list's edge.
         'bg-inherit [overflow-clip-margin:0.25rem] overflow-clip transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none',
@@ -78,9 +91,8 @@ function Timeline({
         containerClassName,
       )}
     >
-      <ol
-        ref={mergeRefs(row, markMounted, ref)}
-        data-slot='timeline-list'
+      <TimelinePrimitive
+        ref={listRef}
         data-variant={variant}
         className={cn(
           'group/timeline group/flow relative isolate flex flex-col gap-(--timeline-gap) bg-inherit [--timeline-gap:var(--surface-gap)] [--timeline-marker:var(--control-height-xs)]',
@@ -101,48 +113,51 @@ function Timeline({
 function TimelineItem({
   className,
   status,
-  render,
   children,
   ...props
-}: useRender.ComponentProps<'li'> & { status?: TimelineStatus }) {
-  return useRender({
-    defaultTagName: 'li',
-    props: mergeProps<'li'>(
-      {
-        'aria-current': status === 'current' ? 'step' : undefined,
-        className: cn(
-          'group/timeline-item group/step relative grid grid-cols-[var(--timeline-marker)_minmax(0,1fr)] content-start gap-x-(--control-padding) bg-inherit @md/timeline:group-data-[variant=split]/timeline:grid-cols-[minmax(0,1fr)_var(--timeline-marker)_minmax(0,1fr)]',
-          // It glides to a new place on `layout` (`followFlow`), fades in on
-          // `enter` once the timeline has painted, and its copy fades on
-          // `exit` (`flowItemClassName`).
-          flowItemClassName,
-          // How far its marker, and the next one, sit inside the rail's
-          // column: a dot is smaller than the column, an icon fills it.
-          '[--timeline-inset:0px] [&:has(>[data-slot=timeline-marker][data-dot])]:[--timeline-inset:calc((var(--timeline-marker)-0.625rem)/2)]',
-          '[&:has(+[data-slot=timeline-item]>[data-slot=timeline-marker][data-dot])]:[--timeline-next-inset:calc((var(--timeline-marker)-0.625rem)/2)] [&:has(+[data-slot=timeline-item]>[data-slot=timeline-marker]:not([data-dot]))]:[--timeline-next-inset:0px]',
-          // The last event has no line out of it, not counting the copies of
-          // events that leave.
-          // A current step after another lights once the line reaching it looks
-          // arrived, halfway through `draw` (the step lib's STEP_ARRIVAL).
-          'motion-safe:[[data-slot=timeline-item]~&[data-status=current]]:[--step-wait:calc(var(--motion-draw-duration)*0.5)]',
-          '[--timeline-line:1] [&:not(:has(~[data-slot=timeline-item]:not([data-leaving])))]:[--timeline-line:0]',
-          className,
-        ),
-        children: (
-          <>
-            {status && stepStatusText[status] ? (
-              <span className='sr-only'>{stepStatusText[status]}</span>
-            ) : null}
-            {children}
-            <TimelineLine />
-          </>
-        ),
-      },
-      props,
-    ),
-    render,
-    state: { slot: 'timeline-item', status },
-  })
+}: Omit<
+  ComponentProps<typeof TimelineItemPrimitive>,
+  'className' | 'children' | 'status'
+> & {
+  className?: string
+  children?: ReactNode
+  status?: TimelineStatus
+}) {
+  return (
+    <TimelineItemPrimitive
+      // ui-sdk knows the three steps of a process; an error and a skipped step are ours.
+      status={
+        status === 'complete' || status === 'current' || status === 'upcoming'
+          ? status
+          : undefined
+      }
+      data-status={status}
+      className={cn(
+        // ui-sdk makes the events one tab stop that the arrow keys move along.
+        'rounded-(--control-radius-sm) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden',
+        'group/timeline-item group/step relative grid grid-cols-[var(--timeline-marker)_minmax(0,1fr)] content-start gap-x-(--control-padding) bg-inherit @md/timeline:group-data-[variant=split]/timeline:grid-cols-[minmax(0,1fr)_var(--timeline-marker)_minmax(0,1fr)]',
+        // It glides to a new place on `layout` (`followFlow`), fades in on
+        // `enter` once the timeline has painted, and its copy fades on
+        // `exit` (`flowItemClassName`).
+        flowItemClassName,
+        // How far its marker, and the next one, sit inside the rail's
+        // column: a dot is smaller than the column, an icon fills it.
+        '[--timeline-inset:0px] [&:has(>[data-slot=timeline-marker][data-dot])]:[--timeline-inset:calc((var(--timeline-marker)-0.625rem)/2)]',
+        '[&:has(+[data-slot=timeline-item]>[data-slot=timeline-marker][data-dot])]:[--timeline-next-inset:calc((var(--timeline-marker)-0.625rem)/2)] [&:has(+[data-slot=timeline-item]>[data-slot=timeline-marker]:not([data-dot]))]:[--timeline-next-inset:0px]',
+        // The last event has no line out of it, not counting the copies of
+        // events that leave.
+        // A current step after another lights once the line reaching it looks
+        // arrived, halfway through `draw` (the step lib's STEP_ARRIVAL).
+        'motion-safe:[[data-slot=timeline-item]~&[data-status=current]]:[--step-wait:calc(var(--motion-draw-duration)*0.5)]',
+        '[--timeline-line:1] [&:not(:has(~[data-slot=timeline-item]:not([data-leaving])))]:[--timeline-line:0]',
+        className,
+      )}
+      {...props}
+    >
+      <StatusContext value={status}>{children}</StatusContext>
+      <TimelineLine />
+    </TimelineItemPrimitive>
+  )
 }
 
 /**
@@ -152,9 +167,7 @@ function TimelineItem({
  */
 function TimelineLine() {
   return (
-    <span
-      aria-hidden
-      data-slot='timeline-line'
+    <TimelineConnectorPrimitive
       className={cn(
         stepLineClassName,
         'absolute start-[calc(var(--timeline-marker)/2-0.5px)] @md/timeline:group-data-[variant=split]/timeline:start-[calc(50%-0.5px)] top-[calc(var(--timeline-marker)-var(--timeline-inset)+0.25rem)] -bottom-[calc(var(--timeline-gap)+var(--timeline-next-inset,var(--timeline-inset))-0.25rem)] w-px origin-top scale-y-(--timeline-line) transition-[scale] duration-(--motion-draw-duration) ease-(--motion-draw-easing) motion-reduce:transition-none group-data-mounted/timeline:starting:scale-y-0',
@@ -166,7 +179,7 @@ function TimelineLine() {
           'origin-top scale-y-0 group-data-[status=complete]/timeline-item:scale-y-100',
         )}
       />
-    </span>
+    </TimelineConnectorPrimitive>
   )
 }
 
@@ -178,37 +191,33 @@ function TimelineLine() {
  */
 function TimelineMarker({
   className,
-  render,
   children,
   ...props
-}: useRender.ComponentProps<'span'>) {
+}: Omit<ComponentProps<typeof TimelineMarkerPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const dot = children === undefined || children === null || children === false
-  return useRender({
-    defaultTagName: 'span',
-    props: mergeProps<'span'>(
-      {
-        'aria-hidden': true,
-        className: cn(
-          'relative z-10 col-start-1 row-start-1 flex size-(--timeline-marker) items-center justify-center @md/timeline:group-data-[variant=split]/timeline:col-start-2',
-          className,
-        ),
-        children: (
-          <span
-            className={cn(
-              'flex items-center justify-center',
-              dot ? stepDotClassName : stepTileClassName,
-              'motion-safe:group-data-mounted/timeline:starting:scale-50',
-            )}
-          >
-            {dot ? null : <Swap>{children}</Swap>}
-          </span>
-        ),
-      },
-      props,
-    ),
-    render,
-    state: { slot: 'timeline-marker', dot },
-  })
+  return (
+    <TimelineMarkerPrimitive
+      data-dot={dot ? '' : undefined}
+      className={cn(
+        'relative z-10 col-start-1 row-start-1 flex size-(--timeline-marker) items-center justify-center @md/timeline:group-data-[variant=split]/timeline:col-start-2',
+        className,
+      )}
+      {...props}
+    >
+      <span
+        className={cn(
+          'flex items-center justify-center',
+          dot ? stepDotClassName : stepTileClassName,
+          'motion-safe:group-data-mounted/timeline:starting:scale-50',
+        )}
+      >
+        {dot ? null : <Swap>{children}</Swap>}
+      </span>
+    </TimelineMarkerPrimitive>
+  )
 }
 
 /** What happened: the header, then any details, a quote or a card. */
@@ -216,11 +225,12 @@ function TimelineContent({
   className,
   render,
   ...props
-}: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'timeline-content',
         className: cn(
           'col-start-2 flex min-w-0 flex-col gap-1 [[data-slot=timeline-item]:has(>[data-slot=timeline-aside])>&]:row-start-2 @md/timeline:group-data-[variant=split]/timeline:col-start-3 @md/timeline:group-data-[variant=split]/timeline:row-start-1!',
           className,
@@ -229,8 +239,7 @@ function TimelineContent({
       props,
     ),
     render,
-    state: { slot: 'timeline-content' },
-  })
+  )
 }
 
 /** The title and the time on one line, its first line level with the marker; the time wraps under a long title. */
@@ -238,11 +247,12 @@ function TimelineHeader({
   className,
   render,
   ...props
-}: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'timeline-header',
         className: cn(
           'flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 py-[calc((var(--timeline-marker)-1.25rem)/2)]',
           className,
@@ -251,26 +261,33 @@ function TimelineHeader({
       props,
     ),
     render,
-    state: { slot: 'timeline-header' },
-  })
+  )
 }
 
 /** Muted while upcoming, destructive on an error, and struck through when skipped. A long unbroken word breaks rather than run out of the box. */
-function TimelineTitle({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
-      {
-        className: cn(
-          'min-w-0 text-sm leading-5 font-medium wrap-anywhere group-data-[status=error]/timeline-item:text-destructive group-data-[status=skipped]/timeline-item:text-muted-foreground group-data-[status=skipped]/timeline-item:line-through group-data-[status=upcoming]/timeline-item:text-muted-foreground',
-          className,
-        ),
-      },
-      props,
-    ),
-    render,
-    state: { slot: 'timeline-title' },
-  })
+function TimelineTitle({
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<typeof TimelineTitlePrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
+  const status = use(StatusContext)
+  const said = status && stepStatusText[status]
+  return (
+    <TimelineTitlePrimitive
+      className={cn(
+        'min-w-0 text-sm leading-5 font-medium wrap-anywhere group-data-[status=error]/timeline-item:text-destructive group-data-[status=skipped]/timeline-item:text-muted-foreground group-data-[status=skipped]/timeline-item:line-through group-data-[status=upcoming]/timeline-item:text-muted-foreground',
+        className,
+      )}
+      {...props}
+    >
+      {/* ui-sdk names the event by its title, so the step's status is read in it. */}
+      {said ? <span className='sr-only'>{`${said}, `}</span> : null}
+      {children}
+    </TimelineTitlePrimitive>
+  )
 }
 
 /**
@@ -278,11 +295,16 @@ function TimelineTitle({ className, render, ...props }: useRender.ComponentProps
  * title and against the rail: a date, a version, a quarter. Elsewhere it
  * sits above the title, beside the marker.
  */
-function TimelineAside({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+function TimelineAside({
+  className,
+  render,
+  ...props
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'timeline-aside',
         className: cn(
           'text-muted-foreground col-start-2 row-start-1 flex min-w-0 flex-col *:max-w-full [&_[data-slot=timeline-time]]:whitespace-normal py-[calc((var(--timeline-marker)-1.25rem)/2)] text-sm leading-5 wrap-anywhere tabular-nums @md/timeline:group-data-[variant=split]/timeline:col-start-1 @md/timeline:group-data-[variant=split]/timeline:items-end @md/timeline:group-data-[variant=split]/timeline:text-end',
           className,
@@ -291,47 +313,42 @@ function TimelineAside({ className, render, ...props }: useRender.ComponentProps
       props,
     ),
     render,
-    state: { slot: 'timeline-aside' },
-  })
+  )
 }
 
 /** When it happened, as a `<time>`: give `dateTime` the machine-readable date. */
-function TimelineTime({ className, render, ...props }: useRender.ComponentProps<'time'>) {
-  return useRender({
-    defaultTagName: 'time',
-    props: mergeProps<'time'>(
-      {
-        className: cn(
-          'text-muted-foreground shrink-0 text-xs leading-5 whitespace-nowrap tabular-nums',
-          className,
-        ),
-      },
-      props,
-    ),
-    render,
-    state: { slot: 'timeline-time' },
-  })
+function TimelineTime({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof TimelineTimePrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <TimelineTimePrimitive
+      className={cn(
+        'text-muted-foreground shrink-0 text-xs leading-5 whitespace-nowrap tabular-nums',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
 
 function TimelineDescription({
   className,
-  render,
   ...props
-}: useRender.ComponentProps<'p'>) {
-  return useRender({
-    defaultTagName: 'p',
-    props: mergeProps<'p'>(
-      {
-        className: cn(
-          'text-muted-foreground text-sm text-pretty wrap-anywhere *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground',
-          className,
-        ),
-      },
-      props,
-    ),
-    render,
-    state: { slot: 'timeline-description' },
-  })
+}: Omit<ComponentProps<typeof TimelineDescriptionPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <TimelineDescriptionPrimitive
+      className={cn(
+        'text-muted-foreground text-sm text-pretty wrap-anywhere *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
 
 export {

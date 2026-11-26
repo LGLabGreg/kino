@@ -10,9 +10,8 @@ import {
   stepTileClassName,
   stepTiming,
 } from '@/registry/lib/step'
-import { Button as ButtonPrimitive } from '@base-ui/react/button'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import {
   type ComponentProps,
   type CSSProperties,
@@ -207,16 +206,24 @@ function StepperItem({
   render,
   children,
   ...props
-}: useRender.ComponentProps<'li'> & { step: number; status?: StepperStatus }) {
+}: Omit<PartProps<'li'>, 'className' | 'style'> & {
+  className?: string
+  style?: CSSProperties
+  step: number
+  status?: StepperStatus
+}) {
   const { value, from, orientation } = useStepper()
   const status: StepperStatus =
     statusProp ?? (step < value ? 'complete' : step === value ? 'current' : 'upcoming')
   const [hasTrigger, setHasTrigger] = useState(false)
   const horizontal = orientation === 'horizontal'
-  const element = useRender({
-    defaultTagName: 'li',
-    props: mergeProps<'li'>(
+  const element = renderElement(
+    'li',
+    mergeProps(
       {
+        'data-slot': 'stepper-item',
+        'data-status': status,
+        'data-passed': step < value ? '' : undefined,
         // A trigger carries it instead, where a screen reader meets it.
         'aria-current': step === value && !hasTrigger ? 'step' : undefined,
         style: { ...timingStyle(step, from, value), ...style },
@@ -237,8 +244,7 @@ function StepperItem({
       props,
     ),
     render,
-    state: { slot: 'stepper-item', status, passed: step < value },
-  })
+  )
   return (
     <StepperItemContext.Provider value={{ step, status, setHasTrigger }}>
       {element}
@@ -312,12 +318,16 @@ function StepperMarker({
   render,
   children,
   ...props
-}: useRender.ComponentProps<'span'>) {
+}: Omit<PartProps<'span'>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const { step } = useStepperItem()
-  return useRender({
-    defaultTagName: 'span',
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'stepper-marker',
         'aria-hidden': true,
         className: cn(
           'relative z-10 flex size-(--stepper-marker) shrink-0 items-center justify-center',
@@ -365,13 +375,12 @@ function StepperMarker({
       props,
     ),
     render,
-    state: { slot: 'stepper-marker' },
-  })
+  )
 }
 
 /**
  * Makes a step one a person can go to: a `<button>`, or a link with
- * `render={<a href='…' />}` and `nativeButton={false}`. It picks its step
+ * `render={<a href='…' />}`. It picks its step
  * (`onValueChange`); in a `linear` stepper an upcoming step's trigger is
  * disabled, so it leaves the tab order.
  */
@@ -379,9 +388,10 @@ function StepperTrigger({
   className,
   disabled,
   onClick,
-  role,
   ...props
-}: Omit<ButtonPrimitive.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof ButtonPrimitive>, 'className'> & {
+  className?: string
+}) {
   const { value, linear, select, orientation } = useStepper()
   const { step, setHasTrigger } = useStepperItem()
   useLayoutEffect(() => {
@@ -393,8 +403,8 @@ function StepperTrigger({
       data-slot='stepper-trigger'
       aria-current={step === value ? 'step' : undefined}
       disabled={disabled ?? (linear && step > value)}
-      onClick={(event) => {
-        onClick?.(event)
+      onClick={(event, details) => {
+        onClick?.(event, details)
         select(step)
       }}
       className={cn(
@@ -407,9 +417,6 @@ function StepperTrigger({
         className,
       )}
       {...props}
-      // Base UI calls whatever it renders other than a `<button>` a button; a
-      // link stays a link unless a role is given.
-      role={role}
     />
   )
 }
@@ -420,13 +427,14 @@ function StepperContent({
   render,
   children,
   ...props
-}: useRender.ComponentProps<'div'>) {
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
   const { status } = useStepperItem()
   const { orientation } = useStepper()
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'stepper-content',
         className: cn(
           'flex min-w-0 flex-col gap-0.5',
           orientation === 'horizontal'
@@ -446,8 +454,7 @@ function StepperContent({
       props,
     ),
     render,
-    state: { slot: 'stepper-content' },
-  })
+  )
 }
 
 /**
@@ -455,11 +462,16 @@ function StepperContent({
  * rather than run out of the box. Under the markers of a narrow horizontal
  * stepper it is a size smaller.
  */
-function StepperTitle({ className, render, ...props }: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+function StepperTitle({
+  className,
+  render,
+  ...props
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'stepper-title',
         className: cn(
           'text-sm leading-5 font-medium wrap-anywhere transition-colors @max-md/stepper:group-data-[orientation=horizontal]/stepper:text-xs @max-md/stepper:group-data-[orientation=horizontal]/stepper:leading-4 duration-(--motion-morph-duration) ease-(--motion-morph-fade-easing) [transition-delay:var(--step-wait,0s)] group-data-[status=error]/step:text-destructive group-data-[status=upcoming]/step:text-muted-foreground',
           className,
@@ -468,8 +480,7 @@ function StepperTitle({ className, render, ...props }: useRender.ComponentProps<
       props,
     ),
     render,
-    state: { slot: 'stepper-title' },
-  })
+  )
 }
 
 /**
@@ -481,11 +492,12 @@ function StepperDescription({
   className,
   render,
   ...props
-}: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'stepper-description',
         className: cn(
           'text-muted-foreground text-sm leading-5 text-pretty wrap-anywhere @max-md/stepper:group-data-[orientation=horizontal]/stepper:sr-only',
           className,
@@ -494,8 +506,7 @@ function StepperDescription({
       props,
     ),
     render,
-    state: { slot: 'stepper-description' },
-  })
+  )
 }
 
 export {

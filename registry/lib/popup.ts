@@ -1,7 +1,6 @@
 'use client'
 
-import { bindPersistentLayer } from '@ui-sdk/core'
-import { type CSSProperties, createContext, use, useEffect, useState } from 'react'
+import { type CSSProperties, createContext, use, useState } from 'react'
 
 /*
  * How every popup anchored to a trigger opens and closes: it grows out from
@@ -144,9 +143,7 @@ export const popupGrowContentClassName =
  * ui-sdk opens its popups in the browser's top layer, above everything in
  * `<body>`, so a popup of the old library, which portals to `<body>`, would
  * open behind a ui-sdk dialog or popover and take no presses. A ui-sdk
- * Dialog, Alert dialog or Popover is the layer for what opens inside it, and
- * the toasts, which live in `<body>` for the whole app, are a layer of their
- * own that ui-sdk keeps above its popups and usable under a modal dialog.
+ * Dialog, Alert dialog or Popover is the layer for what opens inside it.
  */
 
 /** The ui-sdk popup a popup of the old library opens inside, if any. */
@@ -167,24 +164,6 @@ export function useOwnPopupLayer(inTopLayer: boolean) {
 /** Where a popup of the old library portals: inside the ui-sdk popup around it, or `<body>`. */
 export function usePopupLayer(): HTMLElement | undefined {
   return use(PopupLayerContext) ?? undefined
-}
-
-/**
- * For the old library's toast viewport, which needs `popover='manual'`: it
- * shows in the top layer, ui-sdk raises it above each popup that opens after
- * it and leaves it usable while a modal dialog makes the page inert, and a
- * press on a toast closes no popup.
- */
-export function usePersistentLayer(element: HTMLElement | null) {
-  useEffect(() => {
-    if (!element) return
-    element.showPopover()
-    const release = bindPersistentLayer(element)
-    return () => {
-      release()
-      if (element.matches(':popover-open')) element.hidePopover()
-    }
-  }, [element])
 }
 
 /**

@@ -5,8 +5,7 @@ import { followSize } from '@/registry/lib/resize'
 import { Roll } from '@/registry/lib/roll'
 import { registerProgress, runProgress, stopProgress } from '@/registry/lib/run-progress'
 import { Swap } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -19,7 +18,8 @@ import { cn } from '@/lib/utils'
  * readers get the value once, never the numbers in between.
  */
 
-type NumberProps = Omit<useRender.ComponentProps<'span'>, 'children'> & {
+type NumberProps = Omit<PartProps<'span'>, 'className' | 'children'> & {
+  className?: string
   value: number
   /** The locale the value is written in. Give one, so the page's server and browser agree. */
   locale?: Intl.LocalesArgument
@@ -148,10 +148,11 @@ function RollingNumber({
   const formatter = numberFormatter(locale, format)
   const { text, sign, prefix, number, suffix, tail } = numberParts(formatter, value)
   const direction = localeDirection(formatter)
-  return useRender({
-    defaultTagName: 'span',
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'animated-number',
         className: cn('whitespace-nowrap tabular-nums', className),
         children: (
           <>
@@ -176,8 +177,7 @@ function RollingNumber({
       props,
     ),
     render,
-    state: { slot: 'animated-number' },
-  })
+  )
 }
 
 function CountingNumber({
@@ -186,12 +186,11 @@ function CountingNumber({
   format,
   className,
   render,
-  ref,
   ...props
 }: NumberProps) {
   const formatter = numberFormatter(locale, format)
   const text = formatter.format(value)
-  const surface = useRef<HTMLSpanElement>(null)
+  const [surface, setSurface] = useState<HTMLSpanElement | null>(null)
   const live = useRef<HTMLSpanElement>(null)
   const shown = useRef(value)
   const target = useRef(value)
@@ -199,8 +198,8 @@ function CountingNumber({
   useEffect(() => registerProgress(PROGRESS), [])
   // The box glides to each width the count reaches, so what follows it never jumps.
   useEffect(() => {
-    if (!surface.current || !live.current) return
-    const box = surface.current
+    const box = surface
+    if (!box || !live.current) return
     // It clips only while it catches up, so a box narrower than the number at rest still shows all of it.
     return followSize(box, live.current, 'width', {
       moving: () => {
@@ -209,7 +208,7 @@ function CountingNumber({
       },
       settled: () => delete box.dataset.following,
     })
-  }, [])
+  }, [surface])
 
   // Before the first paint of the new value, so it never shows before the count.
   useLayoutEffect(() => {
@@ -240,10 +239,12 @@ function CountingNumber({
     // The formatter, not `format`: an object passed anew on each render must not end a count.
   }, [value, text, formatter])
 
-  return useRender({
-    defaultTagName: 'span',
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'animated-number',
+        ref: setSurface,
         className: cn(
           // While the box catches up with a wider number, it clips it, so nothing after it is drawn over.
           'inline-flex whitespace-nowrap data-following:overflow-x-clip tabular-nums transition-[width] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none',
@@ -266,9 +267,7 @@ function CountingNumber({
       props,
     ),
     render,
-    ref: ref ? [surface, ref] : surface,
-    state: { slot: 'animated-number' },
-  })
+  )
 }
 
 function AnimatedNumber({

@@ -44,7 +44,6 @@ import {
   type ChartItem,
   type ChartPoint,
   plotLayerClassName,
-  tooltipTriggerId,
   useChartFocus,
   SeriesKey,
   useChartRootValue,
@@ -59,7 +58,7 @@ import {
   highlightClassName,
 } from '@/registry/lib/highlight'
 import { Swap } from '@/registry/lib/swap'
-import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
+import { Tooltip as TooltipPrimitive } from '@ui-sdk/react/tooltip'
 import {
   type ComponentProps,
   type CSSProperties,
@@ -575,9 +574,14 @@ function TimeAxis({
   // Only one, since two times close together would overlap inside the pill.
   const [named, setNamed] = useState<string | null>(null)
   if (litKey !== null && named !== litKey) setNamed(litKey)
+  const placedIn = useRef(direction)
   useEffect(() => {
-    highlight.current?.move(litKey === null ? null : target.current)
-  }, [litKey, length])
+    const item = litKey === null ? null : target.current
+    // The page's direction read after the first paint moves every name: the pill goes with it at once.
+    if (placedIn.current !== direction && item) highlight.current?.jump(item)
+    else highlight.current?.move(item)
+    placedIn.current = direction
+  }, [litKey, length, direction])
   const axisId = useId()
   if (!frame || !ladder) throw new Error('`TimeAxis` goes on a chart whose x is times.')
   const { scale } = frame
@@ -793,10 +797,14 @@ function CategoryAxis({
       highlight.current = null
     }
   }, [])
+  const placedIn = useRef(direction)
   useEffect(() => {
     const key = spotlit === null ? undefined : current[spotlit]?.key
-    highlight.current?.move(key === undefined ? null : (names.current.get(key) ?? null))
-  }, [spotlit, current, length])
+    const item = key === undefined ? null : (names.current.get(key) ?? null)
+    if (placedIn.current !== direction && item) highlight.current?.jump(item)
+    else highlight.current?.move(item)
+    placedIn.current = direction
+  }, [spotlit, current, length, direction])
   const write = categoryFormat ?? format
   // How wide a name is with its padding, measured in the chart's font.
   const nameLength = (name: AxisNames['all'][number]) => textWidth(write(name.value)) + 12
@@ -1493,7 +1501,7 @@ function ChartTooltip({
   children,
   ...props
 }: ChartTooltipProps) {
-  const { reader, tooltip, id, status, plot } = useChartRootValue()
+  const { reader, tooltip, status, plot } = useChartRootValue()
   const { focus, setFocus } = useChartFocus()
   const { browse } = reader
   const open = browse !== null && focus !== null && status === 'ready'
@@ -1512,10 +1520,9 @@ function ChartTooltip({
   const point = target === null ? null : browse.anchor(target)
   return (
     <GlideGroupMemory>
-      <TooltipPrimitive.Root
-        handle={tooltip}
+      <TooltipPrimitive
+        controller={tooltip}
         open={open}
-        triggerId={open ? tooltipTriggerId(id) : null}
         onOpenChange={(next, details) => {
           if (next) return
           // The plot clears it when the pointer leaves or focus goes, so only Escape and a press
@@ -1535,14 +1542,20 @@ function ChartTooltip({
             return
           setFocus(null)
         }}
-        disableHoverablePopup
       >
         {target !== null && (item !== null || content != null) && (
           <ChartTooltipPopup
             // A new side starts the popup afresh there, rather than sliding it across the marks.
             key={point?.side}
             point={point}
-            side={side ?? point?.side}
+            side={
+              side ??
+              (point?.side === 'inline-start'
+                ? 'start'
+                : point?.side === 'inline-end'
+                  ? 'end'
+                  : point?.side)
+            }
             align={align}
             className={className}
             {...props}
@@ -1550,7 +1563,7 @@ function ChartTooltip({
             <ChartTooltipTotal value={total}>{content}</ChartTooltipTotal>
           </ChartTooltipPopup>
         )}
-      </TooltipPrimitive.Root>
+      </TooltipPrimitive>
     </GlideGroupMemory>
   )
 }
@@ -1570,9 +1583,6 @@ function ChartTooltipPopup({
   const y = point?.y ?? 0
   const anchor = useMemo(
     () => ({
-      get contextElement() {
-        return plot.current ?? undefined
-      },
       getBoundingClientRect: () => {
         const box = plot.current?.getBoundingClientRect()
         if (!box) return new DOMRect()

@@ -43,8 +43,8 @@ import {
 } from '@/registry/lib/placeholder'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { sameOrder } from '@/registry/lib/sort'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, renderElement } from '@ui-sdk/react/primitive'
+import { Toggle as TogglePrimitive } from '@ui-sdk/react/toggle'
 import {
   type ComponentProps,
   type CSSProperties,
@@ -662,15 +662,14 @@ const BarListRow = memo(function BarListRow({
         <CutTooltip
           labels={NAME}
           render={
-            <button
-              type='button'
-              aria-pressed={picked}
+            <TogglePrimitive
+              pressed={picked}
+              onPressedChange={() => togglePicked({ kind: 'x', key: itemKey })}
               className={rowClassName}
-              onClick={() => togglePicked({ kind: 'x', key: itemKey })}
               {...events}
             >
               {content}
-            </button>
+            </TogglePrimitive>
           }
         />
       ) : (
@@ -693,14 +692,11 @@ function BarListLink({
   linkRender,
   ...props
 }: ComponentProps<'a'> & { linkRender: ReactElement | undefined }) {
-  const element = useRender({
-    defaultTagName: 'a',
-    render: linkRender,
-    props: mergeProps<'a'>(
-      { 'data-slot': 'bar-list-link' } as ComponentProps<'a'>,
-      props,
-    ),
-  })
+  const element = renderElement(
+    'a',
+    mergeProps({ 'data-slot': 'bar-list-link' }, props),
+    linkRender,
+  )
   return <CutTooltip labels={NAME} render={element} />
 }
 

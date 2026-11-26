@@ -1,8 +1,7 @@
 'use client'
 
 import { panelDescriptionClassName, panelTitleClassName } from '@/registry/lib/panel'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -23,12 +22,12 @@ function Card({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'card',
         className: cn(
           'group/card bg-card text-card-foreground relative flex min-w-0 flex-col gap-(--surface-gap) rounded-(--surface-radius) border py-(--surface-padding) text-sm shadow-xs',
           // A footer, and a section at either end, reach the card's edge.
@@ -38,8 +37,8 @@ function Card({
       },
       props,
     ),
-    state: { slot: 'card' },
-  })
+    render,
+  )
 }
 
 /** The title, the description and an action. With a `CardAction`, the action takes the end of the first row. */
@@ -61,13 +60,18 @@ function CardTitle({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'h3'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'h3',
+}: Omit<PartProps<'h3'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'h3',
+    mergeProps(
+      {
+        'data-slot': 'card-title',
+        className: cn(panelTitleClassName, className),
+      },
+      props,
+    ),
     render,
-    props: mergeProps<'h3'>({ className: cn(panelTitleClassName, className) }, props),
-    state: { slot: 'card-title' },
-  })
+  )
 }
 
 function CardDescription({ className, ...props }: ComponentProps<'div'>) {
@@ -116,12 +120,12 @@ function CardSection({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'card-section',
         className: cn(
           // Rows meet a header's border, with no gap. `min-h-0` lets an `aspect-*` hold a taller picture to its ratio. Inside the border, its corner is the card's less the border's width.
           'relative min-h-0 min-w-0 overflow-clip [[data-slot=card-header].border-b+&]:-mt-(--surface-gap) first:rounded-t-[calc(var(--surface-radius)-1px)] last:rounded-b-[calc(var(--surface-radius)-1px)] [&>img,&>video]:size-full [&>img,&>video]:object-cover',
@@ -130,8 +134,8 @@ function CardSection({
       },
       props,
     ),
-    state: { slot: 'card-section' },
-  })
+    render,
+  )
 }
 
 /**
@@ -160,12 +164,12 @@ function CardLink({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'a'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'a',
-    render,
-    props: mergeProps<'a'>(
+}: Omit<PartProps<'a'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'a',
+    mergeProps(
       {
+        'data-slot': 'card-link',
         className: cn(
           // Its hit area lies over the card's border box, and draws the card's hover
           // border and focus ring on it, on `press` as the choice cards do.
@@ -175,8 +179,8 @@ function CardLink({
       },
       props,
     ),
-    state: { slot: 'card-link' },
-  })
+    render,
+  )
 }
 
 export {

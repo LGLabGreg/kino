@@ -577,8 +577,19 @@ function trackGlide(
 
   // What a write reads from the placed element's style. The tracker writes
   // that style too, so a change of anything else is its own and skipped.
+  // ui-sdk's Navigation menu sizes its viewport to the next panel a frame
+  // before it places it there.
   const placing = () =>
-    ['left', 'top', 'transform', 'opacity', '--anchor-width', '--anchor-height']
+    [
+      'left',
+      'top',
+      'transform',
+      'opacity',
+      '--anchor-width',
+      '--anchor-height',
+      '--viewport-width',
+      '--viewport-height',
+    ]
       .map((name) => placed.style.getPropertyValue(name))
       .join()
   let seen = placing()
@@ -697,7 +708,7 @@ export function GlideContent({
   reopen = 'slide',
   instant = popupInstant,
   placedBy = 'ui-sdk',
-}: { children: ReactNode } & Partial<GlideOptions>) {
+}: { children?: ReactNode } & Partial<GlideOptions>) {
   const memory = use(GlideMemoryContext)
   // Stable, so a render doesn't start the tracking over.
   const track = useCallback(
@@ -709,6 +720,27 @@ export function GlideContent({
     <div
       ref={track}
       className={cn(glideClipClassName, glideTiming)}
+      style={glideClip('0px')}
+    >
+      {children}
+    </div>
+  )
+}
+
+/**
+ * For content the library renders straight into the popup, after an empty
+ * `GlideContent` that tracks the box, as the Navigation menu's viewport
+ * renders each panel: a layer as large as the popup, clipped to the same
+ * box on the same timing, that lets the pointer through to what it holds.
+ */
+export function GlideClip({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-0 *:pointer-events-auto',
+        glideClipClassName,
+        glideTiming,
+      )}
       style={glideClip('0px')}
     >
       {children}

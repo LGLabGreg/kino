@@ -408,7 +408,7 @@ function MenuSheetSeparator({
   if (sheet) {
     return (
       <Separator
-        data-slot='menu-sheet-separator'
+        data-menu-sheet-separator=''
         className={cn(menuSeparatorClassName, 'mx-0', className)}
         {...(sheetProps(props) as ComponentProps<typeof Separator>)}
       />

@@ -12,7 +12,6 @@ import {
   labelStep,
 } from '@/registry/lib/chart-math'
 import {
-  ChartTooltipBox,
   type ChartFormat,
   ChartLegendToggles,
   ChartStyle,
@@ -27,7 +26,13 @@ import {
 } from '@/registry/lib/chart-root'
 import { type LinearScale, linearScale, tickCountFor } from '@/registry/lib/chart-scale'
 import { useControllable } from '@/registry/lib/controllable'
-import { GlideGroupMemory } from '@/registry/lib/glide'
+import {
+  GlideContent,
+  GlideGroupMemory,
+  tooltipBoxClassName,
+  tooltipLabelClassName,
+  TooltipSurface,
+} from '@/registry/lib/glide'
 import {
   highlightStep,
   type HighlightState,
@@ -38,9 +43,11 @@ import {
   placeholderBreatheClassName,
   placeholderFillClassName,
 } from '@/registry/lib/placeholder'
+import { basePopupGrow, basePositionerProps, usePopupLayer } from '@/registry/lib/popup'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
 import { edgeFadeClassName, followEdges } from '@/registry/lib/scroll'
+import { useDirection } from '@base-ui/react/direction-provider'
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
 import type { TreeMode } from '@ui-sdk/react/tree'
 import {
@@ -935,7 +942,7 @@ function WaterfallSpan({
 function WaterfallTooltip({
   className,
   ...props
-}: Omit<ComponentProps<typeof ChartTooltipBox>, 'children' | 'anchor'>) {
+}: Omit<ComponentProps<typeof WaterfallTooltipBox>, 'children' | 'anchor'>) {
   const { spans, config, kinds, write, messages, id } = useWaterfall()
   const { active } = use(WaterfallActiveContext)
   // Escape closes it until another span is lit, or this one again.
@@ -962,7 +969,7 @@ function WaterfallTooltip({
         disableHoverablePopup
       >
         {span && (
-          <ChartTooltipBox
+          <WaterfallTooltipBox
             side='top'
             sideOffset={8}
             anchor={span.bar}
@@ -1010,10 +1017,62 @@ function WaterfallTooltip({
                 </div>
               )}
             </div>
-          </ChartTooltipBox>
+          </WaterfallTooltipBox>
         )}
       </TooltipPrimitive.Root>
     </GlideGroupMemory>
+  )
+}
+
+/**
+ * The tooltip's box, on the old library until the Waterfall's own move:
+ * the charts' box, against `anchor`; inside a `GlideGroupMemory`, it slides
+ * from bar to bar.
+ */
+function WaterfallTooltipBox({
+  className,
+  children,
+  style,
+  side = 'top',
+  align = 'center',
+  sideOffset = 6,
+  alignOffset = 0,
+  anchor: placeAgainst,
+  ...props
+}: Omit<TooltipPrimitive.Popup.Props, 'className'> & {
+  className?: string
+} & Pick<
+    TooltipPrimitive.Positioner.Props,
+    'side' | 'align' | 'sideOffset' | 'alignOffset' | 'anchor'
+  >) {
+  const { dir, anchor } = basePopupGrow(useDirection())
+  return (
+    <TooltipPrimitive.Portal container={usePopupLayer()}>
+      <TooltipPrimitive.Positioner
+        {...basePositionerProps}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        alignOffset={alignOffset}
+        anchor={placeAgainst}
+        positionMethod='fixed'
+      >
+        <TooltipPrimitive.Popup
+          data-slot='tooltip-content'
+          // Portalled out of the page's tree, so it takes the reading direction with it.
+          dir={dir}
+          style={style}
+          className={tooltipBoxClassName}
+          {...props}
+        >
+          <TooltipSurface />
+          <GlideContent placedBy='base-ui'>
+            <div className={cn(tooltipLabelClassName, className)}>{children}</div>
+          </GlideContent>
+          <TooltipPrimitive.Arrow {...anchor} />
+        </TooltipPrimitive.Popup>
+      </TooltipPrimitive.Positioner>
+    </TooltipPrimitive.Portal>
   )
 }
 

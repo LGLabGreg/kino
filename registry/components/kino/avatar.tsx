@@ -3,9 +3,12 @@
 import { followFlow } from '@/registry/lib/flow'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
-import { Avatar as AvatarPrimitive } from '@base-ui/react/avatar'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import {
+  AvatarFallback as AvatarFallbackPrimitive,
+  AvatarImage as AvatarImagePrimitive,
+  Avatar as AvatarPrimitive,
+} from '@ui-sdk/react/avatar'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -63,13 +66,12 @@ function Avatar({
   className,
   size,
   ...props
-}: Omit<AvatarPrimitive.Root.Props, 'className'> & {
+}: Omit<ComponentProps<typeof AvatarPrimitive>, 'className'> & {
   className?: string
 } & VariantProps<typeof avatarVariants>) {
   const inherited = use(AvatarSizeContext)
   return (
-    <AvatarPrimitive.Root
-      data-slot='avatar'
+    <AvatarPrimitive
       className={cn(avatarVariants({ size: size ?? inherited }), className)}
       {...props}
     />
@@ -83,15 +85,17 @@ function Avatar({
 function AvatarImage({
   className,
   ...props
-}: Omit<AvatarPrimitive.Image.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof AvatarImagePrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <AvatarPrimitive.Image
-      data-slot='avatar-image'
-      // In the page's HTML, so a photo already there shows from the first
-      // paint and only one that has to load fades in.
-      keepMounted
+    <AvatarImagePrimitive
       className={cn(
-        'absolute inset-0 size-full object-cover transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-error:hidden data-loading:opacity-0',
+        // ui-sdk keeps an image out of sight until it has loaded, and fades it
+        // in on `enter` as it does. One in the page's HTML that it hasn't
+        // checked yet shows, so a photo already there is there from the first
+        // paint, and only one that has to load fades in.
+        'absolute inset-0 size-full object-cover transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-[loading-status=idle]:size-full! data-[loading-status=idle]:opacity-100!',
         className,
       )}
       {...props}
@@ -103,10 +107,11 @@ function AvatarImage({
 function AvatarFallback({
   className,
   ...props
-}: Omit<AvatarPrimitive.Fallback.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof AvatarFallbackPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <AvatarPrimitive.Fallback
-      data-slot='avatar-fallback'
+    <AvatarFallbackPrimitive
       className={cn('flex size-full items-center justify-center uppercase', className)}
       {...props}
     />
@@ -184,15 +189,19 @@ function AvatarStackCount({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'span'>, 'children'> & { count: number }) {
+}: Omit<PartProps<'span'>, 'children' | 'className'> & {
+  count: number
+  className?: string
+}) {
   const size = use(AvatarSizeContext) ?? 'default'
   const [seen, setSeen] = useState({ count, trend: 1 })
   if (seen.count !== count) setSeen({ count, trend: count - seen.count })
   const { shown, spoken } = stackCountLabel(count)
-  const element = useRender({
-    defaultTagName: 'span',
-    props: mergeProps<'span'>(
+  const element = renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'avatar-stack-count',
         className: cn(
           'bg-muted text-foreground relative inline-flex size-(--avatar-size) shrink-0 items-center justify-center rounded-full font-medium tabular-nums select-none forced-colors:border',
           avatarSizes[size],
@@ -211,8 +220,7 @@ function AvatarStackCount({
       props,
     ),
     render,
-    state: { slot: 'avatar-stack-count' },
-  })
+  )
   return count > 0 ? element : null
 }
 

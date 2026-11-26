@@ -5,8 +5,15 @@ import {
   followEdges,
   scrollRegionRingClassName,
 } from '@/registry/lib/scroll'
-import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area'
-import { useEffect, useRef } from 'react'
+import {
+  ScrollAreaContent as ScrollAreaContentPrimitive,
+  ScrollAreaCorner as ScrollAreaCornerPrimitive,
+  ScrollArea as ScrollAreaPrimitive,
+  ScrollAreaScrollbar as ScrollAreaScrollbarPrimitive,
+  ScrollAreaThumb as ScrollAreaThumbPrimitive,
+  ScrollAreaViewport as ScrollAreaViewportPrimitive,
+} from '@ui-sdk/react/scroll-area'
+import { type ComponentProps, type ReactNode, useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -23,7 +30,10 @@ function ScrollArea({
   'aria-label': label,
   'aria-labelledby': labelledBy,
   ...props
-}: Omit<ScrollAreaPrimitive.Root.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof ScrollAreaPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const viewportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -33,19 +43,17 @@ function ScrollArea({
   }, [])
 
   return (
-    <ScrollAreaPrimitive.Root
-      data-slot='scroll-area'
+    <ScrollAreaPrimitive
       className={cn('flex min-h-0 flex-col', scrollRegionRingClassName, className)}
       {...props}
     >
-      <ScrollAreaPrimitive.Viewport
+      <ScrollAreaViewportPrimitive
         ref={viewportRef}
-        data-slot='scroll-area-viewport'
-        // Base UI makes it focusable while it scrolls, so the keyboard can
-        // scroll it: a region then, named by the label given. Content that
-        // fits leaves it a plain box, which can't carry a name.
+        // While it scrolls it is a region, named by the label given, which the
+        // keyboard can reach. Content that fits leaves it a plain box, which
+        // can't carry a name.
         render={(viewportProps, state) =>
-          state.hasOverflowX || state.hasOverflowY ? (
+          state.overflowX || state.overflowY ? (
             <div
               {...viewportProps}
               role='region'
@@ -61,33 +69,30 @@ function ScrollArea({
           edgeFadeClassName,
         )}
       >
-        <ScrollAreaPrimitive.Content data-slot='scroll-area-content'>
-          {children}
-        </ScrollAreaPrimitive.Content>
-      </ScrollAreaPrimitive.Viewport>
+        <ScrollAreaContentPrimitive>{children}</ScrollAreaContentPrimitive>
+      </ScrollAreaViewportPrimitive>
       <ScrollBar orientation='vertical' />
       <ScrollBar orientation='horizontal' />
-      <ScrollAreaPrimitive.Corner data-slot='scroll-area-corner' />
-    </ScrollAreaPrimitive.Root>
+      <ScrollAreaCornerPrimitive />
+    </ScrollAreaPrimitive>
   )
 }
 
 /*
- * Base UI renders a bar only while its axis overflows. Hidden, it lets the
- * pointer through to the content under it; it shows on `enter` and leaves on
- * `exit`. The bar is 10px across, wider than its thumb, so it is easier to
+ * ui-sdk shows a bar only while its axis overflows. Hidden, it lets the
+ * pointer through to the content under it; it shows on `enter` while the
+ * pointer is over the box or it scrolls, and leaves on `exit`. The bar is 10px across, wider than its thumb, so it is easier to
  * catch.
  */
 function ScrollBar({
   className,
   orientation = 'vertical',
   ...props
-}: Omit<ScrollAreaPrimitive.Scrollbar.Props, 'className'> & {
+}: Omit<ComponentProps<typeof ScrollAreaScrollbarPrimitive>, 'className'> & {
   className?: string
 }) {
   return (
-    <ScrollAreaPrimitive.Scrollbar
-      data-slot='scroll-area-scrollbar'
+    <ScrollAreaScrollbarPrimitive
       orientation={orientation}
       className={cn(
         'pointer-events-none z-10 flex touch-none p-0.5 opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-easing) select-none data-hovering:pointer-events-auto data-hovering:opacity-100 data-hovering:duration-(--motion-enter-duration) data-hovering:ease-(--motion-enter-easing) data-scrolling:pointer-events-auto data-scrolling:opacity-100 data-scrolling:duration-(--motion-enter-duration) data-scrolling:ease-(--motion-enter-easing) data-[orientation=horizontal]:h-2.5 data-[orientation=horizontal]:flex-col data-[orientation=vertical]:w-2.5',
@@ -95,11 +100,8 @@ function ScrollBar({
       )}
       {...props}
     >
-      <ScrollAreaPrimitive.Thumb
-        data-slot='scroll-area-thumb'
-        className='bg-foreground/25 hover:bg-foreground/40 active:bg-foreground/50 flex-1 rounded-full transition-colors duration-(--motion-press-duration) ease-(--motion-press-fade-easing) forced-colors:bg-[CanvasText]'
-      />
-    </ScrollAreaPrimitive.Scrollbar>
+      <ScrollAreaThumbPrimitive className='bg-foreground/25 hover:bg-foreground/40 active:bg-foreground/50 flex-1 rounded-full transition-colors duration-(--motion-press-duration) ease-(--motion-press-fade-easing) forced-colors:bg-[CanvasText]' />
+    </ScrollAreaScrollbarPrimitive>
   )
 }
 

@@ -6,13 +6,14 @@ import { useSaveBar } from '@/registry/lib/form-changes'
 import { ariaShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { mergeRefs } from '@/registry/lib/refs'
 import { Swap, SwapText, swapIconClassName } from '@/registry/lib/swap'
-import { useDirection } from '@base-ui/react/direction-provider'
+import { isRTL } from '@ui-sdk/core'
 import {
   type ComponentProps,
   createContext,
   type ReactNode,
   use,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
 } from 'react'
@@ -73,13 +74,15 @@ function SaveBar({
   const refs = useMemo(() => mergeRefs(ref, barRef), [ref, barRef])
   const apple = useApplePlatform()
   const spinning = useSpinner(saving)
-  const direction = useDirection()
   const barId = useId()
+  // Rendered out of the form's tree, so it takes the form's reading direction as it opens.
+  useLayoutEffect(() => {
+    if (frame.current) frame.current.dir = isRTL(anchorRef.current) ? 'rtl' : 'ltr'
+  }, [open, into, anchorRef])
 
   const bar = (
     <div
       ref={frame}
-      dir={direction}
       data-slot='save-bar-frame'
       // Across the form's width, so the bar sits centred under it however the page lays it out; above another bar open before it.
       className='@container pointer-events-none fixed bottom-0 left-(--save-bar-left,0px) z-40 flex w-(--save-bar-width,100%) -translate-y-(--save-bar-stack,0px) justify-center px-4 transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none'

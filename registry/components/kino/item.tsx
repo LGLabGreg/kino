@@ -9,10 +9,18 @@ import {
   rowTintClassName,
   tintedRowTextClassName,
 } from '@/registry/lib/highlight'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { type ComponentProps, createContext, use, useEffect, useRef } from 'react'
+import {
+  type ComponentProps,
+  createContext,
+  type MouseEvent,
+  type ReactNode,
+  use,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -81,21 +89,23 @@ function Item({
   children,
   onClick,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className'> & {
   className?: string
 } & VariantProps<typeof itemVariants>) {
   const inGroup = use(GroupContext)
-  const item = useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+  const item = renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item',
+        'data-variant': variant ?? 'default',
+        'data-size': size ?? 'default',
         className: cn(
           itemVariants({ variant, size }),
           !inGroup && hoveredRowTextClassName,
           className,
         ),
-        onClick: (event) => {
+        onClick: (event: MouseEvent<HTMLDivElement>) => {
           // A link can't be disabled: one marked `aria-disabled` still takes focus, so it
           // is read, but Enter and a press do nothing.
           if (event.currentTarget.getAttribute('aria-disabled') === 'true') {
@@ -115,8 +125,8 @@ function Item({
       },
       props,
     ),
-    state: { slot: 'item', variant: variant ?? 'default', size: size ?? 'default' },
-  })
+    render,
+  )
   if (!inGroup) return item
   return (
     <div role='listitem' data-slot='item-listitem' className='grid min-w-0'>
@@ -134,11 +144,13 @@ function ItemGroup({
   children,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  const groupRef = useRef<HTMLDivElement>(null)
+}: Omit<PartProps<'div'>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
+  const [group, setGroup] = useState<HTMLDivElement | null>(null)
   const layerRef = useRef<HTMLSpanElement>(null)
   useEffect(() => {
-    const group = groupRef.current
     const layer = layerRef.current
     if (!group || !layer) return
     return followPointer(group, layer, {
@@ -147,13 +159,13 @@ function ItemGroup({
       }),
       focus: true,
     })
-  }, [])
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    ref: groupRef,
-    props: mergeProps<'div'>(
+  }, [group])
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item-group',
+        ref: setGroup,
         role: 'list',
         className: cn(
           'group/item-group relative isolate flex min-w-0 flex-col',
@@ -173,8 +185,8 @@ function ItemGroup({
       },
       props,
     ),
-    state: { slot: 'item-group' },
-  })
+    render,
+  )
 }
 
 /** A line between items. Decorative: the list already says where each item ends. */
@@ -182,7 +194,7 @@ function ItemSeparator({ className, ...props }: ComponentProps<typeof Separator>
   return (
     <Separator
       aria-hidden
-      data-slot='item-separator'
+      data-item-separator=''
       className={cn('my-0', className)}
       {...props}
     />
@@ -214,18 +226,22 @@ function ItemMedia({
   variant,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & {
+}: Omit<PartProps<'div'>, 'className'> & {
   className?: string
 } & VariantProps<typeof itemMediaVariants>) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
-      { 'aria-hidden': true, className: cn(itemMediaVariants({ variant }), className) },
+  return renderElement(
+    'div',
+    mergeProps(
+      {
+        'data-slot': 'item-media',
+        'data-variant': variant ?? 'default',
+        'aria-hidden': true,
+        className: cn(itemMediaVariants({ variant }), className),
+      },
       props,
     ),
-    state: { slot: 'item-media', variant: variant ?? 'default' },
-  })
+    render,
+  )
 }
 
 /** The title and the description, taking the room the media and actions leave. */
@@ -233,12 +249,12 @@ function ItemContent({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item-content',
         className: cn(
           // Never narrower than a short name: below that, the actions wrap onto a line of
           // their own rather than squeeze the text to a letter a line. A second content
@@ -249,8 +265,8 @@ function ItemContent({
       },
       props,
     ),
-    state: { slot: 'item-content' },
-  })
+    render,
+  )
 }
 
 /** A long unbroken word, such as an ID or a URL, breaks rather than run out of the row. */
@@ -258,12 +274,12 @@ function ItemTitle({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item-title',
         className: cn(
           'flex w-fit max-w-full min-w-0 items-center gap-2 text-sm leading-5 font-medium wrap-anywhere',
           className,
@@ -271,20 +287,20 @@ function ItemTitle({
       },
       props,
     ),
-    state: { slot: 'item-title' },
-  })
+    render,
+  )
 }
 
 function ItemDescription({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'p'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'p',
-    render,
-    props: mergeProps<'p'>(
+}: Omit<PartProps<'p'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'p',
+    mergeProps(
       {
+        'data-slot': 'item-description',
         className: cn(
           // A small item's line is the small print under a name, as in a list of people.
           'text-muted-foreground *:[a]:hover:text-foreground text-sm leading-5 text-pretty wrap-anywhere group-data-[size=sm]/item:text-xs group-data-[size=sm]/item:leading-4 *:[a]:underline *:[a]:underline-offset-3',
@@ -293,8 +309,8 @@ function ItemDescription({
       },
       props,
     ),
-    state: { slot: 'item-description' },
-  })
+    render,
+  )
 }
 
 /** Buttons and controls at the end of the row. */
@@ -302,16 +318,18 @@ function ItemActions({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
-      { className: cn('flex shrink-0 items-center gap-2', className) },
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
+      {
+        'data-slot': 'item-actions',
+        className: cn('flex shrink-0 items-center gap-2', className),
+      },
       props,
     ),
-    state: { slot: 'item-actions' },
-  })
+    render,
+  )
 }
 
 /** A line across the whole row, above the rest, such as a picture's. */
@@ -319,18 +337,18 @@ function ItemHeader({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item-header',
         className: cn('flex basis-full items-center justify-between gap-2', className),
       },
       props,
     ),
-    state: { slot: 'item-header' },
-  })
+    render,
+  )
 }
 
 /** A line across the whole row, below the rest. */
@@ -338,18 +356,18 @@ function ItemFooter({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'div'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'div',
-    render,
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'item-footer',
         className: cn('flex basis-full items-center justify-between gap-2', className),
       },
       props,
     ),
-    state: { slot: 'item-footer' },
-  })
+    render,
+  )
 }
 
 export {

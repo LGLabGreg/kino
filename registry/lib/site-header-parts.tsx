@@ -117,7 +117,7 @@ function PanelLink({ link }: { link: SiteHeaderLink }) {
   return (
     <NavigationMenuLink
       href={link.href}
-      active={link.current}
+      current={link.current}
       className='flex-row items-start gap-3'
     >
       <SiteHeaderLinkBody link={link} />
@@ -176,7 +176,7 @@ function SiteHeaderNav({
             </NavigationMenuItem>
           ) : (
             <NavigationMenuItem key={item.href}>
-              <NavigationMenuLink href={item.href} active={item.current}>
+              <NavigationMenuLink href={item.href} current={item.current}>
                 {item.label}
               </NavigationMenuLink>
             </NavigationMenuItem>
@@ -560,7 +560,8 @@ function useHeaderScroll(
     let drawn = false
     let pointed = false
     let anchor = position()
-    const open = () => header.querySelector('[data-popup-open]') !== null
+    // A trigger says its popup is open.
+    const open = () => header.querySelector('[aria-expanded=true]') !== null
     const write = () => {
       header.toggleAttribute('data-scrolled', state.scrolled)
       header.toggleAttribute('data-hidden', state.hidden)
@@ -611,7 +612,7 @@ function useHeaderScroll(
     if (draws) {
       header.addEventListener('pointerenter', enter)
       header.addEventListener('pointerleave', leave)
-      menus.observe(header, { subtree: true, attributeFilter: ['data-popup-open'] })
+      menus.observe(header, { subtree: true, attributeFilter: ['aria-expanded'] })
     }
     return () => {
       document.removeEventListener('scroll', scroll, { capture: true })

@@ -11,8 +11,7 @@ import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
 import { followPointer, highlightClassName, itemMatching } from '@/registry/lib/highlight'
 import { flattenChildren } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import {
   cloneElement,
   type ComponentProps,
@@ -132,18 +131,18 @@ function BreadcrumbLink({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'a'>, 'className'> & { className?: string }) {
-  return useRender({
-    defaultTagName: 'a',
-    render,
-    props: mergeProps<'a'>(
+}: Omit<PartProps<'a'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'a',
+    mergeProps(
       {
         'data-slot': 'breadcrumb-link',
         className: cn(crumbClassName, crumbLinkClassName, className),
-      } as ComponentProps<'a'>,
+      },
       props,
     ),
-  })
+    render,
+  )
 }
 
 /**
@@ -244,7 +243,7 @@ function BreadcrumbOverflow({
             setFolded(foldedCrumbs(list))
           }}
           onOpenChangeComplete={(open) => {
-            // Base UI hands focus back to "…" once the menu has gone: refit after that.
+            // The menu hands focus back to "…" once it has gone: refit after that.
             if (!open)
               requestAnimationFrame(() => item.current?.removeAttribute('data-menu'))
           }}

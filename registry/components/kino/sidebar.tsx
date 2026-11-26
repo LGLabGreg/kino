@@ -479,7 +479,7 @@ function SidebarContent({
 }) {
   return (
     <ScrollArea
-      data-slot='sidebar-content'
+      data-sidebar-content=''
       aria-label={label}
       className='group/sidebar-content min-h-0 flex-1'
       {...props}

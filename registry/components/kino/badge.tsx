@@ -1,8 +1,7 @@
 'use client'
 
 import { SwapText, flattenChildren } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
 import type { ReactNode } from 'react'
 
@@ -53,21 +52,23 @@ function Badge({
   render,
   children,
   ...props
-}: Omit<useRender.ComponentProps<'span'>, 'className'> & {
+}: Omit<PartProps<'span'>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
 } & VariantProps<typeof badgeVariants>) {
-  return useRender({
-    defaultTagName: 'span',
-    render,
-    props: mergeProps<'span'>(
+  return renderElement(
+    'span',
+    mergeProps(
       {
+        'data-slot': 'badge',
+        'data-variant': variant ?? 'default',
         className: cn(badgeVariants({ variant }), className),
         children: <Label>{children}</Label>,
       },
       props,
     ),
-    state: { slot: 'badge', variant: variant ?? 'default' },
-  })
+    render,
+  )
 }
 
 /** A label of words or a number crossfades to the next one, and the badge glides to its width. */

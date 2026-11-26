@@ -3,6 +3,7 @@
 import { Spinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
+  gaugeText,
   slidingFillClassName,
   slidingFillStyle,
   trackClassName,
@@ -12,13 +13,29 @@ import {
   trackRootClassName,
   valuePercent,
 } from '@/registry/lib/track'
-import { Progress as ProgressPrimitive } from '@base-ui/react/progress'
-import type { ReactNode } from 'react'
+import {
+  ProgressIndicator as ProgressIndicatorPrimitive,
+  ProgressLabel as ProgressLabelPrimitive,
+  Progress as ProgressPrimitive,
+  ProgressTrack as ProgressTrackPrimitive,
+  ProgressValue as ProgressValuePrimitive,
+  type ProgressValueState,
+} from '@ui-sdk/react/progress'
+import type { ComponentProps, ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
-type ProgressProps = Omit<ProgressPrimitive.Root.Props, 'className'> & {
+type ProgressRootProps = Omit<
+  ComponentProps<typeof ProgressPrimitive>,
+  'className' | 'format' | 'locale' | 'children'
+> & {
   className?: string
+  /** How `ProgressValue` and the value read out are written: a percentage by default. */
+  format?: Intl.NumberFormatOptions
+  locale?: Intl.LocalesArgument
+}
+
+type ProgressProps = ProgressRootProps & {
   /** `destructive` for a task that failed: the fill turns red and stops looking live. */
   variant?: 'default' | 'destructive'
   /** Names a progress that has no `ProgressLabel`. */
@@ -34,19 +51,21 @@ function Progress({
   min = 0,
   max = 100,
   variant = 'default',
+  format,
+  locale,
   ...props
 }: ProgressProps) {
-  const percent = valuePercent(value, min, max)
+  const percent = valuePercent(value ?? null, min, max)
   // Live once it has started, until it ends or fails.
   const running = percent > 0 && percent < 100 && variant === 'default'
   return (
-    <ProgressPrimitive.Root
-      data-slot='progress'
+    <ProgressPrimitive
       data-variant={variant}
       data-live={running || undefined}
       value={value}
       min={min}
       max={max}
+      format={(reading: number) => gaugeText(reading, { min, max, locale, format })}
       className={cn(trackRootClassName, 'group/progress', className)}
       {...props}
     >
@@ -55,12 +74,8 @@ function Progress({
           {children}
         </div>
       ) : null}
-      <ProgressPrimitive.Track
-        data-slot='progress-track'
-        className={cn(trackClassName, 'overflow-hidden')}
-      >
-        <ProgressPrimitive.Indicator
-          data-slot='progress-indicator'
+      <ProgressTrackPrimitive className={cn(trackClassName, 'overflow-hidden')}>
+        <ProgressIndicatorPrimitive
           style={slidingFillStyle(percent)}
           className={cn(
             slidingFillClassName,
@@ -73,7 +88,7 @@ function Progress({
             aria-hidden
             className='via-primary-foreground/35 pointer-events-none absolute inset-y-0 start-0 w-[30%] animate-[kino-progress-sheen_calc(var(--motion-layout-duration)*5)_linear_infinite] bg-linear-to-r from-transparent to-transparent opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-easing) [animation-play-state:paused] group-data-live/progress:opacity-100 group-data-live/progress:[animation-play-state:running] motion-reduce:hidden forced-colors:hidden rtl:bg-linear-to-l'
           />
-        </ProgressPrimitive.Indicator>
+        </ProgressIndicatorPrimitive>
         {/* Unknown length: a piece of the fill slides across. It pauses where it is and fades as the real fill draws in. */}
         <span
           aria-hidden
@@ -83,31 +98,29 @@ function Progress({
             'start-0 w-2/5 animate-[kino-progress-slide_calc(var(--motion-layout-duration)*4)_ease-in-out_infinite] rounded-full opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-easing) [animation-play-state:paused] group-data-indeterminate/progress:opacity-100 group-data-indeterminate/progress:duration-(--motion-enter-duration) group-data-indeterminate/progress:[animation-play-state:running] motion-reduce:w-full motion-reduce:animate-none motion-reduce:group-data-indeterminate/progress:animate-pulse',
           )}
         />
-      </ProgressPrimitive.Track>
-    </ProgressPrimitive.Root>
+      </ProgressTrackPrimitive>
+    </ProgressPrimitive>
   )
 }
 
 function ProgressLabel({
   className,
   ...props
-}: Omit<ProgressPrimitive.Label.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof ProgressLabelPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <ProgressPrimitive.Label
-      data-slot='progress-label'
-      className={cn(trackLabelClassName, className)}
-      {...props}
-    />
+    <ProgressLabelPrimitive className={cn(trackLabelClassName, className)} {...props} />
   )
 }
 
 type ProgressValueProps = Omit<
-  ProgressPrimitive.Value.Props,
+  ComponentProps<typeof ProgressValuePrimitive>,
   'children' | 'className'
 > & {
   className?: string
-  /** Writes the value yourself, such as `512 of 1,284`. Not called while the value is unknown. */
-  children?: (formattedValue: string, value: number) => ReactNode
+  /** Writes the value yourself from its state, such as `512 of 1,284`. Not called while the value is unknown. */
+  children?: (state: ProgressValueState & { value: number }) => ReactNode
   /** What it says beside a tick once the task is complete. */
   completeLabel?: ReactNode
 }
@@ -124,18 +137,21 @@ function ProgressValue({
   ...props
 }: ProgressValueProps) {
   return (
-    <ProgressPrimitive.Value
-      data-slot='progress-value'
+    <ProgressValuePrimitive
       className={cn(
         'text-muted-foreground ms-auto grid shrink-0 justify-items-end',
         className,
       )}
       {...props}
     >
-      {(formatted, value) => {
-        // Base UI writes "indeterminate" while the value is unknown; the row shows nothing then.
+      {(state) => {
+        // While the value is unknown, the row shows nothing.
         const text =
-          value === null ? null : children ? children(formatted ?? '', value) : formatted
+          state.value === null
+            ? null
+            : children
+              ? children({ ...state, value: state.value })
+              : state.text
         return (
           <>
             <span className='col-start-1 row-start-1 tabular-nums transition-[opacity,translate] duration-(--motion-exit-duration) ease-(--motion-exit-easing) group-data-complete/progress:-translate-y-(--progress-value-roll,0.375rem) group-data-complete/progress:opacity-0 group-data-[variant=destructive]/progress:translate-y-0 group-data-[variant=destructive]/progress:opacity-100 motion-reduce:translate-y-0'>
@@ -155,7 +171,7 @@ function ProgressValue({
           </>
         )
       }}
-    </ProgressPrimitive.Value>
+    </ProgressValuePrimitive>
   )
 }
 
@@ -170,19 +186,21 @@ function ProgressRing({
   value,
   min = 0,
   max = 100,
+  format,
+  locale,
   ...props
-}: Omit<ProgressPrimitive.Root.Props, 'className' | 'children'> & {
-  className?: string
+}: ProgressRootProps & {
   /** Names a ring that has no label beside it. */
   'aria-label'?: string
 }) {
-  const percent = valuePercent(value, min, max)
+  const percent = valuePercent(value ?? null, min, max)
   return (
-    <ProgressPrimitive.Root
-      data-slot='progress-ring'
+    <ProgressPrimitive
+      data-progress-ring=''
       value={value}
       min={min}
       max={max}
+      format={(reading: number) => gaugeText(reading, { min, max, locale, format })}
       className={cn(
         'group/progress-ring text-primary relative inline-grid size-4 shrink-0 forced-colors:text-[Highlight] *:col-start-1 *:row-start-1 *:size-full',
         className,
@@ -220,7 +238,7 @@ function ProgressRing({
         aria-hidden
         className='size-full opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-easing) [animation-play-state:paused] group-data-indeterminate/progress-ring:opacity-100 group-data-indeterminate/progress-ring:[animation-play-state:running]'
       />
-    </ProgressPrimitive.Root>
+    </ProgressPrimitive>
   )
 }
 

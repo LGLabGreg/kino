@@ -112,7 +112,7 @@ function PasswordStrength({
         value={level === null ? 0 : level + 1}
         max={4}
         low={2}
-        getAriaValueText={() => word ?? emptyLabel}
+        getValueLabel={() => word ?? emptyLabel}
       >
         <MeterLabel className='text-muted-foreground text-xs font-normal'>
           {label}

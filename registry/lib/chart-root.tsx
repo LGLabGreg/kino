@@ -31,15 +31,20 @@ import {
   TooltipSurface,
 } from '@/registry/lib/glide'
 import { numberFormatter } from '@/registry/lib/number-format'
-import { basePopupGrow, basePositionerProps, usePopupLayer } from '@/registry/lib/popup'
+import { POPUP_COLLISION_PADDING } from '@/registry/lib/popup'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
-import { FOLLOWS_TRANSITION } from '@/registry/lib/resize'
+import { FOLLOWS_TRANSITION, holdResizing } from '@/registry/lib/resize'
 import { revealBehavior, revealBy } from '@/registry/lib/scroll'
 import { Swap } from '@/registry/lib/swap'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
-import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
+import { isRTL } from '@ui-sdk/core'
+import { Toggle as TogglePrimitive } from '@ui-sdk/react/toggle'
+import {
+  createTooltipController,
+  TooltipContent as TooltipContentPrimitive,
+  type TooltipController,
+  TooltipTrigger as TooltipTriggerPrimitive,
+} from '@ui-sdk/react/tooltip'
 import {
   type ComponentProps,
   createContext,
@@ -754,24 +759,18 @@ function useResizing(root: RefObject<HTMLElement | null>, widthOnly: boolean) {
     const element = root.current
     if (!element) return
     let width: number | null = null
-    let frame = 0
+    const resizing = holdResizing(element)
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return
       const was = width
       width = entry.contentRect.width
       if (was === null || (widthOnly && was === width)) return
-      element.dataset.resizing = ''
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        frame = requestAnimationFrame(() => {
-          delete element.dataset.resizing
-        })
-      })
+      resizing.hold()
     })
     observer.observe(element)
     return () => {
       observer.disconnect()
-      cancelAnimationFrame(frame)
+      resizing.stop()
     }
   }, [root, widthOnly])
 }
@@ -1403,7 +1402,7 @@ interface ChartRootState {
   textWidth: (text: string) => number
   /** Whether the chart has come into view, or doesn't wait to. */
   seen: boolean
-  tooltip: TooltipPrimitive.Handle<undefined>
+  tooltip: TooltipController<undefined>
   moves: ChartMoves
 }
 
@@ -1432,14 +1431,14 @@ function useChartRoot(
     messages,
   } = props
   const id = useChartId()
-  const direction = useDirection()
   // The figure, which the moves read once each run starts, never while rendering.
   const [root] = useState<RefObject<HTMLElement | null>>(() => ({
     current: null,
   }))
+  const direction = useReadingDirection(root)
   const plot = useRef<HTMLElement | null>(null)
   const plotSize = useSize(plot)
-  const [tooltip] = useState(() => TooltipPrimitive.createHandle<undefined>())
+  const [tooltip] = useState(() => createTooltipController<undefined>())
   const [moves] = useState(() => createChartMoves(root))
   const series = Object.keys(config)
   const [hidden, setHidden] = useControllable(
@@ -1629,7 +1628,6 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
     picked,
     togglePicked,
     tooltip,
-    id,
   } = useChartRootValue()
   const { focus, setFocus } = useChartFocus()
   // Where the keys start from when focus comes back: the last stop they reached.
@@ -1781,11 +1779,8 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
         }
       }}
     >
-      <TooltipPrimitive.Trigger
-        handle={tooltip}
-        id={tooltipTriggerId(id)}
-        delay={0}
-        closeDelay={0}
+      <TooltipTriggerPrimitive
+        controller={tooltip}
         render={
           <span
             aria-hidden
@@ -1795,11 +1790,6 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
       />
     </div>
   )
-}
-
-/** The id of the tooltip's one trigger, over the whole plot. */
-function tooltipTriggerId(id: string) {
-  return `${id}-tooltip`
 }
 
 /** The data as a table for screen readers, which the chart's picture doesn't reach. */
@@ -1977,6 +1967,8 @@ function ChartFrame({
             chartFrameClassName,
             // Waiting for the plot's size, everything but the legend holds its place unseen.
             'data-measuring:*:not-data-[slot=chart-legend]:invisible',
+            // The server draws left to right, so a page in right to left shows it only once it has read its direction.
+            'rtl:not-data-mounted:*:invisible',
             className,
           )}
           style={
@@ -2001,56 +1993,76 @@ function ChartFrame({
 }
 
 /**
- * The tooltip's box, for a chart's `Tooltip.Root` of the old library, whose
- * triggers share one handle; inside a `GlideGroupMemory`, it slides from
- * trigger to trigger. `anchor` places it against what it shows. The Tooltip
- * component draws the same box on ui-sdk.
+ * The tooltip's box, for a chart's `Tooltip`, which holds it against
+ * `anchor`, where the marks it shows are; inside a `GlideGroupMemory`, it
+ * slides as the anchor moves. The Tooltip component draws the same box.
  */
 function ChartTooltipBox({
   className,
   children,
-  style,
   side = 'top',
   align = 'center',
   sideOffset = 6,
-  alignOffset = 0,
-  anchor: placeAgainst,
   ...props
-}: Omit<TooltipPrimitive.Popup.Props, 'className'> & {
+}: Omit<ComponentProps<typeof TooltipContentPrimitive>, 'className' | 'children'> & {
   className?: string
-} & Pick<
-    TooltipPrimitive.Positioner.Props,
-    'side' | 'align' | 'sideOffset' | 'alignOffset' | 'anchor'
-  >) {
-  const { dir, anchor } = basePopupGrow(useDirection())
+  children?: ReactNode
+}) {
   return (
-    <TooltipPrimitive.Portal container={usePopupLayer()}>
-      <TooltipPrimitive.Positioner
-        {...basePositionerProps}
-        side={side}
-        align={align}
-        sideOffset={sideOffset}
-        alignOffset={alignOffset}
-        anchor={placeAgainst}
-        positionMethod='fixed'
-      >
-        <TooltipPrimitive.Popup
-          data-slot='tooltip-content'
-          // Portalled out of the page's tree, so it takes the reading direction with it.
-          dir={dir}
-          style={style}
-          className={tooltipBoxClassName}
-          {...props}
-        >
-          <TooltipSurface />
-          <GlideContent placedBy='base-ui'>
-            <div className={cn(tooltipLabelClassName, className)}>{children}</div>
-          </GlideContent>
-          <TooltipPrimitive.Arrow {...anchor} />
-        </TooltipPrimitive.Popup>
-      </TooltipPrimitive.Positioner>
-    </TooltipPrimitive.Portal>
+    <TooltipContentPrimitive
+      side={side}
+      align={align}
+      sideOffset={sideOffset}
+      collisionPadding={POPUP_COLLISION_PADDING}
+      arrowPadding={0}
+      // Never under the pointer: the plot beneath keeps it, so the tooltip never closes itself.
+      className={cn(tooltipBoxClassName, 'pointer-events-none')}
+      {...props}
+    >
+      <TooltipSurface />
+      <GlideContent>
+        <div className={cn(tooltipLabelClassName, className)}>{children}</div>
+      </GlideContent>
+    </TooltipContentPrimitive>
   )
+}
+
+/**
+ * The reading direction around `root`'s element, read from the element once
+ * it is on the page and again whenever a `dir` on the page changes, so a
+ * chart in a box of its own direction follows that box. A new direction
+ * mirrors the chart at once, so a right-to-left page never sees it slide
+ * across on load.
+ */
+function useReadingDirection(root: RefObject<HTMLElement | null>): ReadingDirection {
+  const [direction, setDirection] = useState<ReadingDirection>('ltr')
+  const shown = useRef(direction)
+  useLayoutEffect(() => {
+    const element = root.current
+    if (!element) return
+    const resizing = holdResizing(element)
+    const read = (commit: (apply: () => void) => void) => {
+      const next = isRTL(element) ? 'rtl' : 'ltr'
+      if (next === shown.current) return
+      shown.current = next
+      resizing.hold()
+      commit(() => setDirection(next))
+    }
+    // Here React commits before paint; a `dir` that changes later commits at
+    // once, so the hold is still on when the browser restyles.
+    read((apply) => apply())
+    const observer = new MutationObserver(() => read(flushSync))
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['dir'],
+      subtree: true,
+    })
+    return () => {
+      observer.disconnect()
+      resizing.stop()
+    }
+  }, [root])
+  return direction
 }
 
 export {
@@ -2099,7 +2111,6 @@ export {
   swatchClassName,
   swatchStyle,
   tooltipQuietClassName,
-  tooltipTriggerId,
   reversedShare,
   useBefore,
   useChartFocus,
