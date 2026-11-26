@@ -21,7 +21,7 @@ import {
 import type { ChartDatum, ReadingDirection } from '@/registry/lib/chart-math'
 import { liveNow, liveRate } from '@/registry/lib/live'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { FOLLOWS_TRANSITION, roleDuration } from '@/registry/lib/resize'
+import { PAGE_TIME, roleDuration } from '@/registry/lib/resize'
 import {
   type ReactNode,
   type RefObject,
@@ -111,7 +111,7 @@ interface Motion {
   direction: ReadingDirection
   keyframes: Keyframe[]
   duration: number
-  /** A clock that keeps the trajectory's time, as the playground's Speed retimes it. */
+  /** A clock that keeps the trajectory's time on the page's clock, slowed where the page is slowed. */
   master: Animation | null
 }
 
@@ -140,7 +140,7 @@ function createClock(start: ClockSnapshot) {
     const animation = element.animate(motion.keyframes, {
       duration: motion.duration,
       fill: 'both',
-      id: FOLLOWS_TRANSITION,
+      id: PAGE_TIME,
     })
     if (motion.master) {
       animation.playbackRate = motion.master.playbackRate
@@ -180,7 +180,7 @@ function createClock(start: ClockSnapshot) {
       const master = figure.animate([], {
         duration,
         fill: 'both',
-        id: FOLLOWS_TRANSITION,
+        id: PAGE_TIME,
       })
       master.playbackRate = liveRate()
       // Every layer starts on the same frame as the clock, so they move as one.
@@ -342,7 +342,8 @@ function useLiveClock({
       return
     }
     const reduced = reducesMotion(figure)
-    const glide = reduced ? 0 : roleDuration(figure, 'layout', 0)
+    // A role's time, on the page's clock: slowed once, by the clock, when the page is slowed.
+    const glide = reduced ? 0 : roleDuration(figure, 'layout', 0) * liveRate()
     if (runs && !isRunning) {
       const now = liveNow()
       const from = still ?? now

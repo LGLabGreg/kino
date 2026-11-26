@@ -188,8 +188,8 @@ const DRIFT_REM = 1.25
  * feel sets its pace, and it is rebuilt from where it was when the feel, the
  * reduced motion or the row's width changes. It plays while `running`, and
  * holds while the row is out of view; under reduced motion it stands still.
- * It plays in step with the page's transitions (`FOLLOWS_TRANSITION`), so a
- * tool that slows them slows it too.
+ * Its pace is `layout`'s, so a tool that slows the roles, such as the
+ * playground's Speed, slows it too, rebuilt as for a new feel.
  */
 function useDrift(
   {

@@ -56,7 +56,7 @@ function useTurns(
     const element = ref.current
     if (!element || !running) return
     let seen = false
-    // The wait is a Web Animation that follows the page's transitions, so a tool that slows them slows it too.
+    // The wait is `layout`'s, so a tool that slows the roles, such as the playground's Speed, slows it too.
     let clock: Animation | undefined
     const schedule = () => {
       clock?.cancel()

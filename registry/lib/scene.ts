@@ -113,9 +113,8 @@ function sceneStep(steps: readonly number[], elapsed: number): number {
 /**
  * Plays a scripted scene once it is seen (`useSeen`): each entry of `steps`
  * is how many ms after the start that step lands in the default feel, Crisp.
- * A slower feel stretches them with its `enter` role, and its clock is a Web
- * Animation that follows the transitions, so a tool that slows CSS slows the
- * scene with it. Under reduced motion it is on its last step. `replay`
+ * A slower feel stretches them with its `enter` role, and so does a tool
+ * that slows the roles, such as the playground's Speed. Under reduced motion it is on its last step. `replay`
  * starts it over.
  */
 function useScene<Element extends HTMLElement>(

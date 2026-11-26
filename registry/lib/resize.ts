@@ -37,10 +37,18 @@ export function startSizeRun(element: object, size: Size): () => boolean {
 
 /**
  * The id of a Web Animation a component plays in step with one of its CSS
- * transitions, so a tool that retimes CSS, such as the playground's Speed,
+ * transitions. Its duration comes from a role's variable or the transition's
+ * own, so a tool that retimes the roles, such as the playground's Speed,
  * retimes it too.
  */
 export const FOLLOWS_TRANSITION = 'follows-transition'
+
+/**
+ * The id of a Web Animation that waits on a time in ms rather than a role's,
+ * such as the page's clock. A tool that slows the page, such as the
+ * playground's Speed, slows it by its `playbackRate`.
+ */
+export const PAGE_TIME = 'page-time'
 
 /** A CSS time, such as a `--motion-press-duration` of `0.3s` or `300ms`, in ms; `fallback` when it is empty or not a time. */
 export function cssTime(value: string, fallback: number) {

@@ -191,7 +191,7 @@ function StatsNumber({
     const element = ref.current
     if (seen !== 'seen' || phase !== 'waiting' || !element) return
     waited.current ??= arrival?.wait() ?? 0
-    // A clock that follows the transitions, so a slower feel or a tool that slows CSS stretches the wait too.
+    // Stretched by the feel's `enter`, so a slower feel or a tool that slows the roles stretches the wait too.
     const clock = element.animate([], {
       duration: waited.current * feelStretch(element),
       id: FOLLOWS_TRANSITION,

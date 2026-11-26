@@ -29,6 +29,11 @@ export interface MotionSpring {
 
 export type Feel = Record<MotionRole, MotionSpring>
 
+/** A time played at `speed`, such as 0.25 for slow motion, in the same unit: the same curve over it, longer. */
+export function atSpeed(time: number, speed: number): number {
+  return time / speed
+}
+
 export const feels = {
   /** Slower and soft, for calm products and long reads. */
   calm: {

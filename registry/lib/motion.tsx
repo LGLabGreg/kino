@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  atSpeed,
   DEFAULT_FEEL,
   FEEL_NAMES,
   type FeelName,
@@ -20,7 +21,7 @@ const SpeedContext = createContext(1)
 
 /**
  * Plays the springs `useMotionTransition` returns at this rate, such as 0.25
- * for a slow-motion demo. CSS transitions keep their timing.
+ * for a slow-motion demo. CSS keeps its timing: the roles' variables time it.
  */
 function MotionSpeed({ speed, children }: { speed: number; children: ReactNode }) {
   return <SpeedContext value={speed}>{children}</SpeedContext>
@@ -57,17 +58,17 @@ function useMotionTransition(role: MotionRole): Transition {
   // With no MotionConfig above, motion's config says "never", whatever the system says.
   const system = useReducedMotion() === true
   const reduced = useReducedMotionConfig() === true || system || reducedByPage
-  const { visualDuration, bounce } = feels[feel][role]
+  const { bounce } = feels[feel][role]
+  const visualDuration = atSpeed(feels[feel][role].visualDuration, speed)
   return useMemo(() => {
-    const scaled = visualDuration / speed
     if (reduced) {
       return {
         duration: 0,
-        opacity: { type: 'spring', visualDuration: scaled, bounce: 0 },
+        opacity: { type: 'spring', visualDuration, bounce: 0 },
       }
     }
-    return { type: 'spring', visualDuration: scaled, bounce }
-  }, [visualDuration, bounce, speed, reduced])
+    return { type: 'spring', visualDuration, bounce }
+  }, [visualDuration, bounce, reduced])
 }
 
 export { MotionSpeed, useMotionTransition }

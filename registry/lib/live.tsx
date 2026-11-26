@@ -1,6 +1,6 @@
 'use client'
 
-import { FOLLOWS_TRANSITION } from '@/registry/lib/resize'
+import { PAGE_TIME } from '@/registry/lib/resize'
 import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -9,8 +9,8 @@ import { cn } from '@/lib/utils'
  * What shows that something is live, and the time it keeps. The pulse is a
  * loop that runs while a value is live, timed by `layout` at an even pace
  * (motion rule 8). The clock is the page's own time as a Web Animation
- * plays it, so a live chart's scroll and the rows stamped by it keep step
- * when the playground's Speed slows every animation.
+ * plays it (`PAGE_TIME`), so a live chart's scroll and the rows stamped by it
+ * keep step when the playground's Speed slows the page.
  */
 
 /**
@@ -27,7 +27,7 @@ function pageClock() {
   if (clock && clock.animation.playState !== 'idle') return clock
   const animation = document.documentElement.animate([], {
     duration: Number.MAX_SAFE_INTEGER,
-    id: FOLLOWS_TRANSITION,
+    id: PAGE_TIME,
   })
   // Started on the page's time now, not on the next frame as a pending animation starts, which
   // can come long after on a busy page and leave the clock behind what was timed from it before.
@@ -39,9 +39,9 @@ function pageClock() {
 }
 
 /**
- * The time now, in ms since 1970, as the page's animations keep it: the
- * same as `Date.now()`, but slowed with them where every animation is
- * slowed, such as in the playground. Rows a live chart shows are stamped
+ * The time now, in ms since 1970, as the page's clock keeps it: the same
+ * as `Date.now()`, but slowed where the page is slowed, such as in the
+ * playground. Rows a live chart shows are stamped
  * with `Date.now()` or with this. On the server, `Date.now()`.
  */
 function liveNow(): number {
@@ -64,22 +64,21 @@ function liveNow(): number {
   )
 }
 
-/** How fast the page's clock runs: 1, or slower where the page's animations are slowed. */
+/** How fast the page's clock runs: 1, or slower where the page is slowed. */
 function liveRate(): number {
   if (typeof document === 'undefined') return 1
   return pageClock().animation.playbackRate
 }
 
 /**
- * Calls `then` once `ms` have passed on the page's clock: a Web Animation
- * that follows the transitions, so a wait slows with the page's animations,
- * even when they are slowed part-way through it. Gives a function that
+ * Calls `then` once `ms` have passed on the page's clock, so a wait slows
+ * with the page, even when it is slowed part-way through it. Gives a function that
  * cancels it.
  */
 function afterPageTime(ms: number, then: () => void): () => void {
   const wait = document.documentElement.animate([], {
     duration: Math.max(0, ms),
-    id: FOLLOWS_TRANSITION,
+    id: PAGE_TIME,
   })
   wait.playbackRate = liveRate()
   let cancelled = false
