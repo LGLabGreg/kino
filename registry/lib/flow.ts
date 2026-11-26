@@ -15,7 +15,8 @@
  * styles its children leaves `[data-leaving]` out. An item marked
  * `data-flow-held` is placed by whoever holds it, such as a row dragged in a
  * sortable list: it is measured, so it glides once let go, but never glided
- * while held.
+ * while held. One marked `data-flow-away` as it is taken out has moved to
+ * another row, which shows it arrive, so it leaves no copy here.
  */
 
 import { translateOf } from '@/registry/lib/highlight'
@@ -506,8 +507,10 @@ export function followFlow(
           stacked,
           heightChanged: heights.get(entry.target) !== height,
           sizing:
-            runningTransitions(entry.target, { property: 'height', subtree: true })
-              .length > 0,
+            runningTransitions(entry.target, {
+              property: 'height',
+              subtree: true,
+            }).length > 0,
         })
       )
         moves = true
@@ -606,6 +609,7 @@ export function followFlow(
         // One moved to another place in the row (a list that reorders) is still there.
         if (!(node instanceof HTMLElement) || !was || node.parentNode === row) continue
         resizes.unobserve(node)
+        if (node.hasAttribute('data-flow-away')) continue
         // A copy no one could see isn't made: many rows going at once, such
         // as a long list cut back to a few, would each be styled and laid
         // out for nothing.

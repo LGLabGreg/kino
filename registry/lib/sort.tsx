@@ -1,65 +1,80 @@
 'use client'
 
 import { useAnnouncer } from '@/registry/lib/announce'
-import { useControllable } from '@/registry/lib/controllable'
-import { useFlow } from '@/registry/lib/flow'
 import { translateOf } from '@/registry/lib/highlight'
-import { mergeRefs } from '@/registry/lib/refs'
-import { startRun, transitionsSettled } from '@/registry/lib/resize'
-import { revealBehavior, scrollerOf } from '@/registry/lib/scroll'
+import { transitionsQuiet } from '@/registry/lib/resize'
+import {
+  bindHold,
+  type ChangeDetails,
+  createChange,
+  createReorder,
+  createTransfer,
+  definePrimitive,
+  elements,
+  isRTL,
+  type ReorderDraft,
+  type ReorderMessage,
+  type ReorderReason,
+  type SlotFactory,
+  type TransferDraft,
+  type TransferLists,
+  type TransferMessage,
+  type TransferReason,
+} from '@ui-sdk/core'
+import { usePrimitive } from '@ui-sdk/react/primitive'
 import {
   Children,
+  Component,
   createContext,
   Fragment,
   isValidElement,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
-  type RefCallback,
+  type RefObject,
   use,
   useId,
   useLayoutEffect,
-  useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 
 /*
- * A list whose items are put in a new order by dragging, by touch and by
- * keyboard: the Sortable list's. The order changes in the page as an item
- * passes its neighbours, so the browser lays out every place, rows or a
- * wrapping grid alike, and `followFlow` glides each neighbour to its new place
- * on `layout`. An item that follows the pointer is marked `data-flow-held`:
- * it is placed here, every frame, and glides into its place on `layout` once
- * let go. Nothing re-renders while it follows: React hears only when the
- * order changes. The DOM work is kept outside components, as the flow lib's
- * is.
+ * Lists put in a new order, and groups of lists whose items move between
+ * them, on ui-sdk's `createReorder` and `createTransfer`: they own the drag,
+ * the keys, the draft order, the focus, edge scrolling and the steps a
+ * screen reader hears. Kino adds the motion. A pointer drags a copy above the
+ * page while the item shows where it would land as a dashed slot, its
+ * neighbours glide aside on `layout` (the `flow` lib in each list, and a
+ * glide of our own for an item that changes list), and let go, the item
+ * glides from the copy into its slot. A finger holds an item still for a
+ * moment to pick it up, so a card never blocks the page's scroll.
  */
 
 /** Rows in a column, or items that wrap in rows (`grid`). */
 export type SortLayout = 'list' | 'grid'
 
-/** A box in the viewport's px. */
-export interface SortBox {
-  left: number
-  top: number
-  width: number
-  height: number
+/** Where an item is: a list, and its index there, from 0. */
+export interface SortPlace {
+  list: string
+  index: number
 }
 
-interface Point {
-  x: number
-  y: number
+/** One item moved, named at both ends, for undo and logs. */
+export interface SortMove {
+  item: string
+  from: SortPlace
+  to: SortPlace
 }
 
-/** `order` with the item at `from` taken out and put back at `to`. */
-export function moveTo<T>(order: readonly T[], from: number, to: number): T[] {
-  const next = [...order]
-  const [item] = next.splice(from, 1)
-  if (item !== undefined) next.splice(to, 0, item)
-  return next
-}
+/** Whether the list `to` takes `item` from the list `from`. */
+export type SortAccepts = (item: string, to: string, from: string) => boolean
+
+/** What a lone list's `onValueChange` gets after the order: ui-sdk's change details. */
+export type SortListDetails = ChangeDetails<ReorderReason>
+
+/** What a group's `onValueChange` gets after the move: ui-sdk's change details. */
+export type SortGroupDetails = ChangeDetails<TransferReason>
 
 /** Whether two orders are the same. */
 export function sameOrder(a: readonly string[], b: readonly string[]): boolean {
@@ -81,166 +96,97 @@ export function reconcileOrder(
 }
 
 /**
- * Where the item at `from` goes, with `point` (the centre of where the
- * pointer would put the item) over the others' `boxes`, in
- * the order they are now. Over another item, it goes before it in that
- * item's first half and after it in its second, along the column, or along
- * the line in a grid: the place it takes puts the same half under it, so it
- * never swaps back and forth between items of different sizes. Past the
- * first or the last item it goes first or last; in a gap it stays.
+ * A group's lists, with the items there are: each list keeps the items of
+ * `lists` that some list renders, and takes at its end any it renders that
+ * no list holds yet. `present` is what each list renders, by its id; a list
+ * not in it yet, on the first render, keeps all of its items.
  */
-export function sortTarget(
-  boxes: readonly SortBox[],
-  from: number,
-  point: Point,
-  { layout, rtl = false }: { layout: SortLayout; rtl?: boolean },
-): number {
-  const others = boxes.flatMap((box, index) => (index === from ? [] : [box]))
-  if (others.length === 0) return from
-  for (const [index, box] of others.entries()) {
-    const inColumn = point.y >= box.top && point.y < box.top + box.height
-    const inLine = point.x >= box.left && point.x < box.left + box.width
-    if (!inColumn || (layout === 'grid' && !inLine)) continue
-    const before =
-      layout === 'list'
-        ? point.y < box.top + box.height / 2
-        : rtl
-          ? point.x > box.left + box.width / 2
-          : point.x < box.left + box.width / 2
-    return before ? index : index + 1
+export function reconcileLists(
+  lists: Readonly<TransferLists>,
+  present: Readonly<TransferLists>,
+): TransferLists {
+  const rendered = new Set(Object.values(present).flat())
+  const next: TransferLists = {}
+  for (const [list, keys] of Object.entries(lists))
+    next[list] = keys.filter((key) => rendered.has(key) || !(list in present))
+  const held = new Set(Object.values(next).flat())
+  for (const [list, keys] of Object.entries(present)) {
+    const added = keys.filter((key) => !held.has(key))
+    next[list] = [...(next[list] ?? []), ...added]
+    for (const key of added) held.add(key)
   }
-  const first = others[0]
-  const last = others.at(-1)
-  if (!first || !last) return from
-  if (point.y < first.top) return 0
-  // On the first line of a grid, before its first item.
-  if (
-    layout === 'grid' &&
-    point.y < first.top + first.height &&
-    (rtl ? point.x >= first.left + first.width : point.x < first.left)
-  )
-    return 0
-  if (point.y >= last.top + last.height) return others.length
-  // On the last line of a grid, past its last item.
-  if (
-    layout === 'grid' &&
-    point.y >= last.top &&
-    (rtl ? point.x < last.left : point.x >= last.left + last.width)
-  )
-    return others.length
-  return from
+  return next
 }
 
-/** A move a key asks for. */
-export type SortStep = 'previous' | 'next' | 'up' | 'down' | 'first' | 'last'
+/** The list that holds `item`, if one does. */
+export function listOf(lists: Readonly<TransferLists>, item: string): string | undefined {
+  return Object.keys(lists).find((list) => lists[list]?.includes(item))
+}
 
-/**
- * The move a key asks for: Up and Down step through a column, Left and Right
- * through a grid's line (turned around in right to left) and Up and Down
- * between its lines, Home and End to the ends. Null for any other key.
- */
-export function sortStepOf(
-  key: string,
-  layout: SortLayout,
-  rtl = false,
-): SortStep | null {
-  switch (key) {
-    case 'ArrowUp':
-      return layout === 'list' ? 'previous' : 'up'
-    case 'ArrowDown':
-      return layout === 'list' ? 'next' : 'down'
-    case 'ArrowLeft':
-      return layout === 'list' ? null : rtl ? 'next' : 'previous'
-    case 'ArrowRight':
-      return layout === 'list' ? null : rtl ? 'previous' : 'next'
-    case 'Home':
-      return 'first'
-    case 'End':
-      return 'last'
-    default:
-      return null
+/** The items that are in another list in `next` than in `previous`. */
+export function changedLists(
+  previous: Readonly<TransferLists>,
+  next: Readonly<TransferLists>,
+): string[] {
+  return Object.entries(next).flatMap(([list, keys]) =>
+    keys.filter((key) => {
+      const was = listOf(previous, key)
+      return was !== undefined && was !== list
+    }),
+  )
+}
+
+/** The move that takes `item` to `index` in the list `to`, from where it is in `lists`. */
+export function moveOf(
+  lists: Readonly<TransferLists>,
+  item: string,
+  to: string,
+  index: number,
+): SortMove {
+  const from = listOf(lists, item) ?? to
+  return {
+    item,
+    from: { list: from, index: lists[from]?.indexOf(item) ?? -1 },
+    to: { list: to, index },
   }
 }
 
-/**
- * Where a step takes the item at `from`. Up and Down in a grid go to the
- * item nearest across in the line above or below.
- */
-export function stepTarget(
-  boxes: readonly SortBox[],
-  from: number,
-  step: SortStep,
-): number {
-  const last = boxes.length - 1
-  if (step === 'previous') return Math.max(0, from - 1)
-  if (step === 'next') return Math.min(last, from + 1)
-  if (step === 'first') return 0
-  if (step === 'last') return last
-  const box = boxes[from]
-  if (!box) return from
-  const middle = (b: SortBox) => ({ x: b.left + b.width / 2, y: b.top + b.height / 2 })
-  const here = middle(box)
-  const lines = boxes
-    .map((other, index) => ({ index, at: middle(other) }))
-    .filter(
-      ({ index, at }) =>
-        index !== from && (step === 'up' ? at.y < box.top : at.y > box.top + box.height),
-    )
-  if (lines.length === 0) return from
-  const nearestLine = (step === 'up' ? Math.max : Math.min)(
-    ...lines.map(({ at }) => at.y),
-  )
-  const line = lines.filter(({ at }) => Math.abs(at.y - nearestLine) < box.height / 2)
-  line.sort((a, b) => Math.abs(a.at.x - here.x) - Math.abs(b.at.x - here.x))
-  return line[0]?.index ?? from
-}
-
-/**
- * How far to scroll each frame, in px, with the pointer at `at` between a
- * scroller's `start` and `end`: faster the deeper into the edge's `zone` it
- * is, up to `most`.
- */
-export function edgeSpeed(
-  at: number,
-  start: number,
-  end: number,
-  zone = 40,
-  most = 14,
-): number {
-  const into = (depth: number) => Math.min(1, Math.max(0, depth / zone)) * most
-  if (at < start + zone) return -into(start + zone - at)
-  if (at > end - zone) return into(at - (end - zone))
-  return 0
-}
-
-/** `value`, kept between `min` and `max`; `min` when they cross. */
-export function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max))
-}
-
-/** What a screen reader hears as an item is picked up, moved, dropped or put back. */
-export function sortMessage(
-  event: 'lift' | 'move' | 'drop' | 'cancel',
-  label: string,
-  position: number,
-  total: number,
-): string {
+/** What a screen reader hears as an item in a list is picked up, moved, dropped or put back. */
+export function sortMessage({ type, label, position, total }: ReorderMessage): string {
   const at = `position ${position} of ${total}`
-  if (event === 'lift') return `Picked up ${label}, at ${at}.`
-  if (event === 'move') return `${label} moved to ${at}.`
-  if (event === 'drop') return `${label} dropped at ${at}.`
+  if (type === 'grab') return `Picked up ${label}, at ${at}.`
+  if (type === 'move') return `${label} moved to ${at}.`
+  if (type === 'drop') return `${label} dropped at ${at}.`
   return `Move cancelled. ${label} is back at ${at}.`
 }
 
-/** What the handles' instructions say. */
+/** The same in a group, naming the list each time: "Write the brief, moved to Doing, 2 of 4." */
+export function groupMessage({
+  type,
+  label,
+  list,
+  position,
+  total,
+}: TransferMessage): string {
+  const at = `${list}, ${position} of ${total}`
+  if (type === 'grab') return `Picked up ${label}, in ${at}.`
+  if (type === 'move') return `${label}, moved to ${at}.`
+  if (type === 'drop') return `${label}, dropped in ${at}.`
+  return `Move cancelled. ${label} is back in ${at}.`
+}
+
+/** What a list's handles say they do. */
 export const sortInstructions =
   'Press Space to pick it up. Then use the arrow keys to move it, Space to drop it, or Escape to put it back.'
 
+/** What a group's handles say they do. */
+export const groupInstructions =
+  'Press Space to pick it up. Then use Up and Down to move it, Left and Right to move it to another list, Space to drop it, or Escape to put it back.'
+
 /**
  * What a press inside an item goes to, rather than starting a drag: a
- * control. Base UI draws some without a native element or the role on the
- * part pressed (a Radio is a `span`, a Slider's thumb takes its role from a
- * hidden input), so they are named by role and by their slot too.
+ * control, named by its element, its role, or its slot where it draws none
+ * (a Slider's control).
  */
 const sortControls = [
   'a[href]',
@@ -271,462 +217,701 @@ const sortControls = [
 ] as const
 const controls = sortControls.join(',')
 
-/** How far, in px, a pointer moves before a press becomes a drag, and a long press stays still. */
-const DRAG_DISTANCE = 4
-const HOLD_TOLERANCE = 8
-/** How long, in ms, a finger holds a row before it lifts. */
+/** How near an edge, in px, a drag scrolls what it is in, and how far it scrolls each frame at most. */
+const EDGE_SCROLL = { edge: 40, speed: 14 }
+/** How long, in ms, a finger holds an item before it is picked up, and how far, in px, it may move meanwhile. */
 const HOLD_DELAY = 300
+const HOLD_TOLERANCE = 8
 
-type Via = 'pointer' | 'keyboard'
+/** The handle's mark: a press on it drags, whatever the pointer. */
+const HANDLE = 'data-sortable-handle'
 
-interface Lifted {
-  value: string
-  via: Via
+/** Whether a press on `target` in an item drags it: anywhere but a control, the handle aside. */
+function dragsFrom(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true
+  const control = target.closest(controls)
+  return !control || control.hasAttribute(HANDLE)
 }
 
-interface Drag {
-  value: string
-  pointerId: number
-  start: Point
-  at: Point
-  /** Where the pointer holds the item, from its top-left corner as it was seen. */
-  grip: Point | null
-  /**
-   * The centre of where the pointer would put the item, past the list's
-   * edges too: the item stays inside the list, and this is where it goes.
-   */
-  aim: Point | null
-  started: boolean
-  hold: ReturnType<typeof setTimeout> | null
-  frame: number
-}
-
-/** Everything the list keeps outside React: the elements, and the drag in progress. */
-interface Sorter {
-  list: HTMLElement | null
-  items: Map<string, HTMLElement>
-  handles: Map<string, HTMLElement>
-  itemRefs: Map<string, RefCallback<HTMLElement>>
-  handleRefs: Map<string, RefCallback<HTMLElement>>
-  order: string[]
-  original: string[]
-  lifted: Lifted | null
-  drag: Drag | null
-  /**
-   * The item whose handle gets focus back once the page has its new order:
-   * moved in the page, a handle loses focus, and that blur is ours.
-   */
-  refocus: string | null
-  stop: (() => void) | null
-  // The latest of what the component gives, set as it renders.
-  layout: SortLayout
-  setPreview: (order: string[] | null) => void
-  setLifted: (lifted: Lifted | null) => void
-  commit: (order: string[]) => void
-  announce: (text: string) => void
-}
-
-/** The item's place in the viewport without any `translate`: where it is laid out. */
-function laidOut(item: HTMLElement): SortBox {
-  const box = item.getBoundingClientRect()
-  const [x, y] = translateOf(getComputedStyle(item).translate)
-  return { left: box.left - x, top: box.top - y, width: box.width, height: box.height }
-}
-
-function labelOf(item: HTMLElement | undefined): string {
-  return item?.dataset.label ?? item?.textContent?.trim() ?? ''
-}
-
-function isRtl(element: HTMLElement | null) {
-  return element ? getComputedStyle(element).direction === 'rtl' : false
-}
-
-/** The box that scrolls `element`, or the page's own scrolling element. */
-function scrollingBox(element: HTMLElement): HTMLElement {
-  return (
-    scrollerOf(element) ??
-    (document.scrollingElement as HTMLElement | null) ??
-    document.documentElement
-  )
-}
-
-/** Puts the item that follows the pointer under it, inside the list. */
-function place(sorter: Sorter) {
-  const { drag, list } = sorter
-  if (!drag?.started || !drag.grip || !list) return
-  const item = sorter.items.get(drag.value)
-  if (!item) return
-  const box = laidOut(item)
-  const bounds = list.getBoundingClientRect()
-  const want = { x: drag.at.x - drag.grip.x, y: drag.at.y - drag.grip.y }
-  drag.aim = { x: want.x + box.width / 2, y: want.y + box.height / 2 }
-  const x =
-    sorter.layout === 'list'
-      ? box.left
-      : clamp(want.x, bounds.left, bounds.right - box.width)
-  const y = clamp(want.y, bounds.top, bounds.bottom - box.height)
-  item.style.translate = `${x - box.left}px ${y - box.top}px`
-}
-
-/** Moves the picked-up item to `to` in the order shown, and says so if `say`. */
-function moveLifted(sorter: Sorter, to: number, say: boolean) {
-  const lifted = sorter.lifted
-  if (!lifted) return
-  const from = sorter.order.indexOf(lifted.value)
-  if (from === -1 || to === from) return
-  sorter.order = moveTo(sorter.order, from, to)
-  if (lifted.via === 'keyboard') sorter.refocus = lifted.value
-  sorter.setPreview(sorter.order)
-  if (say)
-    sorter.announce(
-      sortMessage(
-        'move',
-        labelOf(sorter.items.get(lifted.value)),
-        to + 1,
-        sorter.order.length,
-      ),
-    )
-}
-
-/** Where each item is laid out, in the order shown. */
-function boxesOf(sorter: Sorter): SortBox[] {
-  return sorter.order.map((value) => {
-    const element = sorter.items.get(value)
-    return element ? laidOut(element) : { left: 0, top: 0, width: 0, height: 0 }
-  })
-}
-
-/** Moves the item that follows the pointer to the place under it. */
-function retarget(sorter: Sorter) {
-  const { drag, lifted } = sorter
-  if (!drag?.started || !lifted) return
-  const from = sorter.order.indexOf(lifted.value)
-  const boxes = boxesOf(sorter)
-  const point = drag.aim ?? drag.at
-  const to = sortTarget(boxes, from, point, {
-    layout: sorter.layout,
-    rtl: isRtl(sorter.list),
-  })
-  moveLifted(sorter, to, false)
-}
-
-/** Lifts the item a pointer pressed, once it has moved far enough or held long enough. */
-function begin(sorter: Sorter) {
-  const drag = sorter.drag
-  if (!drag || drag.started) return
-  const item = sorter.items.get(drag.value)
-  if (!item) return
-  drag.started = true
-  item.removeAttribute('data-pressing')
-  item.removeAttribute('data-settling')
-  startRun(settleKey(item))
-  const seen = item.getBoundingClientRect()
-  drag.grip = { x: drag.start.x - seen.left, y: drag.start.y - seen.top }
-  sorter.original = sorter.order
-  sorter.lifted = { value: drag.value, via: 'pointer' }
-  item.setAttribute('data-flow-held', '')
-  sorter.setLifted(sorter.lifted)
-  sorter.announce(
-    sortMessage(
-      'lift',
-      labelOf(item),
-      sorter.order.indexOf(drag.value) + 1,
-      sorter.order.length,
-    ),
-  )
-  place(sorter)
-  // The page scrolls while the pointer sits near its edge.
-  const scroller = scrollingBox(item)
-  const tick = () => {
-    if (sorter.drag !== drag) return
-    const page = scroller === document.scrollingElement
-    const box = page
-      ? { top: 0, bottom: window.innerHeight }
-      : scroller.getBoundingClientRect()
-    const speed = edgeSpeed(drag.at.y, box.top, box.bottom)
-    if (speed !== 0) {
-      scroller.scrollBy(0, speed)
-      place(sorter)
-      retarget(sorter)
-    }
-    drag.frame = requestAnimationFrame(tick)
-  }
-  drag.frame = requestAnimationFrame(tick)
-}
-
-const settleKeys = new WeakMap<HTMLElement, object>()
-
-/** The key an item's settling runs on: its own, apart from the flow lib's glides. */
-function settleKey(item: HTMLElement): object {
-  let key = settleKeys.get(item)
-  if (!key) {
-    key = {}
-    settleKeys.set(item, key)
-  }
-  return key
-}
-
-/** Ends a pick-up: drops the item where it is, or puts the order back. */
-function finish(sorter: Sorter, how: 'drop' | 'cancel') {
-  const lifted = sorter.lifted
-  const drag = sorter.drag
-  sorter.stop?.()
-  sorter.stop = null
-  sorter.drag = null
-  if (drag) {
-    if (drag.hold) clearTimeout(drag.hold)
-    cancelAnimationFrame(drag.frame)
-    sorter.items.get(drag.value)?.removeAttribute('data-pressing')
-  }
-  if (!lifted) return
-  sorter.lifted = null
-  const item = sorter.items.get(lifted.value)
-  const order = how === 'cancel' ? sorter.original : sorter.order
-  const changes = !sameOrder(order, sorter.order)
-  if (item) {
-    // Let go, it glides into its place on `layout`: the flow lib takes it
-    // from where it is when the order changes back, and its own transition
-    // when it doesn't.
-    item.removeAttribute('data-flow-held')
-    if (!changes) item.style.translate = ''
-    // It stays above its neighbours, marked `data-settling`, until it is in place.
-    item.setAttribute('data-settling', '')
-    const latest = startRun(settleKey(item))
-    void transitionsSettled(item, { property: 'translate' }).then(() => {
-      if (latest()) item.removeAttribute('data-settling')
-    })
-  }
-  if (changes && lifted.via === 'keyboard') sorter.refocus = lifted.value
-  sorter.order = order
-  sorter.setLifted(null)
-  sorter.setPreview(null)
-  if (how === 'drop') sorter.commit(order)
-  sorter.announce(
-    sortMessage(how, labelOf(item), order.indexOf(lifted.value) + 1, order.length),
-  )
+/** Whether a press on `target` is on the handle, which drags at once by touch too. */
+function onHandle(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(`[${HANDLE}]`) !== null
 }
 
 /**
- * Swallows the click that follows a drag, if one comes before the next
- * press: a browser may send none, and the next real click must go through.
+ * Starts `drag` from a press on an item: at once for a mouse or a pen, or a
+ * finger on the handle. A finger elsewhere waits for `holdToDrag`, so it
+ * scrolls the page if it moves first. A press inside an item of a list
+ * nested in it, such as a card's checklist, is that item's.
  */
-function swallowClick() {
-  const swallow = (click: MouseEvent) => {
-    click.preventDefault()
-    click.stopPropagation()
-    stop()
-  }
-  const stop = () => {
-    window.removeEventListener('click', swallow, { capture: true })
-    window.removeEventListener('pointerdown', stop, { capture: true })
-  }
-  window.addEventListener('click', swallow, { capture: true })
-  window.addEventListener('pointerdown', stop, { capture: true })
+function pressItem(
+  event: PointerEvent,
+  item: Element | null | undefined,
+  drag: (down: PointerEvent) => void,
+) {
+  if (!dragsFrom(event.target) || !ownPress(event, item)) return
+  if (event.pointerType === 'touch' && !onHandle(event.target)) return
+  drag(event)
 }
 
-/** Follows a pointer pressed on a handle, or on a row that drags from anywhere. */
-function press(sorter: Sorter, value: string, event: ReactPointerEvent, hold: boolean) {
-  if (sorter.lifted || sorter.drag) return
-  if (event.pointerType === 'mouse' && event.button !== 0) return
-  const drag: Drag = {
-    value,
-    pointerId: event.pointerId,
-    start: { x: event.clientX, y: event.clientY },
-    at: { x: event.clientX, y: event.clientY },
-    grip: null,
-    aim: null,
-    started: false,
-    hold: null,
-    frame: 0,
-  }
-  sorter.drag = drag
-  if (hold) {
-    // A finger held on a row is answered at once, marked `data-pressing`
-    // until the row lifts or the hold is let go.
-    sorter.items.get(value)?.setAttribute('data-pressing', '')
-    drag.hold = setTimeout(() => begin(sorter), HOLD_DELAY)
-  }
+/** The items of a lone list, of a group, and of either. */
+const LIST_ITEM = '[data-slot=sortable-list-item]'
+const GROUP_ITEM = '[data-slot=sortable-group-item]'
+const ITEMS = `${LIST_ITEM},${GROUP_ITEM}`
 
-  const move = (moved: PointerEvent) => {
-    if (moved.pointerId !== drag.pointerId) return
-    drag.at = { x: moved.clientX, y: moved.clientY }
-    const distance = Math.hypot(drag.at.x - drag.start.x, drag.at.y - drag.start.y)
-    if (!drag.started) {
-      if (hold) {
-        // A finger that moves before the hold is up scrolls instead.
-        if (distance > HOLD_TOLERANCE) finish(sorter, 'cancel')
-        return
-      }
-      if (distance < DRAG_DISTANCE) return
-      begin(sorter)
+/** Whether a press is on `item` itself, rather than on an item of a list inside it. */
+function ownPress(event: Event, item: Element | null | undefined): boolean {
+  const target = event.target
+  return !(target instanceof Element) || target.closest(ITEMS) === item
+}
+
+/**
+ * A finger held still on `el` for `HOLD_DELAY` starts `drag` with the press
+ * it began with. While pressed, `el` has `data-holding`; once held, and
+ * while the drag lasts, the page no longer scrolls under the finger, so the
+ * drag follows it.
+ */
+function holdToDrag(
+  el: HTMLElement,
+  drag: (down: PointerEvent) => void,
+  dragging: () => boolean,
+): () => void {
+  let held = false
+  // On the element from the start, so the browser waits for it before it scrolls.
+  const block = (event: TouchEvent) => {
+    if (held || dragging()) event.preventDefault()
+  }
+  el.addEventListener('touchmove', block, { passive: false })
+  const unbind = bindHold(el, {
+    delay: HOLD_DELAY,
+    tolerance: HOLD_TOLERANCE,
+    keys: [],
+    onPress: ({ event, input }) =>
+      input === 'touch' &&
+      dragsFrom(event.target) &&
+      !onHandle(event.target) &&
+      ownPress(event, el),
+    onHold: ({ event }) => {
+      held = true
+      drag(event as PointerEvent)
+    },
+    onEnd: () => {
+      held = false
+    },
+  })
+  return () => {
+    unbind()
+    el.removeEventListener('touchmove', block)
+  }
+}
+
+/** Says each step in our words, politely: ui-sdk's own announcements are urgent, so they get none. */
+function said<Message extends { type: string }>(
+  say: () => ((text: string) => void) | undefined,
+  words: (message: Message) => string,
+  pointer: () => boolean,
+) {
+  return (message: Message) => {
+    // A pointer's steps show as it drags; only where it was picked up and let go is said.
+    if (message.type !== 'move' || !pointer()) say()?.(words(message))
+    return ''
+  }
+}
+
+/**
+ * Whether focus at `active` has left `key` while the keys move it: a press
+ * elsewhere puts it back, as Tab does. Focus its own move takes away comes
+ * back to it.
+ */
+export function leaves(
+  moving: { key: string; pointer: boolean } | null,
+  key: string,
+  active: Element | null,
+): boolean {
+  if (!moving || moving.pointer || moving.key !== key) return false
+  return active?.closest('[data-key]')?.getAttribute('data-key') !== key
+}
+
+/** Calls `check` with where focus went, once a move that took it away has given it back (`keepFocus`). */
+function leaveLater(event: Event, check: (active: Element | null) => void) {
+  const doc = (event.target as Node).ownerDocument
+  setTimeout(() => check(doc?.activeElement ?? null))
+}
+
+/** A box in the viewport, as `placeAt` reads it. */
+type Box = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom'>
+
+/**
+ * Where an item dragged to `point` goes among the others, from the boxes
+ * they and its slot are laid out in: `others` in order and `slot` at
+ * `current` among them. It goes past every box the point is past: in a
+ * list, past its middle; in a grid, below it, or level with it and past its
+ * middle across. A grid's point past the last box of a row, where the slot
+ * would wrap below it, takes that box's place, so the slot reaches the end
+ * of the row and the box wraps instead.
+ */
+export function placeAt(
+  others: readonly Box[],
+  slot: Box,
+  current: number,
+  point: { x: number; y: number },
+  layout: SortLayout,
+  rtl: boolean,
+): number {
+  if (layout === 'list')
+    return others.filter((box) => point.y > (box.top + box.bottom) / 2).length
+  const middle = (box: Box) => (box.left + box.right) / 2
+  const after = (box: Box, than: Box) =>
+    rtl ? middle(box) < middle(than) : middle(box) > middle(than)
+  const level = (box: Box) => point.y >= box.top && point.y <= box.bottom
+  const across = (box: Box) => (rtl ? point.x < middle(box) : point.x > middle(box))
+  const counted = others.filter(
+    (box) => point.y > box.bottom || (point.y >= box.top && across(box)),
+  ).length
+  if (counted !== current) return counted
+  const boxes = [...others, slot]
+  const lastOfRow = (box: Box) =>
+    !boxes.some(
+      (other) =>
+        other !== box &&
+        other.top < box.bottom &&
+        other.bottom > box.top &&
+        after(other, box),
+    )
+  const end = others.findIndex(
+    (box, index) => index < current && level(box) && across(box) && lastOfRow(box),
+  )
+  return end === -1 ? counted : end
+}
+
+/** What a list's and a group's state share: the item that moves, if one does. */
+type SortState = { moving: { key: string; pointer: boolean } | null }
+
+/** An item and its label, as an agent names it. */
+interface Named {
+  value: string
+  label: string
+  /** What the page shows of it, which an agent reads in `snapshot()`. */
+  shown?: string
+}
+
+/**
+ * The text an item shows, as ui-sdk's `snapshot()` reads it: its text, in
+ * order, past anything hidden from a screen reader or an agent and past the
+ * items of a list inside it, with its spaces run together.
+ */
+export function shownText(item: Element): string {
+  let text = ''
+  const walk = (node: Node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) text += child.textContent
+      else if (
+        child instanceof Element &&
+        !child.matches(ITEMS) &&
+        !child.hasAttribute('data-agent-hidden') &&
+        child.getAttribute('aria-hidden') !== 'true'
+      )
+        walk(child)
     }
-    place(sorter)
-    retarget(sorter)
   }
-  const up = (ended: PointerEvent) => {
-    if (ended.pointerId !== drag.pointerId) return
-    const started = drag.started
-    finish(sorter, 'drop')
-    // The click that ends a mouse's drag isn't a press on what's under it.
-    // A finger's drag ends with no click, so nothing waits for one.
-    if (started && ended.pointerType !== 'touch') swallowClick()
-  }
-  const cancel = (ended: PointerEvent) => {
-    if (ended.pointerId === drag.pointerId) finish(sorter, 'cancel')
-  }
-  const key = (pressed: KeyboardEvent) => {
-    if (pressed.key !== 'Escape' || !drag.started) return
-    pressed.preventDefault()
-    pressed.stopPropagation()
-    finish(sorter, 'cancel')
-  }
-  const scrolled = () => {
-    place(sorter)
-    retarget(sorter)
-  }
-  const blocked = (blockable: Event) => {
-    if (drag.started || blockable.type === 'contextmenu') blockable.preventDefault()
-  }
-  const left = () => finish(sorter, 'cancel')
-  window.addEventListener('pointermove', move)
-  window.addEventListener('pointerup', up)
-  window.addEventListener('pointercancel', cancel)
-  window.addEventListener('keydown', key, { capture: true })
-  window.addEventListener('scroll', scrolled, { capture: true, passive: true })
-  window.addEventListener('blur', left)
-  // While it drags, a finger doesn't scroll the page and nothing is selected.
-  window.addEventListener('touchmove', blocked, { passive: false })
-  window.addEventListener('selectstart', blocked)
-  if (hold) window.addEventListener('contextmenu', blocked)
-  sorter.stop = () => {
-    window.removeEventListener('pointermove', move)
-    window.removeEventListener('pointerup', up)
-    window.removeEventListener('pointercancel', cancel)
-    window.removeEventListener('keydown', key, { capture: true })
-    window.removeEventListener('scroll', scrolled, { capture: true })
-    window.removeEventListener('blur', left)
-    window.removeEventListener('touchmove', blocked)
-    window.removeEventListener('selectstart', blocked)
-    window.removeEventListener('contextmenu', blocked)
+  walk(item)
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * What the items and handles of a lone list and of a group call: the same
+ * parts on either, each primitive answering with its own engine, `reorder`
+ * or `transfer`.
+ */
+interface SortParts<State> {
+  /** Whether the item can't move: it, or what it is in, is turned off. */
+  locked: (state: State, key: string) => boolean
+  /** Whether the keys move the item now. */
+  moved: (state: State, key: string) => boolean
+  /** Whether a pointer drags the item now. */
+  dragged: (state: State, key: string) => boolean
+  pointerdown: (event: PointerEvent, key: string) => void
+  keydown: (event: KeyboardEvent, key: string) => void
+  bindItem: (el: HTMLElement, part: { key: string; props: object }) => () => void
+  /** Whether a pointer drags an item now. */
+  dragging: () => boolean
+  /** Picks the item up by keys, or drops it if it is picked up: a screen reader's activate. */
+  toggle: (key: string) => void
+  /** Puts the item back if focus at `active` has left it while the keys move it. */
+  leave: (key: string, active: Element | null) => void
+  /** Where the copy of `key` was let go, once: the item glides from there into its place. */
+  settle: (key: string) => DOMRect | null
+  /** Follows a pointer's drags from the root's element. */
+  follow: (el: HTMLElement) => () => void
+}
+
+/** The item and handle slots, the same in a lone list and a group. */
+function itemSlots<State extends object & SortState, Api extends SortParts<State>>(
+  slot: SlotFactory<State, Api>,
+) {
+  return {
+    item: slot<{ value: string; label: string; disabled?: boolean }>({
+      props: { value: 'string', label: 'string', disabled: 'boolean' },
+      role: 'listitem',
+      attrs: (state, { api, key, props }) => ({
+        'data-key': key,
+        'data-moving': api.moved(state, key) ? '' : undefined,
+        'data-dragging': api.dragged(state, key) ? '' : undefined,
+        'data-disabled': props.disabled || api.locked(state, key) ? '' : undefined,
+      }),
+      on: {
+        pointerdown: (event, { api, el, key }) =>
+          pressItem(event as PointerEvent, el, (down) => api.pointerdown(down, key)),
+      },
+      bind: (el, { api, key, props }) => {
+        const cleanups = [
+          api.bindItem(el, { key, props }),
+          holdToDrag(el, (down) => api.pointerdown(down, key), api.dragging),
+        ]
+        return () => cleanups.forEach((cleanup) => cleanup())
+      },
+    }),
+    handle: slot<{ value: string; disabled?: boolean }>({
+      props: { value: 'string', disabled: 'boolean' },
+      role: 'button',
+      focus: 'native',
+      // A screen reader's activate sends a click with no press behind it; a pointer drags instead.
+      press: ({ api, key }, event) => {
+        if (event instanceof MouseEvent && event.detail === 0) api.toggle(key)
+      },
+      attrs: (state, { api, key, props }) => ({
+        type: 'button',
+        [HANDLE]: '',
+        'aria-pressed': String(api.moved(state, key) || api.dragged(state, key)),
+        disabled: props.disabled || api.locked(state, key) ? '' : undefined,
+      }),
+      on: {
+        keydown: (event, { api, key }) => api.keydown(event as KeyboardEvent, key),
+        focusout: (event, { api, key }) =>
+          leaveLater(event, (active) => api.leave(key, active)),
+      },
+    }),
   }
 }
 
-/** Picks the item up by keyboard, or drops it if it is picked up. */
-function toggle(sorter: Sorter, value: string) {
-  const lifted = sorter.lifted
-  if (sorter.drag) return
-  if (lifted?.value === value) {
-    finish(sorter, 'drop')
-    return
-  }
-  if (lifted) return
-  sorter.original = sorter.order
-  sorter.lifted = { value, via: 'keyboard' }
-  sorter.setLifted(sorter.lifted)
-  sorter.announce(
-    sortMessage(
-      'lift',
-      labelOf(sorter.items.get(value)),
-      sorter.order.indexOf(value) + 1,
-      sorter.order.length,
-    ),
+/** Finds `name` among `all` by its value, or else by its label or what it shows, in any case. */
+function named(all: readonly Named[], name: string): Named | undefined {
+  const lower = name.replace(/\s+/g, ' ').trim().toLowerCase()
+  return (
+    all.find((one) => one.value === name) ??
+    all.find(
+      (one) => one.label.toLowerCase() === lower || one.shown?.toLowerCase() === lower,
+    )
   )
 }
 
-/** A key on a handle: Space or Enter picks up and drops, the arrows move, Escape puts back. */
-function key(sorter: Sorter, value: string, event: ReactKeyboardEvent) {
-  const lifted = sorter.lifted
-  if (sorter.drag) return
-  if (event.key === ' ' || event.key === 'Enter') {
-    event.preventDefault()
-    toggle(sorter, value)
-    return
-  }
-  if (lifted?.value !== value) return
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    event.stopPropagation()
-    finish(sorter, 'cancel')
-    return
-  }
-  if (event.key === 'Tab') {
-    finish(sorter, 'drop')
-    return
-  }
-  const step = sortStepOf(event.key, sorter.layout, isRtl(sorter.list))
-  if (!step) return
-  event.preventDefault()
-  const boxes = boxesOf(sorter)
-  moveLifted(sorter, stepTarget(boxes, sorter.order.indexOf(value), step), true)
-}
-
-/** After a move: the item that follows the pointer is placed again, and a moved handle keeps focus. */
-function settle(sorter: Sorter) {
-  place(sorter)
-  const value = sorter.refocus
-  sorter.refocus = null
-  if (value === null) return
-  const handle = sorter.handles.get(value)
-  if (handle && document.activeElement !== handle) handle.focus({ preventScroll: true })
-  const item = sorter.items.get(value)
-  item?.scrollIntoView({
-    block: 'nearest',
-    inline: 'nearest',
-    behavior: revealBehavior(scrollingBox(item)),
+/** Each item there is, by its value, its label and what it shows. */
+function itemsIn(
+  context: Parameters<typeof elements>[0],
+  values: readonly string[],
+  label: (value: string) => string | undefined,
+): Named[] {
+  const els = new Map(elements(context, 'item').map((part) => [part.key, part.el]))
+  return values.map((value) => {
+    const el = els.get(value)
+    return { value, label: label(value) ?? value, shown: el && shownText(el) }
   })
 }
 
-interface SortContextValue {
-  sorter: Sorter
-  lifted: Lifted | null
-  layout: SortLayout
-  disabled: boolean
-  instructionsId: string
+/** How `all` reads in an error: each by its label. */
+function namesOf(all: readonly Named[]): string {
+  return all.map((one) => one.label).join(', ')
 }
 
-const SortContext = createContext<SortContextValue | null>(null)
-const SortItemContext = createContext<{
-  value: string
-  label: string
-  disabled: boolean
-} | null>(null)
-
-function useSortContext() {
-  const context = use(SortContext)
-  if (!context) throw new Error('A sortable part must be inside a SortableList.')
-  return context
-}
-
-export interface SortListOptions {
+type SortListOptions = {
   /** The items' values, in order. */
   value?: string[]
   defaultValue?: string[]
-  /** Called with the new order when an item is dropped in a new place. */
-  onValueChange?: (value: string[]) => void
-  layout: SortLayout
-  disabled: boolean
+  /** Called with the new order once an item is dropped in a new place. */
+  onValueChange?: (value: string[], details: SortListDetails) => void
+  /** The values of the items the list renders. */
+  items?: string[]
+  layout?: SortLayout
+  disabled?: boolean
+  /** Says a step to a screen reader. */
+  announce?: (text: string) => void
 }
 
-/**
- * Gives the sorter the latest of what the component has. Written outside the
- * hook: React's lint holds a value from `useState` as one never changed, and
- * the sorter is the one thing here that changes outside React. The order is
- * taken only while nothing is picked up, which keeps its own as it moves.
- */
-function update(
-  sorter: Sorter,
-  latest: Partial<Pick<Sorter, 'layout' | 'announce' | 'commit' | 'order' | 'list'>>,
-) {
-  const { order, ...rest } = latest
-  Object.assign(sorter, rest)
-  if (order && !sorter.lifted) sorter.order = order
+/** A list put in a new order: the Sortable list's. */
+const sortList = definePrimitive({
+  name: 'sortable-list',
+  options: {
+    value: 'list',
+    defaultValue: 'list',
+    onValueChange: 'callback',
+    items: 'list',
+    layout: 'string',
+    disabled: 'boolean',
+    announce: 'value',
+  },
+  controlled: ['value'],
+  state: (options: SortListOptions) => ({
+    value: reconcileOrder(
+      options.value ?? options.defaultValue ?? options.items ?? [],
+      options.items ?? [],
+    ),
+    moving: null as ReorderDraft | null,
+    layout: options.layout ?? 'list',
+    disabled: !!options.disabled,
+  }),
+  sync: (options) => ({
+    ...(options.value === undefined
+      ? {}
+      : { value: reconcileOrder(options.value, options.items ?? []) }),
+    layout: options.layout ?? 'list',
+    disabled: !!options.disabled,
+  }),
+  api: (context) => {
+    const { store, options } = context
+    const change = createChange(context)
+    // An item that comes or goes joins or leaves the order the list keeps itself.
+    let items = options().items ?? []
+    context.onOptions((next) => {
+      const now = next.items ?? []
+      if (sameOrder(now, items)) return
+      items = now
+      if (next.value === undefined)
+        store.set({ value: reconcileOrder(store.get().value, now) })
+    })
+    const itemProps = (key: string) =>
+      context.props<{ label?: string; disabled?: boolean }>('item', key)
+    const reorder = createReorder(context, {
+      slot: 'item',
+      key: 'value',
+      draft: 'moving',
+      set: (value, details) => change('value', value, details),
+      orientation: () => (store.get().layout === 'grid' ? 'grid' : 'vertical'),
+      preview: true,
+      createAutoScroll: EDGE_SCROLL,
+      disabled: ({ props }) =>
+        !!(props as { disabled?: boolean }).disabled || store.get().disabled,
+      label: (key) => itemProps(key)?.label,
+      message: said(
+        () => options().announce,
+        sortMessage,
+        () => store.get().moving?.pointer === true,
+      ),
+    })
+    const held = createHeld()
+    const all = () => itemsIn(context, store.get().value, (key) => itemProps(key)?.label)
+    const parts: SortParts<ReturnType<typeof store.get>> = {
+      locked: (state, key) => state.disabled || !!itemProps(key)?.disabled,
+      moved: (state, key) => reorder.moving(state, key) && !state.moving?.pointer,
+      dragged: (state, key) => reorder.dragging(state, key),
+      pointerdown: (event, key) => reorder.pointerdown(event, key),
+      keydown: (event, key) => {
+        reorder.keydown(event, key)
+      },
+      bindItem: (el, part) => reorder.bind(el, part),
+      dragging: () => store.get().moving?.pointer === true,
+      toggle: (key) => {
+        if (store.get().moving?.key === key) reorder.drop()
+        else reorder.grab(key)
+      },
+      leave: (key, active) => {
+        if (leaves(store.get().moving, key, active)) reorder.cancel()
+      },
+      settle: held.take,
+      follow: (el) => {
+        const unfollow = followDrag(el, store, held, LIST_ITEM)
+        const unplace = placeLaidOut(
+          el,
+          store,
+          reorder,
+          () => new Map(elements(context, 'item').map((part) => [part.key, part.el])),
+        )
+        return () => {
+          unplace()
+          unfollow()
+        }
+      },
+    }
+    return {
+      reorder,
+      ...parts,
+      /** Every item, by its value and its label. */
+      items: all,
+      /**
+       * Moves `item`, by its value or its label, to `index`, from 0, as a
+       * drop there would: an agent's move. Says which items there are, or how
+       * far `index` goes, when it names neither.
+       */
+      moveItem: (item: string, index: number) => {
+        const order = store.get().value
+        const found = named(all(), item)
+        if (!found) throw new Error(`No item "${item}". Its items: ${namesOf(all())}.`)
+        if (!Number.isInteger(index) || index < 0 || index >= order.length)
+          throw new Error(`No place ${index}. Places go from 0 to ${order.length - 1}.`)
+        if (parts.locked(store.get(), found.value))
+          throw new Error(`"${found.label}" can’t be moved.`)
+        return reorder.move(found.value, index)
+      },
+    }
+  },
+  slots: (slot) => ({
+    root: slot<object, { order: string[]; sorting: boolean }>({
+      role: 'list',
+      state: (state, { api }) => ({
+        order: api.reorder.order(state),
+        sorting: state.moving !== null,
+      }),
+      attrs: (state) => ({
+        'data-layout': state.layout,
+        'data-sorting': state.moving ? '' : undefined,
+        'data-disabled': state.disabled ? '' : undefined,
+      }),
+      bind: (el, { api }) => api.follow(el),
+    }),
+    ...itemSlots(slot),
+  }),
+  agent: { actions: ['moveItem'], items: (api) => api.items() },
+})
+
+type SortGroupOptions = {
+  /** Each list's items, in order, by the list's id. */
+  value?: TransferLists
+  defaultValue?: TransferLists
+  onValueChange?: (value: TransferLists, details: SortGroupDetails) => void
+  accepts?: SortAccepts
+  /** What each list renders, by its id. */
+  present?: TransferLists
+  announce?: (text: string) => void
 }
+
+/** Lists whose items move between them: the Sortable group's. */
+const sortGroup = definePrimitive({
+  name: 'sortable-group',
+  options: {
+    value: 'value',
+    defaultValue: 'value',
+    onValueChange: 'callback',
+    accepts: 'value',
+    present: 'value',
+    announce: 'value',
+  },
+  controlled: ['value'],
+  state: (options: SortGroupOptions) => ({
+    value: reconcileLists(
+      options.value ?? options.defaultValue ?? {},
+      options.present ?? {},
+    ),
+    moving: null as TransferDraft | null,
+  }),
+  sync: (options) =>
+    options.value === undefined
+      ? {}
+      : { value: reconcileLists(options.value, options.present ?? {}) },
+  api: (context) => {
+    const { store, options } = context
+    const change = createChange(context)
+    let present = options().present ?? {}
+    context.onOptions((next) => {
+      if (next.present === present) return
+      present = next.present ?? {}
+      if (next.value === undefined)
+        store.set({ value: reconcileLists(store.get().value, present) })
+    })
+    const listProps = (list: string | undefined) =>
+      list === undefined
+        ? undefined
+        : context.props<{ label?: string; disabled?: boolean }>('list', list)
+    const itemProps = (key: string) =>
+      context.props<{ label?: string; disabled?: boolean }>('item', key)
+    const locked = (key: string) =>
+      !!itemProps(key)?.disabled || !!listProps(listOf(store.get().value, key))?.disabled
+    const takes = (item: string, list: string) =>
+      !listProps(list)?.disabled &&
+      (options().accepts?.(item, list, listOf(store.get().value, item) ?? list) ?? true)
+    // Left and Right go through the lists in the order they are in the page.
+    const order = () => elements(context, 'list').map((list) => list.key)
+    const transfer = createTransfer(context, {
+      key: 'value',
+      draft: 'moving',
+      set: (value, { key, to, index, reason, event }) =>
+        change('value', value, {
+          reason,
+          event,
+          move: moveOf(store.get().value, key, to, index),
+        }),
+      order,
+      accepts: takes,
+      disabled: locked,
+      label: (key) => itemProps(key)?.label,
+      listLabel: (list) => listProps(list)?.label,
+      message: said(
+        () => options().announce,
+        groupMessage,
+        () => store.get().moving?.pointer === true,
+      ),
+      createAutoScroll: EDGE_SCROLL,
+    })
+    /** What a person sees as each list: the box a drop lands in. */
+    const boxes = new Map<string, HTMLElement>()
+    const held = createHeld()
+    const itemsOf = () =>
+      itemsIn(
+        context,
+        Object.values(store.get().value).flat(),
+        (key) => itemProps(key)?.label,
+      )
+    const listsOf = (): Named[] =>
+      Object.keys(store.get().value).map((value) => ({
+        value,
+        label: listProps(value)?.label ?? value,
+      }))
+    /** Says so when Left or Right is refused by the list beside, which the keys skip. */
+    const refused = (event: KeyboardEvent, was: TransferDraft) => {
+      const across = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
+      if (!across || store.get().moving !== was) return
+      const lists = order()
+      const from = listOf(was.lists, was.key) ?? was.from
+      const rtl = event.target instanceof Element && isRTL(event.target)
+      const beside = lists[lists.indexOf(from) + (rtl ? -across : across)]
+      if (beside === undefined || takes(was.key, beside)) return
+      options().announce?.(
+        `${listProps(beside)?.label ?? beside} doesn’t take ${itemProps(was.key)?.label ?? was.key}.`,
+      )
+    }
+    const parts: SortParts<ReturnType<typeof store.get>> = {
+      locked: (_state, key) => locked(key),
+      moved: (state, key) => transfer.moving(state, key) && !state.moving?.pointer,
+      dragged: (state, key) => transfer.dragging(state, key),
+      pointerdown: (event, key) => transfer.pointerdown(event, key),
+      keydown: (event, key) => {
+        const was = store.get().moving
+        transfer.keydown(event, key)
+        if (was && !was.pointer) refused(event, was)
+      },
+      bindItem: (el, { key }) => transfer.bindItem(el, key),
+      dragging: () => store.get().moving?.pointer === true,
+      toggle: (key) => {
+        if (store.get().moving?.key === key) transfer.drop()
+        else transfer.grab(key)
+      },
+      leave: (key, active) => {
+        if (leaves(store.get().moving, key, active)) transfer.cancel()
+      },
+      settle: held.take,
+      follow: (el) => {
+        const stops = [
+          followDrag(el, store, held, GROUP_ITEM),
+          // Outside every box that takes it, a drop puts it back.
+          followOutside(
+            el,
+            store,
+            (x, y, key) =>
+              ![...boxes].some(
+                ([list, box]) =>
+                  box.isConnected &&
+                  inside(box, x, y) &&
+                  (list === listOf(store.get().value, key) || takes(key, list)),
+              ),
+            () => transfer.cancel(),
+          ),
+        ]
+        return () => stops.forEach((stop) => stop())
+      },
+    }
+    return {
+      transfer,
+      ...parts,
+      /** Whether a list takes the item now being moved: a drop on one that doesn't puts it back. */
+      takes,
+      /** Joins a list's box, so drags find it and a drop in it lands there. */
+      bindList: (el: HTMLElement, list: string) => {
+        const box = dropBoxOf(el)
+        boxes.set(list, box)
+        const unbind = transfer.bindList(box, list)
+        // While an item moves that it won't take, the box is marked, so it steps back as one.
+        const mark = () => {
+          const moving = store.get().moving
+          box.toggleAttribute(
+            'data-refused',
+            !!moving &&
+              listOf(store.get().value, moving.key) !== list &&
+              !takes(moving.key, list),
+          )
+        }
+        mark()
+        const stop = store.subscribe(mark)
+        return () => {
+          stop()
+          unbind()
+          box.removeAttribute('data-refused')
+          if (boxes.get(list) === box) boxes.delete(list)
+        }
+      },
+      /** Every item, by its value and its label. */
+      items: itemsOf,
+      /**
+       * Moves `item` to `index`, from 0, in the list `list`, each by its
+       * value or its label, as a drop there would: an agent's move. Says
+       * which items or lists there are, or how far `index` goes, when it
+       * names neither.
+       */
+      moveItem: (item: string, list: string, index: number) => {
+        const lists = store.get().value
+        const found = named(itemsOf(), item)
+        if (!found)
+          throw new Error(`No item "${item}". Its items: ${namesOf(itemsOf())}.`)
+        const into = named(listsOf(), list)
+        if (!into) throw new Error(`No list "${list}". Its lists: ${namesOf(listsOf())}.`)
+        const places = (lists[into.value] ?? []).filter(
+          (key) => key !== found.value,
+        ).length
+        if (!Number.isInteger(index) || index < 0 || index > places)
+          throw new Error(
+            `No place ${index} in "${into.label}". Places go from 0 to ${places}.`,
+          )
+        if (locked(found.value)) throw new Error(`"${found.label}" can’t be moved.`)
+        if (listOf(lists, found.value) !== into.value && !takes(found.value, into.value))
+          throw new Error(`"${into.label}" doesn’t take "${found.label}".`)
+        return transfer.move(found.value, into.value, index)
+      },
+    }
+  },
+  slots: (slot) => ({
+    root: slot<object, { lists: TransferLists; dragging: string | null }>({
+      role: 'group',
+      state: (state, { api }) => ({
+        lists: api.transfer.lists(state),
+        dragging: state.moving?.pointer ? state.moving.key : null,
+      }),
+      attrs: (state) => ({ 'data-sorting': state.moving ? '' : undefined }),
+      bind: (el, { api }) => api.follow(el),
+    }),
+    list: slot<{ value: string; label: string; disabled?: boolean }, { order: string[] }>(
+      {
+        props: { value: 'string', label: 'string', disabled: 'boolean' },
+        role: 'list',
+        state: (state, { api, key }) => ({
+          order: api.transfer.lists(state)[key] ?? NONE,
+        }),
+        attrs: (_state, { key, props }) => ({
+          'data-key': key,
+          'aria-label': props.label,
+          'data-disabled': props.disabled ? '' : undefined,
+        }),
+        bind: (el, { api, key }) => api.bindList(el, key),
+      },
+    ),
+    ...itemSlots(slot),
+  }),
+  agent: { actions: ['moveItem'], items: (api) => api.items() },
+})
+
+const NONE: string[] = []
 
 /** Something with a `value`, as a sortable item has. */
 type Valued = ReactElement<{ value: string }>
 
 /**
- * The list's items: its children, and those inside fragments, each with a
+ * A list's items: its children, and those inside fragments, each with a
  * `value` to put it in order by. A component of the buyer's own that renders
  * an item takes the item's `value` too.
  */
@@ -740,77 +925,378 @@ function valuedChildren(children: ReactNode): Valued[] {
   })
 }
 
-/**
- * A sortable list's state, its children in the order shown, and the flow
- * that glides them: give `frame` to an element that clips, and `list` to the
- * positioned list inside it.
- */
-export function useSortList(children: ReactNode, options: SortListOptions) {
-  const items = valuedChildren(children)
-  const present = items.map((item) => item.props.value)
-  const [committed, setCommitted] = useControllable(
-    options.value,
-    options.defaultValue ?? present,
-    options.onValueChange,
-  )
-  const [preview, setPreview] = useState<string[] | null>(null)
-  const [lifted, setLifted] = useState<Lifted | null>(null)
-  const { announce, region } = useAnnouncer()
-  const order = reconcileOrder(preview ?? committed, present)
-  const byValue = new Map(items.map((item) => [item.props.value, item]))
+/** The item's place in the viewport without any `translate`: where it is laid out. */
+function laidOut(item: HTMLElement): DOMRect {
+  const box = item.getBoundingClientRect()
+  const [x, y] = translateOf(getComputedStyle(item).translate)
+  return new DOMRect(box.left - x, box.top - y, box.width, box.height)
+}
 
-  // Made once, and kept: it holds what changes outside React.
-  const [sorter] = useState<Sorter>(() => ({
-    list: null,
-    items: new Map(),
-    handles: new Map(),
-    itemRefs: new Map(),
-    handleRefs: new Map(),
-    order,
-    original: order,
-    lifted: null,
-    drag: null,
-    refocus: null,
-    stop: null,
-    layout: options.layout,
-    setPreview,
-    setLifted,
-    commit: () => {},
-    announce,
-  }))
-  useLayoutEffect(() => {
-    update(sorter, {
-      layout: options.layout,
-      announce,
-      commit: (next) => {
-        if (!sameOrder(next, committed)) setCommitted(next)
-      },
-      order,
+/**
+ * Glides `item` from `was`, a box in the viewport it was seen at, to where
+ * it is laid out now, on its `translate` transition (`layout`): marked
+ * `data-flow=start`, as the `flow` lib marks what it glides, while it is put
+ * where it was.
+ */
+function glideFrom(item: HTMLElement, was: DOMRect) {
+  const now = laidOut(item)
+  const x = was.left - now.left
+  const y = was.top - now.top
+  if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) return
+  item.dataset.flow = 'start'
+  item.style.translate = `${x}px ${y}px`
+  void item.offsetHeight
+  delete item.dataset.flow
+  item.style.translate = ''
+}
+
+/** The attributes that set a look for what is inside them, read from the nearest element that has each. */
+const scopes = [
+  'data-density',
+  'data-shape',
+  'data-feel',
+  'data-motion',
+  'data-theme-preset',
+  'data-primary',
+  'dir',
+] as const
+
+/**
+ * Gives the copy a pointer drags the look of the item it came from: ui-sdk
+ * puts it in `<body>`, outside a preview's density, shape, feel, motion and
+ * theme, and outside its container. It takes the attributes around
+ * `from`, the custom properties set inline on the way up, the
+ * nearest first, and, where `from` is in a size container, becomes one, so
+ * its container queries still match: the copy is as wide as the item.
+ */
+function scopeCopy(copy: HTMLElement, from: HTMLElement) {
+  for (const name of scopes) {
+    const value = from.closest(`[${name}]`)?.getAttribute(name)
+    if (value !== null && value !== undefined) copy.setAttribute(name, value)
+  }
+  let contained = false
+  for (let at = from.parentElement; at; at = at.parentElement) {
+    for (const name of Array.from(at.style)) {
+      if (name.startsWith('--') && !copy.style.getPropertyValue(name))
+        copy.style.setProperty(name, at.style.getPropertyValue(name))
+    }
+    contained ||= getComputedStyle(at).containerType !== 'normal'
+  }
+  if (contained) copy.style.containerType = 'inline-size'
+}
+
+/** The copy that follows the pointer, once ui-sdk has put it in the page. */
+function copyOf(doc: Document): HTMLElement | null {
+  return doc.body.querySelector<HTMLElement>(':scope > [data-drag-preview]')
+}
+
+/** Where the copy was let go, and of which item, until that item is back in place. */
+interface LetGo {
+  key: string
+  box: DOMRect
+}
+
+/** Holds where the copy was let go until its item takes it, once. */
+function createHeld() {
+  const held = {
+    letGo: null as LetGo | null,
+    take: (key: string) => {
+      const letGo = held.letGo
+      if (letGo?.key !== key) return null
+      held.letGo = null
+      return letGo.box
+    },
+  }
+  return held
+}
+
+/** An item of a list or a group, found by its slot, so a list's own `data-key` never answers. */
+function itemIn(root: Element, selector: string, key: string): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    `:is(${selector})[data-key="${CSS.escape(key)}"]`,
+  )
+}
+
+/** The item a pointer drags now, if one does. */
+function draggedIn(store: { get: () => SortState }): string | null {
+  const moving = store.get().moving
+  return moving?.pointer ? moving.key : null
+}
+
+/** What `followDrag` and `followOutside` read: a primitive's store. */
+interface SortStore {
+  get: () => SortState
+  subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * Follows a pointer's drags from `root`, the list's or the group's element:
+ * gives the copy its look, and as it is let go, holds where it was so the
+ * item glides from there into its slot (`useSettle`).
+ */
+function followDrag(
+  root: HTMLElement,
+  store: SortStore,
+  held: ReturnType<typeof createHeld>,
+  items: string,
+): () => void {
+  const doc = root.ownerDocument
+  let was: string | null = null
+  const stop = store.subscribe(() => {
+    const now = draggedIn(store)
+    if (now === was) return
+    const ended = was
+    was = now
+    if (now) {
+      // ui-sdk puts the copy in the page once the item is picked up, in the same task.
+      queueMicrotask(() => {
+        const copy = copyOf(doc)
+        const item = itemIn(root, items, now)
+        if (copy && item) scopeCopy(copy, item)
+      })
+      return
+    }
+    // Its item takes where it was let go as it renders; if it never does, nothing stays held.
+    requestAnimationFrame(() => {
+      if (!ended || !held.take(ended)) return
+      itemIn(root, items, ended)?.removeAttribute('data-flow-held')
     })
   })
-  // Each time the order changes, the item that follows the pointer is put
-  // back under it, and a handle moved with its item gets focus back.
-  const key = order.join('\u0000')
-  useLayoutEffect(() => {
-    settle(sorter)
-  }, [key, sorter])
-  // A pick-up the list unmounts during ends with it.
-  useLayoutEffect(() => () => sorter.stop?.(), [sorter])
+  const end = (event: Event) => {
+    if (event instanceof KeyboardEvent && event.key !== 'Escape') return
+    const key = draggedIn(store)
+    const copy = copyOf(doc)
+    if (!key || !copy) return
+    held.letGo = { key, box: copy.getBoundingClientRect() }
+    // Held, the `flow` lib leaves it to us: it glides from the copy.
+    itemIn(root, items, key)?.setAttribute('data-flow-held', '')
+  }
+  doc.addEventListener('pointerup', end, true)
+  doc.addEventListener('pointercancel', end, true)
+  doc.addEventListener('keydown', end, true)
+  return () => {
+    stop()
+    doc.removeEventListener('pointerup', end, true)
+    doc.removeEventListener('pointercancel', end, true)
+    doc.removeEventListener('keydown', end, true)
+  }
+}
 
-  const { frame, row } = useFlow<HTMLDivElement, HTMLElement>('[data-slot=sortable-item]')
-  const listRef = useMemo(
-    () => mergeRefs<HTMLElement>(row, (node) => update(sorter, { list: node })),
-    [row, sorter],
+/**
+ * Puts the item a pointer drags back where it came from when it is let go
+ * at a point `outside`, such as outside every list of a group that takes
+ * it, and marks `root` `data-outside` while the pointer is there. Bound
+ * after `followDrag`, so where it was let go is held first.
+ */
+function followOutside(
+  root: HTMLElement,
+  store: SortStore,
+  outside: (x: number, y: number, key: string) => boolean,
+  cancel: () => void,
+): () => void {
+  const doc = root.ownerDocument
+  const stop = store.subscribe(() => {
+    if (!draggedIn(store)) root.removeAttribute('data-outside')
+  })
+  const end = (event: PointerEvent) => {
+    const key = draggedIn(store)
+    if (key && outside(event.clientX, event.clientY, key)) cancel()
+  }
+  const move = (event: PointerEvent) => {
+    const key = draggedIn(store)
+    if (key)
+      root.toggleAttribute('data-outside', outside(event.clientX, event.clientY, key))
+  }
+  doc.addEventListener('pointerup', end, true)
+  doc.addEventListener('pointermove', move, true)
+  return () => {
+    stop()
+    doc.removeEventListener('pointerup', end, true)
+    doc.removeEventListener('pointermove', move, true)
+  }
+}
+
+/**
+ * Moves the item a pointer drags in `root` to where the others are laid
+ * out, not where they are drawn. ui-sdk 0.1.0-beta.17 finds the place from
+ * each item's box as drawn, so a neighbour still gliding to its new place,
+ * as one that wraps to the next row of a grid does, passes back under the
+ * pointer and sends the item back, and the two swing to and fro; it takes
+ * no boxes or place of ours. It still moves the item through
+ * `reorder.moveTo`, which this takes over while a pointer drags, following
+ * only the pointer that pressed, as ui-sdk does.
+ */
+function placeLaidOut(
+  root: HTMLElement,
+  store: { get: () => { moving: ReorderDraft | null; layout: SortLayout } },
+  reorder: { moveTo: (index: number) => void },
+  itemOf: () => Map<string, HTMLElement>,
+): () => void {
+  const doc = root.ownerDocument
+  const moveTo = reorder.moveTo
+  let pointer: number | null = null
+  let point: { x: number; y: number } | null = null
+  const press = (event: PointerEvent) => {
+    pointer = event.pointerId
+    point = { x: event.clientX, y: event.clientY }
+  }
+  const move = (event: PointerEvent) => {
+    if (event.pointerId === pointer) point = { x: event.clientX, y: event.clientY }
+  }
+  reorder.moveTo = (index) => {
+    const { moving, layout } = store.get()
+    if (!moving?.pointer || !point) return moveTo(index)
+    const items = itemOf()
+    const slot = items.get(moving.key)
+    const others = moving.order
+      .filter((key) => !moving.keys.includes(key))
+      .map((key) => items.get(key))
+      .filter((item) => item !== undefined)
+    if (!slot) return moveTo(index)
+    const current = moving.order.indexOf(moving.keys[0]!)
+    moveTo(
+      placeAt(others.map(laidOut), laidOut(slot), current, point, layout, isRTL(slot)),
+    )
+  }
+  root.addEventListener('pointerdown', press, true)
+  doc.addEventListener('pointermove', move, true)
+  return () => {
+    reorder.moveTo = moveTo
+    root.removeEventListener('pointerdown', press, true)
+    doc.removeEventListener('pointermove', move, true)
+  }
+}
+
+/**
+ * The box a person sees as a list of a group, which takes a drop anywhere
+ * in it: the list's element, or the one around it that holds it alone, such
+ * as a column with a heading, up to the group.
+ */
+function dropBoxOf(list: HTMLElement): HTMLElement {
+  let box = list
+  for (
+    let up = box.parentElement;
+    up &&
+    up.getAttribute('data-slot') !== 'sortable-group' &&
+    up.querySelectorAll('[data-slot=sortable-group-list]').length <= 1;
+    up = up.parentElement
   )
-  const instructionsId = useId()
-  const context: SortContextValue = {
-    sorter,
-    lifted,
+    box = up
+  return box
+}
+
+/**
+ * Glides `item` from `was` into its place, above its neighbours and past
+ * its list's frame while it does (`data-settling`): from where its copy was
+ * let go (`drop`), which keeps the copy's shadow on it until it lands and
+ * hands it back to the `flow` lib the frame after, or from the list it left
+ * (`across`).
+ */
+function settleFrom(item: HTMLElement, was: DOMRect, settling: 'drop' | 'across') {
+  if (settling === 'drop') {
+    item.setAttribute('data-flow-held', '')
+    requestAnimationFrame(() => item.removeAttribute('data-flow-held'))
+  }
+  item.setAttribute('data-settling', settling)
+  glideFrom(item, was)
+  void transitionsQuiet(item).then(() => {
+    if (item.getAttribute('data-settling') === settling)
+      item.removeAttribute('data-settling')
+  })
+}
+
+/**
+ * Glides an item let go by the pointer from where its copy was into its
+ * place, as the drag ends: the item renders again then, whatever else does.
+ */
+function useSettle(
+  handle: {
+    instance: {
+      get: () => SortState
+      subscribe: (listener: () => void) => () => void
+    }
+    api: Pick<SortParts<never>, 'settle'>
+  },
+  ref: RefObject<HTMLElement | null>,
+  value: string,
+) {
+  const { instance, api } = handle
+  const dragged = useSyncExternalStore(
+    instance.subscribe,
+    () => {
+      const moving = instance.get().moving
+      return moving?.pointer === true && moving.key === value
+    },
+    () => false,
+  )
+  useLayoutEffect(() => {
+    const item = ref.current
+    if (dragged || !item) return
+    const box = api.settle(value)
+    if (box) settleFrom(item, box, 'drop')
+  }, [dragged, api, ref, value])
+}
+
+type SortListHandle = ReturnType<typeof usePrimitive<typeof sortList>>
+type SortGroupHandle = ReturnType<typeof usePrimitive<typeof sortGroup>>
+
+interface ListContextValue {
+  kind: 'list'
+  handle: SortListHandle
+  instructionsId: string
+}
+
+interface GroupContextValue {
+  kind: 'group'
+  handle: SortGroupHandle
+  instructionsId: string
+  /** Each list's items as it last rendered them, so a list can show one that moved in. */
+  elements: Map<string, Valued>
+  /** Tells the group what a list renders. */
+  render: (list: string, items: string[] | null) => void
+}
+
+const SortContext = createContext<ListContextValue | GroupContextValue | null>(null)
+const SortItemContext = createContext<{
+  value: string
+  label: string
+  disabled: boolean
+} | null>(null)
+
+/** The list or group around a part. */
+function useSortContext() {
+  const context = use(SortContext)
+  if (!context) throw new Error('A sortable part must be inside a SortableList.')
+  return context
+}
+
+export interface UseSortListOptions {
+  value?: string[]
+  defaultValue?: string[]
+  onValueChange?: (value: string[], details: SortListDetails) => void
+  layout: SortLayout
+  disabled: boolean
+}
+
+/** A lone list: its primitive, its children in the order shown, and what its parts read. */
+function useSortList(children: ReactNode, options: UseSortListOptions) {
+  const items = valuedChildren(children)
+  const present = items.map((item) => item.props.value)
+  const { announce, region } = useAnnouncer()
+  const handle = usePrimitive(sortList, {
+    value: options.value,
+    defaultValue: options.defaultValue,
+    onValueChange: options.onValueChange,
+    items: present,
     layout: options.layout,
     disabled: options.disabled,
-    instructionsId,
-  }
-  const ordered = order.flatMap((value) => byValue.get(value) ?? [])
+    announce,
+  })
+  const instructionsId = useId()
+  const byValue = new Map(items.map((item) => [item.props.value, item]))
+  const ordered = (order: readonly string[]) =>
+    reconcileOrder(order, present).flatMap((value) => byValue.get(value) ?? [])
+  const context: ListContextValue = { kind: 'list', handle, instructionsId }
   const extras = (
     <>
       <p id={instructionsId} hidden>
@@ -819,93 +1305,169 @@ export function useSortList(children: ReactNode, options: SortListOptions) {
       {region}
     </>
   )
-  return { context, frame, listRef, ordered, extras, sorting: lifted !== null }
+  return { context, handle, ordered, extras }
 }
 
-/** One ref callback per value, made once, so React doesn't detach and attach it on every render. */
-function refFor(
-  refs: Map<string, RefCallback<HTMLElement>>,
-  elements: Map<string, HTMLElement>,
-  value: string,
-) {
-  let ref = refs.get(value)
-  if (!ref) {
-    ref = (node) => {
-      if (node) elements.set(value, node)
-      else if (elements.get(value)) elements.delete(value)
-    }
-    refs.set(value, ref)
-  }
-  return ref
+export interface UseSortGroupOptions {
+  value?: TransferLists
+  defaultValue?: TransferLists
+  onValueChange?: (
+    value: TransferLists,
+    move: SortMove,
+    details: SortGroupDetails,
+  ) => void
+  accepts?: SortAccepts
+}
+
+/** Whether a point is inside `el`'s box. */
+function inside(el: Element, x: number, y: number) {
+  const box = el.getBoundingClientRect()
+  return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom
 }
 
 /**
- * The props of an item's element, and what its handle reads: its place in
- * the list, and a press anywhere on it but a control.
+ * A group of lists: its primitive and what its lists and parts read. Give
+ * `root` to the group's element, which `ListsMove` glides across.
  */
-export function useSortItem(value: string, label: string, disabled: boolean) {
-  const { sorter, lifted, disabled: allDisabled } = useSortContext()
-  const off = disabled || allDisabled
-  return {
-    props: {
-      ref: refFor(sorter.itemRefs, sorter.items, value),
-      'data-lifted': lifted?.value === value ? lifted.via : undefined,
-      'data-disabled': off ? '' : undefined,
-      'data-label': label,
-      onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
-        if (off) return
-        // A control inside it, the handle included, answers its own press.
-        if (event.target instanceof Element && event.target.closest(controls)) return
-        press(sorter, value, event, event.pointerType === 'touch')
-      },
-    },
-    item: { value, label, disabled: off },
+function useSortGroup(options: UseSortGroupOptions) {
+  const { announce, region } = useAnnouncer()
+  const [present, setPresent] = useState<TransferLists>({})
+  const [elements] = useState(() => new Map<string, Valued>())
+  const { onValueChange } = options
+  const handle = usePrimitive(sortGroup, {
+    value: options.value,
+    defaultValue: options.defaultValue,
+    onValueChange:
+      onValueChange &&
+      ((value, details) =>
+        onValueChange(
+          value,
+          (details as { move: SortMove } & SortGroupDetails).move,
+          details,
+        )),
+    accepts: options.accepts,
+    present,
+    announce,
+  })
+  const root = useRef<HTMLElement>(null)
+  const instructionsId = useId()
+  const [render] = useState(
+    () => (list: string, items: string[] | null) =>
+      setPresent((was) => {
+        if (items === null) {
+          if (!(list in was)) return was
+          const rest = { ...was }
+          delete rest[list]
+          return rest
+        }
+        return was[list] && sameOrder(was[list], items) ? was : { ...was, [list]: items }
+      }),
+  )
+  const context: GroupContextValue = {
+    kind: 'group',
+    handle,
+    instructionsId,
+    elements,
+    render,
+  }
+  const extras = (
+    <>
+      <p id={instructionsId} hidden>
+        {groupInstructions}
+      </p>
+      {region}
+    </>
+  )
+  return { context, handle, root, extras }
+}
+
+/**
+ * A list in a group: its items as the group orders them, the ones that moved
+ * in from another list included, and the props its parts read.
+ */
+function useGroupList(id: string, children: ReactNode) {
+  const context = useSortContext()
+  if (context.kind !== 'group')
+    throw new Error('A SortableList with an `id` must be inside a SortableGroup.')
+  const items = valuedChildren(children)
+  const present = items.map((item) => item.props.value)
+  const key = present.join('\u0000')
+  const { elements, render } = context
+  useLayoutEffect(() => {
+    for (const item of items) elements.set(item.props.value, item)
+    render(id, key === '' ? [] : key.split('\u0000'))
+  })
+  useLayoutEffect(() => () => render(id, null), [id, render])
+  const own = new Map(items.map((item) => [item.props.value, item]))
+  const ordered = (order: readonly string[]) => {
+    const shown = new Set(order)
+    return [
+      ...order.flatMap((value) => own.get(value) ?? elements.get(value) ?? []),
+      // Rendered here but in no list of the group's yet: at the end, until it is.
+      ...items.filter(
+        (item) =>
+          !shown.has(item.props.value) &&
+          !listOf(context.handle.state.value, item.props.value),
+      ),
+    ]
+  }
+  return { handle: context.handle, ordered }
+}
+
+/**
+ * Glides each item that moved to another list from where it was, before the
+ * page changed, across the group: the `flow` lib in each list glides what
+ * moved inside it, and is told to leave no copy of what moved out
+ * (`data-flow-away`). The item a pointer drags is its slot, which appears in
+ * place. Read just before React changes the page, which only a class can.
+ */
+class ListsMove extends Component<{
+  lists: TransferLists
+  dragging: string | null
+  root: RefObject<HTMLElement | null>
+  children: ReactNode
+}> {
+  getSnapshotBeforeUpdate(previous: Readonly<{ lists: TransferLists }>) {
+    const root = this.props.root.current
+    if (!root || previous.lists === this.props.lists) return null
+    const seen = new Map<string, DOMRect>()
+    for (const key of changedLists(previous.lists, this.props.lists)) {
+      const item = itemIn(root, GROUP_ITEM, key)
+      if (!item) continue
+      item.setAttribute('data-flow-away', '')
+      if (key !== this.props.dragging) seen.set(key, item.getBoundingClientRect())
+    }
+    return seen
+  }
+
+  componentDidUpdate(
+    _previous: unknown,
+    _state: unknown,
+    seen: Map<string, DOMRect> | null,
+  ) {
+    const root = this.props.root.current
+    if (!root || !seen) return
+    for (const [key, box] of seen) {
+      const item = itemIn(root, GROUP_ITEM, key)
+      if (item) settleFrom(item, box, 'across')
+    }
+  }
+
+  render() {
+    return this.props.children
   }
 }
 
-/** The props of an item's handle: a button that picks the item up. */
-export function useSortHandle() {
-  const { sorter, lifted, instructionsId } = useSortContext()
-  const item = use(SortItemContext)
-  if (!item) throw new Error('A SortableHandle must be inside a SortableItem.')
-  const { value, label, disabled } = item
-  return {
-    ref: refFor(sorter.handleRefs, sorter.handles, value),
-    type: 'button' as const,
-    disabled,
-    'aria-label': `Move ${label}`,
-    'aria-describedby': instructionsId,
-    'aria-pressed': lifted?.value === value,
-    onPointerDown: (event: ReactPointerEvent<HTMLElement>) => {
-      if (!disabled) press(sorter, value, event, false)
-    },
-    onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
-      if (!disabled) key(sorter, value, event)
-    },
-    // A screen reader's activate command sends a click with no press behind
-    // it (detail 0), not a key: it picks up and drops as Space does. A
-    // pointer's click does nothing, since a drag is how a pointer moves it.
-    onClick: (event: ReactMouseEvent<HTMLElement>) => {
-      if (disabled || event.detail !== 0) return
-      toggle(sorter, value)
-    },
-    onBlur: () => {
-      // Focus left behind drops the item where it is; a blur from its own move doesn't.
-      if (
-        sorter.refocus === value ||
-        sorter.lifted?.value !== value ||
-        sorter.lifted.via !== 'keyboard'
-      )
-        return
-      queueMicrotask(() => {
-        if (
-          sorter.lifted?.value === value &&
-          document.activeElement !== sorter.handles.get(value)
-        )
-          finish(sorter, 'drop')
-      })
-    },
-  }
+export {
+  ListsMove,
+  SortContext,
+  sortControls,
+  sortGroup,
+  SortItemContext,
+  sortList,
+  useGroupList,
+  useSettle,
+  useSortContext,
+  useSortGroup,
+  useSortList,
 }
-
-export { SortContext, sortControls, SortItemContext }
