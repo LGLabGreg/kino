@@ -6,7 +6,7 @@ import { useLayoutEffect, useState, useSyncExternalStore } from 'react'
  * bottom sheet. Rendered on the server as roomy, since most first loads are
  * on a desk. A container: narrower than a width in rem, for a part whose
  * container query lays it out and whose behaviour has to follow, such as
- * the Sidebar's Sheet and the AI chat popup's window that fills its
+ * the Sidebar's Drawer and the AI chat popup's window that fills its
  * container.
  */
 

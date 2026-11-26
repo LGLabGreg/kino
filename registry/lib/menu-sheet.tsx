@@ -28,7 +28,6 @@ import {
 } from '@/registry/lib/menu'
 import { useRoomy } from '@/registry/lib/roomy'
 import { edgeFadeClassName, followEdges } from '@/registry/lib/scroll'
-import type { Drawer as DrawerPrimitive } from '@base-ui/react/drawer'
 import { createChangeEventDetails } from '@base-ui/react/internals/createBaseUIEventDetails'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import { mergeProps } from '@base-ui/react/merge-props'
@@ -67,7 +66,7 @@ interface MenuSheetContextValue {
 /** Why it opened or closed: the Menu's details, or on a phone the Drawer's. */
 type MenuSheetOpenChangeDetails =
   | MenuPrimitive.Root.ChangeEventDetails
-  | DrawerPrimitive.Root.ChangeEventDetails
+  | Parameters<NonNullable<ComponentProps<typeof Drawer>['onOpenChange']>>[1]
 
 const MenuSheetContext = createContext<MenuSheetContextValue>({
   sheet: false,
@@ -129,7 +128,8 @@ function MenuSheet<Payload>({
           onOpenChange={change}
           {...(props.modal === undefined ? {} : { modal: props.modal })}
         >
-          {children}
+          {/* A trigger that passes a payload is the menu's; the drawer opens from its own trigger. */}
+          {typeof children === 'function' ? children({ payload: undefined }) : children}
         </Drawer>
       ) : (
         <MenuPrimitive.Root<Payload> open={open} onOpenChange={change} {...props}>
@@ -151,7 +151,7 @@ function MenuSheetTrigger(
   if (sheet) {
     return (
       <DrawerTrigger
-        data-slot='menu-sheet-trigger'
+        data-menu-sheet-trigger=''
         {...(props as ComponentProps<typeof DrawerTrigger>)}
       />
     )
@@ -214,7 +214,7 @@ function MenuSheetContent({
   if (sheet) {
     return (
       <DrawerContent
-        data-slot='menu-sheet-content'
+        data-menu-sheet-content=''
         showCloseButton={false}
         {...(sheetProps(props) as ComponentProps<typeof DrawerContent>)}
       >

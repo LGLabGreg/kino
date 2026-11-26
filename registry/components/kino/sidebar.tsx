@@ -7,9 +7,9 @@ import {
   collapsibleNestedClassName,
   collapsibleRowClassName,
 } from '@/registry/components/kino/collapsible'
+import { Drawer, DrawerContent, DrawerTitle } from '@/registry/components/kino/drawer'
 import { Kbd, KbdGroup } from '@/registry/components/kino/kbd'
 import { ScrollArea } from '@/registry/components/kino/scroll-area'
-import { Sheet, SheetContent, SheetTitle } from '@/registry/components/kino/sheet'
 import {
   Tooltip,
   TooltipContent,
@@ -67,7 +67,7 @@ import { cn } from '@/lib/utils'
  * that glides with the pointer and focus, and the current page is a tint
  * that glides to the next page as you go there. Each row keeps the
  * sidebar's whole width inside it, so a sidebar that narrows covers its
- * labels in place and nothing in a row moves. On a phone, it is a Sheet.
+ * labels in place and nothing in a row moves. On a phone, it is a Drawer.
  */
 
 type SidebarSide = 'start' | 'end'
@@ -75,18 +75,18 @@ type SidebarSide = 'start' | 'end'
 /** Toggles the sidebar from anywhere on the page. */
 const SIDEBAR_SHORTCUT = ['Mod', 'B'] as const
 
-/** Under this width, in rem, the provider is a phone's screen: the sidebar is a Sheet. */
+/** Under this width, in rem, the provider is a phone's screen: the sidebar is a Drawer. */
 const SHEET_BELOW_REM = 48
 
 interface SidebarContextValue {
   /** Whether the sidebar is docked open beside the page, on a wide screen. */
   open: boolean
   setOpen: (open: boolean) => void
-  /** Whether the provider is as narrow as a phone, so the sidebar is a Sheet. */
+  /** Whether the provider is as narrow as a phone, so the sidebar is a Drawer. */
   sheet: boolean
   sheetOpen: boolean
   setSheetOpen: (open: boolean) => void
-  /** Opens or closes whichever the screen shows: the docked sidebar or the Sheet. */
+  /** Opens or closes whichever the screen shows: the docked sidebar or the Drawer. */
   toggle: () => void
   /** The sidebar's id, for its triggers' `aria-controls`. */
   id: string
@@ -115,7 +115,7 @@ function showsSheet(width: number, rem: number) {
 /**
  * Holds whether the sidebar is open, and lays it out beside the page:
  * `SidebarInset` holds the page and scrolls. It is as tall as the screen
- * unless `className` says otherwise. Under 48rem wide, the sidebar is a Sheet.
+ * unless `className` says otherwise. Under 48rem wide, the sidebar is a Drawer.
  */
 function SidebarProvider({
   open: openProp,
@@ -289,7 +289,7 @@ function railHome(element: HTMLElement): HTMLElement | null {
 }
 
 /**
- * The sidebar on a phone: the same parts, whole, in a Sheet from its side.
+ * The sidebar on a phone: the same parts, whole, in a Drawer from its side.
  * A link pressed inside closes it.
  */
 function SidebarSheet({
@@ -304,12 +304,12 @@ function SidebarSheet({
   const { sheet, sheetOpen, setSheetOpen, id } = useSidebar()
   if (!sheet) return null
   return (
-    <Sheet side={side} open={sheetOpen} onOpenChange={setSheetOpen}>
-      <SheetContent
+    <Drawer side={side} open={sheetOpen} onOpenChange={setSheetOpen}>
+      <DrawerContent
         id={id}
         className='bg-sidebar w-(--sidebar-width-mobile,18rem) [--sidebar-width:var(--sidebar-width-mobile,18rem)]'
       >
-        <SheetTitle className='sr-only'>{label}</SheetTitle>
+        <DrawerTitle className='sr-only'>{label}</DrawerTitle>
         <SidebarSurface
           collapsed={false}
           aria-label={label}
@@ -318,8 +318,8 @@ function SidebarSheet({
         >
           {children}
         </SidebarSurface>
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -435,7 +435,7 @@ function SidebarHeader({ className, children, ...props }: ComponentProps<'div'>)
     <div
       data-slot='sidebar-header'
       className={cn(
-        // In a Sheet, it ends short of the close button, as a panel's header does.
+        // In a Drawer, it ends short of the close button, as a panel's header does.
         'flex shrink-0 flex-col py-(--control-padding) group-data-close-button/panel-surface:pe-[calc(var(--surface-padding-lg)+var(--control-height-sm)-4px)]',
         sidebarGutter,
         className,
@@ -526,7 +526,7 @@ function SidebarGroup({ className, children, ...props }: ComponentProps<'div'>) 
  * The width a row's content keeps in a docked sidebar whatever the sidebar's
  * own width, so nothing is laid out again as it folds to its rail: the
  * sidebar's, inside its gutters and the row's padding. Anywhere else (its
- * Sheet, or a list drawn with its rows in a popover or a window) nothing
+ * Drawer, or a list drawn with its rows in a popover or a window) nothing
  * folds, so the content fits its row.
  */
 const contentWidth =
@@ -721,8 +721,8 @@ const rowContentClassName = cn(
 )
 
 /**
- * Closes the Sheet the sidebar shows in a narrow container, when it is one.
- * Outside a SidebarProvider there is no Sheet, so it does nothing: a list
+ * Closes the Drawer the sidebar shows in a narrow container, when it is one.
+ * Outside a SidebarProvider there is no Drawer, so it does nothing: a list
  * drawn with the sidebar's rows works in a popover or a panel too.
  */
 function useCloseSheet() {
@@ -732,7 +732,7 @@ function useCloseSheet() {
   }
 }
 
-/** Closes the Sheet when a link inside it is pressed, since the page it opens is under it. */
+/** Closes the Drawer when a link inside it is pressed, since the page it opens is under it. */
 function useCloseOnNavigate() {
   const closeSheet = useCloseSheet()
   return (event: MouseEvent<HTMLElement>) => {
@@ -1057,7 +1057,7 @@ type Peek = 'off' | 'open' | 'closing'
  * narrows it to its icons, its rows named by tooltips; `offcanvas` slides it
  * away, and resting the pointer on the screen's edge brings it back over the
  * page for a moment. Either way the page beside it moves on `layout`. On a
- * phone it is a Sheet from the same side.
+ * phone it is a Drawer from the same side.
  */
 function Sidebar({
   side = 'start',
@@ -1330,7 +1330,7 @@ function usePeek({
 }
 
 /**
- * Opens and closes the sidebar, or the Sheet on a phone. Its tooltip names
+ * Opens and closes the sidebar, or the Drawer on a phone. Its tooltip names
  * the shortcut.
  */
 function SidebarTrigger({

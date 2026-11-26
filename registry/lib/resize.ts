@@ -1,7 +1,7 @@
 /**
  * Moving an element from one size to another on its own CSS transition, then
  * handing the size back to layout: the Accordion's panel, the Dialog's and
- * Sheet's box, and the Swap's width. Kept outside components: the React
+ * Drawer's box, and the Swap's width. Kept outside components: the React
  * Compiler drops a forced reflow written inside one, and then the size jumps.
  */
 

@@ -14,8 +14,8 @@ import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 
 /*
- * What Dialog, Alert dialog, Sheet, Drawer and a Popover shown as a sheet
- * share: the overlay, a box that follows its content's height, the close
+ * What Dialog, Alert dialog, Drawer and a Popover shown as a sheet
+ * share: the dim, a box that follows its content's height, the close
  * button, the handle, and the header, title, description, body and footer. Each component names its own parts with
  * `data-slot`; the parts the panel itself looks for carry `data-panel`
  * (`body`, `footer`, `handle`), so the same selectors work in all four. A
@@ -28,8 +28,14 @@ import { cn } from '@/lib/utils'
  * iOS: an absolute backdrop as tall as the screen covers the whole visible
  * viewport, a fixed one doesn't.
  */
-export const panelOverlayClassName =
-  'fixed inset-0 isolate z-50 bg-black/15 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs supports-[-webkit-touch-callout:none]:absolute supports-[-webkit-touch-callout:none]:min-h-dvh dark:bg-black/45'
+export const panelDimClassName =
+  'fixed inset-0 isolate z-50 bg-black/15 supports-backdrop-filter:backdrop-blur-xs supports-[-webkit-touch-callout:none]:absolute supports-[-webkit-touch-callout:none]:min-h-dvh dark:bg-black/45'
+
+/** The dim behind a dialog, which fades in and out with it. A drawer's follows the drawer instead. */
+export const panelOverlayClassName = cn(
+  panelDimClassName,
+  'transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) data-starting-style:opacity-0',
+)
 
 /**
  * The same dim and blur behind a popup ui-sdk shows as a sheet, such as a
@@ -40,13 +46,13 @@ export const panelSheetBackdropClassName =
   '[--sheet-backdrop:--alpha(var(--color-black)/15%)] dark:[--sheet-backdrop:--alpha(var(--color-black)/45%)] supports-backdrop-filter:[*:has(>&[data-presentation=sheet])::backdrop]:backdrop-blur-xs'
 
 /**
- * The dim over a panel while another opens on top of it: a dialog under
- * another dialog (ui-sdk marks the content around the surface
- * `data-nested-open`), or a sheet or drawer under another one. Only the
- * content's own surface dims: the dialog on top sits inside it.
+ * The dim over a dialog's surface while another dialog opens on top of it
+ * (ui-sdk marks the content around the surface `data-nested-open`). Only the
+ * content's own surface dims: the dialog on top sits inside it. A drawer's
+ * dim follows the drawer on top instead (`drawer.tsx`).
  */
 export const panelStackDimClassName =
-  'before:pointer-events-none before:absolute before:inset-0 before:z-20 before:rounded-[inherit] before:bg-black/0 before:transition-colors before:duration-(--motion-enter-duration) before:ease-(--motion-enter-fade-easing) [[data-nested-open]>&]:before:bg-black/10 data-nested-drawer-open:before:bg-black/10 dark:[[data-nested-open]>&]:before:bg-black/40 dark:data-nested-drawer-open:before:bg-black/40'
+  'before:pointer-events-none before:absolute before:inset-0 before:z-20 before:rounded-[inherit] before:bg-black/0 before:transition-colors before:duration-(--motion-enter-duration) before:ease-(--motion-enter-fade-easing) [[data-nested-open]>&]:before:bg-black/10 dark:[[data-nested-open]>&]:before:bg-black/40'
 
 /**
  * A dialog's box on the screen's top layer: it rises `--dialog-rise` into

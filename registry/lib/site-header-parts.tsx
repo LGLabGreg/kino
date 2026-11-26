@@ -2,6 +2,15 @@
 
 import { buttonVariants } from '@/registry/components/kino/button'
 import {
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from '@/registry/components/kino/drawer'
+import {
   NavigationMenu,
   NavigationMenuContent,
   NavigationMenuItem,
@@ -9,15 +18,6 @@ import {
   NavigationMenuList,
   NavigationMenuTrigger,
 } from '@/registry/components/kino/navigation-menu'
-import {
-  Sheet,
-  SheetBody,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/registry/components/kino/sheet'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { pageColumnClassName } from '@/registry/lib/hero-parts'
 import { withoutTransition } from '@/registry/lib/resize'
@@ -315,7 +315,8 @@ function SiteHeaderPhoneMenu({
   const shown = items.find((item) => isSection(item) && item.label === drawn)
 
   return (
-    <Sheet
+    <Drawer
+      side='end'
       open={open}
       onOpenChange={(next) => {
         // Opened again, it starts from the list.
@@ -323,22 +324,22 @@ function SiteHeaderPhoneMenu({
         setOpen(next)
       }}
     >
-      <SheetTrigger aria-label='Menu' className={menuButtonClassName}>
+      <DrawerTrigger aria-label='Menu' className={menuButtonClassName}>
         <MenuToggleIcon />
-      </SheetTrigger>
-      <SheetContent
+      </DrawerTrigger>
+      <DrawerContent
         className='w-[min(24rem,calc(100%-(--spacing(12))))]'
         // Any link in it closes it, the logo and the actions too, so it never stays over the page it opened.
         onClick={(event) => {
           if (event.target instanceof Element && event.target.closest('a[href]')) close()
         }}
       >
-        <SheetHeader className='border-b'>
+        <DrawerHeader className='border-b'>
           {/* The logo where the header showed it; the title names the sheet for screen readers. */}
-          <SheetTitle className='sr-only'>Menu</SheetTitle>
+          <DrawerTitle className='sr-only'>Menu</DrawerTitle>
           {logo}
-        </SheetHeader>
-        <SheetBody className='p-0'>
+        </DrawerHeader>
+        <DrawerBody className='p-0'>
           <nav aria-label={label} className='grid overflow-x-clip p-(--surface-padding)'>
             <div
               ref={list}
@@ -417,12 +418,12 @@ function SiteHeaderPhoneMenu({
               ) : null}
             </div>
           </nav>
-        </SheetBody>
+        </DrawerBody>
         {actions ? (
-          <SheetFooter className={phoneActionsClassName}>{actions}</SheetFooter>
+          <DrawerFooter className={phoneActionsClassName}>{actions}</DrawerFooter>
         ) : null}
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   )
 }
 

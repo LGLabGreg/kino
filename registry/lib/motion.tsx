@@ -1,5 +1,6 @@
 'use client'
 
+import { MotionSpeed, useMotionSpeed } from '@/registry/lib/motion-speed'
 import {
   atSpeed,
   DEFAULT_FEEL,
@@ -9,23 +10,13 @@ import {
   type MotionRole,
 } from '@/registry/lib/motion-tokens'
 import { type Transition, useReducedMotion, useReducedMotionConfig } from 'motion/react'
-import { createContext, type ReactNode, use, useMemo, useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 
 /*
  * Components move with CSS on the roles' variables, which the feel in
  * `data-feel` sets (the `motion` item's CSS). This file is for `motion`
  * elements, which need the same springs as numbers.
  */
-
-const SpeedContext = createContext(1)
-
-/**
- * Plays the springs `useMotionTransition` returns at this rate, such as 0.25
- * for a slow-motion demo. CSS keeps its timing: the roles' variables time it.
- */
-function MotionSpeed({ speed, children }: { speed: number; children: ReactNode }) {
-  return <SpeedContext value={speed}>{children}</SpeedContext>
-}
 
 function subscribeToPage(onChange: () => void) {
   const observer = new MutationObserver(onChange)
@@ -54,7 +45,7 @@ function useMotionTransition(role: MotionRole): Transition {
     () => document.documentElement.dataset.motion === 'reduce',
     () => false,
   )
-  const speed = use(SpeedContext)
+  const speed = useMotionSpeed()
   // With no MotionConfig above, motion's config says "never", whatever the system says.
   const system = useReducedMotion() === true
   const reduced = useReducedMotionConfig() === true || system || reducedByPage

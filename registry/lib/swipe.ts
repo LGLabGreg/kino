@@ -1,8 +1,9 @@
 /*
  * A sideways drag that carries its speed, as a carousel's slides follow one:
  * the element follows the pointer at once, and on release the flick's speed
- * says how far it goes and how quickly it settles. The numbers match Base
- * UI's Drawer, so a swipe feels the same in every Kino component.
+ * says how far it goes and how quickly it settles. The numbers are Base UI's
+ * Drawer's. Kino's Drawer moves on ui-sdk's own spring, so only the Carousel
+ * uses this.
  */
 
 /** How far, in pixels, a press moves sideways before it becomes a drag, as Base UI's Drawer waits. */
@@ -58,7 +59,7 @@ export function projectedOffset(offset: number, velocity: number) {
 
 /**
  * How much of its role's duration the rest of a swipe takes, from 0.1 to 1,
- * as Base UI's `--drawer-swipe-strength`: `remaining` pixels to go at
+ * as the Carousel's `--carousel-swipe-strength`: `remaining` pixels to go at
  * `velocity` pixels per millisecond. A slow release takes the whole role.
  */
 export function swipeStrength(remaining: number, velocity: number) {
