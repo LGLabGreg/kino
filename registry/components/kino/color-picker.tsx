@@ -1,6 +1,6 @@
 'use client'
 
-import { Collapsible, CollapsibleContent } from '@/registry/components/kino/collapsible'
+import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
 import {
   InputGroup,
   InputGroupAddon,
@@ -1049,9 +1049,9 @@ function ColorPickerPalette({
         </PresetRadio>
       </RadioGroupPrimitive>
       {/* The room above and below keeps the area's thumb and the focus rings clear of the panel's clip. */}
-      <CollapsibleContent className='flex flex-col gap-(--surface-gap) ps-0 pe-0 pt-(--surface-gap) pb-1'>
+      <CollapsiblePanel className='flex flex-col gap-(--surface-gap) ps-0 pe-0 pt-(--surface-gap) pb-1'>
         {children}
-      </CollapsibleContent>
+      </CollapsiblePanel>
     </Collapsible>
   )
 }

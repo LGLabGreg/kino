@@ -1,7 +1,7 @@
 'use client'
 
 import { useSpinner } from '@/registry/components/kino/spinner'
-import { Tree, TreeItem } from '@/registry/components/kino/tree'
+import { Tree, TreeGroup, TreeItem, TreeItemLabel } from '@/registry/components/kino/tree'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
   type ChartConfig,
@@ -42,6 +42,7 @@ import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
 import { edgeFadeClassName, followEdges } from '@/registry/lib/scroll'
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
+import type { TreeMode } from '@ui-sdk/react/tree'
 import {
   type ComponentProps,
   createContext,
@@ -336,6 +337,14 @@ const narrowTrackClassName =
 /** The axis and the grid in a narrow list: the bars' column alone, as wide as the rows'. */
 const narrowColumnClassName = '@max-lg:w-[calc(100cqw-2*var(--control-padding)-1.5rem)]'
 
+/** A span's row in the Tree. */
+const rowSelector = '[data-slot=tree-label]'
+
+/** The span a row, or anything in one, belongs to. */
+function spanOf(node: Element | null) {
+  return node?.closest<HTMLElement>('[data-span]')?.dataset.span ?? null
+}
+
 /** The room the Tree keeps for the tick of a picked row, so the axis lines up with the bars. */
 const tickRoomClassName = 'size-4 shrink-0'
 
@@ -345,13 +354,14 @@ const tickRoomClassName = 'size-4 shrink-0'
  * `style` go to its box; the rest are the Tree's: `expanded` and `value`
  * with their defaults and callbacks.
  */
-function WaterfallList({
+function WaterfallList<Mode extends TreeMode = 'single'>({
   className,
   style,
   children,
   loading = false,
   ...props
-}: ComponentProps<typeof Tree> & {
+}: Omit<ComponentProps<typeof Tree<Mode>>, 'style'> & {
+  style?: CSSProperties
   /** Shows a placeholder while the spans load, after a moment, and for long enough to read. */
   loading?: boolean
 }) {
@@ -423,28 +433,26 @@ function WaterfallList({
         bar !== null && inSight(bar.getBoundingClientRect(), view.top, view.bottom)
       const next = seen ? lit : null
       // Spotlight reads the lit row from the page, so no span re-renders as the pointer moves.
+      const litRow = next === null ? null : (bar?.closest(rowSelector) ?? null)
       for (const row of list.querySelectorAll('[data-lit]')) {
-        if (row.getAttribute('data-value') !== next) row.removeAttribute('data-lit')
+        if (row !== litRow) row.removeAttribute('data-lit')
       }
-      if (next !== null) bar?.closest('[role=treeitem]')?.setAttribute('data-lit', '')
+      litRow?.setAttribute('data-lit', '')
       // Set here rather than found with `:has()`, which would restyle every bar on each move.
       list.toggleAttribute('data-spotlit', next !== null)
       setActive(next)
     }
     const observer = new MutationObserver(() => {
-      glided =
-        list.querySelector<HTMLElement>('[role=treeitem][data-glided]')?.dataset.value ??
-        null
+      glided = spanOf(list.querySelector(`${rowSelector}[data-glided]`))
       sync()
     })
     observer.observe(list, { subtree: true, attributeFilter: ['data-glided'] })
     const press = (event: PointerEvent) => {
       if (event.pointerType !== 'touch') return
-      const row =
+      touched =
         event.target instanceof Element && list.contains(event.target)
-          ? event.target.closest<HTMLElement>('[role=treeitem]')
+          ? spanOf(event.target)
           : null
-      touched = row?.dataset.value ?? null
       sync()
     }
     document.addEventListener('pointerdown', press)
@@ -490,7 +498,7 @@ function WaterfallList({
             <WaterfallPlaceholder />
           ) : (
             <>
-              <Tree className='relative' {...props}>
+              <Tree<Mode> className='relative' {...props}>
                 {children}
               </Tree>
               {/* Loading with no spans yet is loading, never empty, while the placeholder waits to show. */}
@@ -765,9 +773,15 @@ function WaterfallSpan({
   className,
   children,
   ...props
-}: Omit<ComponentProps<typeof TreeItem>, 'label' | 'aside'> & {
+}: Omit<ComponentProps<typeof TreeItem>, 'children' | 'label'> & {
   /** What the row names it. Its text is what typing a name finds. */
   label: ReactNode
+  /** Shown before the name, sized by the row. */
+  icon?: ReactNode
+  /** `className` goes on its row. */
+  className?: string
+  /** The spans inside it, each a `WaterfallSpan`. */
+  children?: ReactNode
   /** When it starts, from the trace's start. */
   start: number
   /** How long it lasts. */
@@ -816,15 +830,15 @@ function WaterfallSpan({
   const durationText = write(duration)
 
   return (
-    <TreeItem
-      value={value}
-      icon={icon}
-      className={cn(
-        'data-lit:[--mark-step:0] @max-lg/tree:flex-wrap @max-lg/tree:gap-y-0.5',
-        className,
-      )}
-      label={
-        <span className='flex min-w-0 items-center gap-2'>
+    <TreeItem value={value} data-span={value} {...props}>
+      <TreeItemLabel
+        className={cn(
+          'data-lit:[--mark-step:0] @max-lg/tree:flex-wrap @max-lg/tree:gap-y-0.5',
+          className,
+        )}
+      >
+        {icon}
+        <span className='flex min-w-0 flex-1 items-center gap-2'>
           {/* Its own direction, so a name in another script reads and cuts short at its end, on the row's start. */}
           <span dir='auto' className='min-w-0 flex-1 truncate text-left rtl:text-right'>
             {label}
@@ -852,8 +866,6 @@ function WaterfallSpan({
               ))}
           </span>
         </span>
-      }
-      aside={
         <span
           aria-hidden
           data-slot='waterfall-track'
@@ -901,13 +913,15 @@ function WaterfallSpan({
             }
           />
         </span>
-      }
-      {...props}
-    >
-      {children === undefined ? undefined : (
-        <ParentContext value={{ span: [start, start + duration], depth, within, shown }}>
-          {children}
-        </ParentContext>
+      </TreeItemLabel>
+      {children === undefined ? null : (
+        <TreeGroup>
+          <ParentContext
+            value={{ span: [start, start + duration], depth, within, shown }}
+          >
+            {children}
+          </ParentContext>
+        </TreeGroup>
       )}
     </TreeItem>
   )

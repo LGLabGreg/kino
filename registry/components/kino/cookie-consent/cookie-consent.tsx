@@ -1,7 +1,7 @@
 'use client'
 
 import { Button } from '@/registry/components/kino/button'
-import { Collapsible, CollapsibleContent } from '@/registry/components/kino/collapsible'
+import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
 import type { Consent } from '@/registry/lib/consent'
 import {
   CookieConsentCategory,
@@ -79,7 +79,7 @@ function CookieConsent<Id extends string>({
           policyHref={policyHref}
         />
         <Collapsible open={model.customising}>
-          <CollapsibleContent className='p-0'>
+          <CollapsiblePanel className='p-0'>
             <div
               ref={fades}
               className={cn(
@@ -97,7 +97,7 @@ function CookieConsent<Id extends string>({
                 ))}
               </div>
             </div>
-          </CollapsibleContent>
+          </CollapsiblePanel>
         </Collapsible>
         <div className='mt-(--surface-gap) flex flex-col gap-2 @xs/cookie-consent:flex-row'>
           <Button

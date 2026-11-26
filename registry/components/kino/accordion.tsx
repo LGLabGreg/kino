@@ -3,13 +3,20 @@
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { collapseClassName, followPanelContent } from '@/registry/lib/resize'
 import { holdAtEdge, topEdge } from '@/registry/lib/scroll'
-import { Accordion as AccordionPrimitive } from '@base-ui/react/accordion'
+import {
+  AccordionHeader as AccordionHeaderPrimitive,
+  AccordionItem as AccordionItemPrimitive,
+  AccordionPanel as AccordionPanelPrimitive,
+  Accordion as AccordionPrimitive,
+  AccordionTrigger as AccordionTriggerPrimitive,
+} from '@ui-sdk/react/accordion'
 import { cva } from 'class-variance-authority'
 import {
   type ComponentProps,
   createContext,
   createElement,
   type MouseEvent,
+  type ReactNode,
   use,
   useEffect,
   useRef,
@@ -59,7 +66,8 @@ function Accordion({
   heading = 'h3',
   onClick,
   ...props
-}: Omit<AccordionPrimitive.Root.Props, 'className'> & { className?: string } & {
+}: Omit<ComponentProps<typeof AccordionPrimitive>, 'className'> & {
+  className?: string
   variant?: AccordionVariant
   /** Each trigger's heading level: one under the heading the accordion sits under. */
   heading?: AccordionHeading
@@ -67,8 +75,7 @@ function Accordion({
   return (
     <AccordionHeadingContext value={heading}>
       <AccordionVariantContext value={variant}>
-        <AccordionPrimitive.Root
-          data-slot='accordion'
+        <AccordionPrimitive
           data-variant={variant}
           className={cn('flex w-full min-w-0 flex-col', className)}
           onClick={(event) => {
@@ -100,11 +107,13 @@ function AccordionItem({
   className,
   children,
   ...props
-}: Omit<AccordionPrimitive.Item.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof AccordionItemPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const variant = use(AccordionVariantContext)
   return (
-    <AccordionPrimitive.Item
-      data-slot='accordion-item'
+    <AccordionItemPrimitive
       className={cn(accordionItemVariants({ variant }), className)}
       {...props}
     >
@@ -119,7 +128,7 @@ function AccordionItem({
       ) : (
         children
       )}
-    </AccordionPrimitive.Item>
+    </AccordionItemPrimitive>
   )
 }
 
@@ -130,7 +139,7 @@ const accordionTriggerVariants = cva(
       variant: {
         default: 'rounded-(--control-radius-capped) py-(--row-padding)',
         // A card's rows are 2px tighter than flat rows, at every density.
-        card: 'not-data-panel-open:not-data-disabled:hover:bg-muted/60 rounded-[inherit] px-(--surface-padding) py-[calc(var(--row-padding)_-_2px)]',
+        card: 'not-data-open:not-data-disabled:hover:bg-muted/60 rounded-[inherit] px-(--surface-padding) py-[calc(var(--row-padding)_-_2px)]',
       },
     },
     defaultVariants: { variant: 'default' },
@@ -142,24 +151,24 @@ const accordionIndicator =
 
 // The indicator turns with the panel, so the two end together.
 const accordionIndicatorTurn =
-  'origin-center transition-[rotate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-panel-open/accordion-trigger:rotate-180 motion-reduce:transition-none'
+  'origin-center transition-[rotate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-open/accordion-trigger:rotate-180 motion-reduce:transition-none'
 
 function AccordionTrigger({
   className,
   children,
   ...props
-}: Omit<AccordionPrimitive.Trigger.Props, 'className'> & {
+}: Omit<ComponentProps<typeof AccordionTriggerPrimitive>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
 }) {
   const variant = use(AccordionVariantContext)
   const heading = use(AccordionHeadingContext)
   return (
-    <AccordionPrimitive.Header
+    <AccordionHeaderPrimitive
       render={(headerProps) => createElement(heading, headerProps)}
       className='flex min-w-0 rounded-[inherit]'
     >
-      <AccordionPrimitive.Trigger
-        data-slot='accordion-trigger'
+      <AccordionTriggerPrimitive
         className={cn(accordionTriggerVariants({ variant }), className)}
         {...props}
       >
@@ -193,12 +202,12 @@ function AccordionTrigger({
             aria-hidden
             className={cn(
               accordionIndicator,
-              'transition-[color,rotate] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] group-data-panel-open/accordion-trigger:rotate-180 motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
+              'transition-[color,rotate] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] group-data-open/accordion-trigger:rotate-180 motion-reduce:transition-[color] motion-reduce:ease-(--motion-layout-fade-easing)',
             )}
           />
         )}
-      </AccordionPrimitive.Trigger>
-    </AccordionPrimitive.Header>
+      </AccordionTriggerPrimitive>
+    </AccordionHeaderPrimitive>
   )
 }
 
@@ -231,12 +240,12 @@ const accordionContentVariants = cva('text-muted-foreground wrap-break-word', {
 })
 
 /**
- * The content's own box. It mounts with the panel. Base UI sizes the panel
+ * The content's own box. It mounts with the panel. ui-sdk sizes the panel
  * while it opens and closes, and leaves it at `auto` once open, so content
  * that grows or shrinks after that would jump: this moves the panel to the
  * new height on the same transition.
  */
-function AccordionContentInner(props: ComponentProps<'div'>) {
+function AccordionPanelContent(props: ComponentProps<'div'>) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -246,33 +255,32 @@ function AccordionContentInner(props: ComponentProps<'div'>) {
     return followPanelContent(panel, inner, '--accordion-panel-height')
   }, [])
 
-  return <div ref={ref} data-slot='accordion-content-inner' {...props} />
+  return <div ref={ref} data-slot='accordion-panel-content' {...props} />
 }
 
 /**
  * `className` goes on the content's own box, the one with the padding; the
- * other props go to Base UI's panel.
+ * other props go to ui-sdk's panel.
  */
-function AccordionContent({
+function AccordionPanel({
   className,
   children,
   ...props
-}: Omit<AccordionPrimitive.Panel.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof AccordionPanelPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const variant = use(AccordionVariantContext)
   return (
-    <AccordionPrimitive.Panel
-      data-slot='accordion-content'
-      className={accordionPanelVariants({ variant })}
-      {...props}
-    >
-      <AccordionContentInner
+    <AccordionPanelPrimitive className={accordionPanelVariants({ variant })} {...props}>
+      <AccordionPanelContent
         className={cn(accordionContentVariants({ variant }), className)}
       >
         {children}
-      </AccordionContentInner>
-    </AccordionPrimitive.Panel>
+      </AccordionPanelContent>
+    </AccordionPanelPrimitive>
   )
 }
 
-export { Accordion, AccordionItem, AccordionTrigger, AccordionContent }
+export { Accordion, AccordionItem, AccordionTrigger, AccordionPanel }
 export type { AccordionHeading }

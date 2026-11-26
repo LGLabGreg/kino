@@ -1,7 +1,7 @@
 'use client'
 
 import { Card } from '@/registry/components/kino/card'
-import { Collapsible, CollapsibleContent } from '@/registry/components/kino/collapsible'
+import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
 import {
   Field,
   FieldDescription,
@@ -78,9 +78,9 @@ function SettingsChannel({
         <Switch checked={on} onCheckedChange={setOn} className='[grid-area:control]' />
       </Field>
       <Collapsible open={on}>
-        <CollapsibleContent keepMounted className='p-0'>
+        <CollapsiblePanel keepMounted className='p-0'>
           <div className='flex min-w-0 flex-col divide-y border-t'>{children}</div>
-        </CollapsibleContent>
+        </CollapsiblePanel>
       </Collapsible>
     </Card>
   )

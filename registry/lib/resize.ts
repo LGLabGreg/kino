@@ -395,7 +395,7 @@ export function markResizing(element: HTMLElement | null) {
 /**
  * A panel that opens and closes on its height, on `layout`, its content
  * fading out on `exit` and in as it opens: the Accordion's and a
- * collapsible's. Set `--collapse-height` to the height Base UI gives it
+ * collapsible's. Set `--collapse-height` to the height ui-sdk gives it
  * (`--accordion-panel-height`, `--collapsible-panel-height`), and clip it.
  */
 export const collapseClassName =
@@ -500,12 +500,12 @@ export function followColumns(table: HTMLTableElement): () => void {
 }
 
 /**
- * Keeps an open collapsing panel on its content's height. Base UI sizes the
+ * Keeps an open collapsing panel on its content's height. ui-sdk sizes the
  * panel while it opens and closes, then leaves it at `auto`, so content that
  * grows or shrinks after that would jump: this moves the panel to the new
  * height on its own transition, then hands it back to `auto`. Content that is
  * itself moving, such as a nested panel opening, is followed frame by frame
- * instead. `variable` is the height Base UI writes
+ * instead. `variable` is the height ui-sdk writes
  * (`--accordion-panel-height`). A column that changes width re-flows the
  * text, and the panel follows that at once. Returns a function that stops
  * following.
@@ -549,7 +549,7 @@ export function followPanelContent(
         write,
       },
     ).then((latest) => {
-      // Closed meanwhile: the height is Base UI's again.
+      // Closed meanwhile: the height is ui-sdk's again.
       if (!latest || !panel.hasAttribute('data-open')) return
       if (panel.style.getPropertyValue(variable) === `${target}px`) write('auto')
     })

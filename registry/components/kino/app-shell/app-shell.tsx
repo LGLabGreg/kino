@@ -161,7 +161,7 @@ function AppShell({
         onOpenChange={onOpenChange}
         shortcut={shortcut}
         {...props}
-        data-slot='app-shell'
+        data-app-shell=''
         data-variant={variant}
         className={cn(
           'text-foreground h-full min-h-full flex-col',
@@ -518,7 +518,7 @@ function AppShellWorkspaces({
         <CutTooltip
           render={
             <UserMenuTrigger
-              data-slot='app-shell-workspaces'
+              data-app-shell-workspaces=''
               render={
                 <Button
                   variant='ghost'
@@ -545,7 +545,7 @@ function AppShellWorkspaces({
   }
 
   return (
-    <SidebarMenu data-slot='app-shell-workspaces'>
+    <SidebarMenu data-app-shell-workspaces=''>
       <SidebarMenuItem>
         <UserMenu {...root}>
           <UserMenuTrigger
@@ -606,7 +606,7 @@ function AppShellUser({
     return (
       <UserMenu {...root}>
         <UserMenuTrigger
-          data-slot='app-shell-user'
+          data-app-shell-user=''
           render={<Button variant='ghost' size='icon' aria-label={`${name}, ${label}`} />}
         >
           {avatar}
@@ -620,7 +620,7 @@ function AppShellUser({
     )
   }
   return (
-    <SidebarMenu data-slot='app-shell-user'>
+    <SidebarMenu data-app-shell-user=''>
       <SidebarMenuItem>
         <UserMenu {...root}>
           <UserMenuTrigger render={<SidebarMenuButton size='lg' tooltip={name} />}>

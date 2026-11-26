@@ -35,9 +35,13 @@ import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { collapseClassName, transitionsSettled } from '@/registry/lib/resize'
 import { narrowerThan, useNarrowerThan } from '@/registry/lib/roomy'
 import { SwapTextTitleContext } from '@/registry/lib/swap'
-import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
+import {
+  CollapsiblePanel as CollapsiblePanelPrimitive,
+  Collapsible as CollapsiblePrimitive,
+  CollapsibleTrigger as CollapsibleTriggerPrimitive,
+} from '@ui-sdk/react/collapsible'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -184,23 +188,23 @@ function SidebarInset({
   className,
   render,
   ...props
-}: Omit<useRender.ComponentProps<'main'>, 'className'> & {
+}: Omit<PartProps<'main'>, 'className'> & {
   className?: string
 }) {
-  return useRender({
-    defaultTagName: 'main',
-    render,
-    props: mergeProps<'main'>(
+  return renderElement(
+    'main',
+    mergeProps(
       {
+        'data-slot': 'sidebar-inset',
         className: cn(
           'bg-background scrollbar-thin relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto',
           className,
         ),
       },
-      { 'data-slot': 'sidebar-inset' } as ComponentProps<'main'>,
       props,
     ),
-  })
+    render,
+  )
 }
 
 /** A row's inline padding, which centres a 1rem icon in a square as tall as the row. */
@@ -259,18 +263,18 @@ function SidebarSurface({
 
 /** Where focus on `element` goes once the sidebar is a rail: the row that stays, or itself. */
 function railHome(element: HTMLElement): HTMLElement | null {
-  const sub = element.closest('[data-slot=sidebar-menu-sub]')
+  const sub = element.closest('[data-sidebar-menu-sub]')
   if (sub) {
     return (
       sub.parentElement?.querySelector<HTMLElement>(
-        ':scope > [data-slot=sidebar-menu-section-trigger]',
+        ':scope > [data-sidebar-menu-section-trigger]',
       ) ?? null
     )
   }
   if (element.matches('[data-sidebar-menu-action]')) {
     return (
       element.parentElement?.querySelector<HTMLElement>(
-        ':scope > [data-slot=sidebar-menu-button]',
+        ':scope > [data-sidebar-menu-button]',
       ) ?? null
     )
   }
@@ -278,7 +282,7 @@ function railHome(element: HTMLElement): HTMLElement | null {
     return (
       element
         .closest('[data-slot=sidebar-group]')
-        ?.querySelector<HTMLElement>('[data-slot=sidebar-menu-button]') ?? null
+        ?.querySelector<HTMLElement>('[data-sidebar-menu-button]') ?? null
     )
   }
   return element
@@ -319,8 +323,7 @@ function SidebarSheet({
   )
 }
 
-const rowSelector =
-  '[data-slot=sidebar-menu-button], [data-slot=sidebar-menu-section-trigger]'
+const rowSelector = '[data-sidebar-menu-button], [data-sidebar-menu-section-trigger]'
 
 /**
  * The row that shows the current page: its own, or, while a section hides
@@ -329,16 +332,16 @@ const rowSelector =
 function currentRow(area: HTMLElement): HTMLElement | null {
   // Never a copy of a row that is leaving (the `flow` lib's), which keeps its marks while it fades.
   const current = area.querySelector<HTMLElement>(
-    '[data-slot=sidebar-menu-button][aria-current=page]:not([data-leaving] *)',
+    '[data-sidebar-menu-button][aria-current=page]:not([data-leaving] *)',
   )
   if (!current) return null
-  const sub = current.closest('[data-slot=sidebar-menu-sub]')
+  const sub = current.closest('[data-sidebar-menu-sub]')
   const trigger = sub?.parentElement?.querySelector<HTMLElement>(
-    ':scope > [data-slot=sidebar-menu-section-trigger]',
+    ':scope > [data-sidebar-menu-section-trigger]',
   )
   if (
     trigger &&
-    (!trigger.hasAttribute('data-panel-open') || area.dataset.state === 'collapsed')
+    (!trigger.hasAttribute('data-open') || area.dataset.state === 'collapsed')
   ) {
     return trigger
   }
@@ -379,7 +382,7 @@ function RowArea({
       followPointer(area, highlight, {
         // A heading that opens and closes its group is a control of its own: over it, the highlight goes.
         itemOf: itemMatching(area, rowSelector, {
-          rows: '[data-slot=sidebar-group-toggle]',
+          rows: '[data-sidebar-group-toggle]',
         }),
         focus: true,
       }),
@@ -389,7 +392,7 @@ function RowArea({
       stops.push(
         followPick(area, tint, {
           picked: () => currentRow(area),
-          attributes: ['aria-current', 'data-panel-open', 'data-state'],
+          attributes: ['aria-current', 'data-open', 'data-state'],
         }),
       )
     }
@@ -541,10 +544,11 @@ function SidebarGroupLabel({
   open,
   onOpenChange,
   ...props
-}: ComponentProps<'div'> & {
+}: Omit<ComponentProps<'div'>, 'className'> & {
+  className?: string
   /** Whether the group's rows show; the heading only says so, and the rows are yours to hide. */
   open?: boolean
-  onOpenChange?: (open: boolean) => void
+  onOpenChange?: ComponentProps<typeof CollapsiblePrimitive>['onOpenChange']
 }) {
   const group = use(GroupContext)
   const { rail } = use(SurfaceContext)
@@ -568,10 +572,10 @@ function SidebarGroupLabel({
       {children}
     </span>
   )
-  return (
+  const label = (
     <div
       id={group?.id}
-      data-slot='sidebar-group-label'
+      data-sidebar-group-label=''
       className={cn(
         'text-muted-foreground relative flex h-(--control-height-sm) shrink-0 items-center overflow-hidden text-xs font-medium',
         !toggles && rowPadding,
@@ -586,13 +590,10 @@ function SidebarGroupLabel({
         <CutTooltip
           disabled={rail}
           render={
-            <button
-              type='button'
-              aria-expanded={open}
+            <CollapsibleTriggerPrimitive
               // In the rail its words are gone, so it leaves the tab order.
               tabIndex={rail ? -1 : undefined}
-              onClick={() => onOpenChange?.(!open)}
-              data-slot='sidebar-group-toggle'
+              data-sidebar-group-toggle=''
               className={cn(
                 'group/collapsible-trigger hover:text-sidebar-foreground flex h-full shrink-0 items-center gap-1 rounded-(--control-radius-capped) text-start',
                 rowPadding,
@@ -607,9 +608,9 @@ function SidebarGroupLabel({
             >
               <span className={cn('flex min-w-0 items-center gap-1', fadesInRail)}>
                 {words}
-                <CollapsibleIndicator open={open} className='size-3' />
+                <CollapsibleIndicator className='size-3' />
               </span>
-            </button>
+            </CollapsibleTriggerPrimitive>
           }
         />
       ) : (
@@ -620,6 +621,12 @@ function SidebarGroupLabel({
         />
       )}
     </div>
+  )
+  // A disclosure with no panel of its own: the rows it shows and hides are yours.
+  return toggles ? (
+    <CollapsiblePrimitive open={open} onOpenChange={onOpenChange} render={label} />
+  ) : (
+    label
   )
 }
 
@@ -772,59 +779,47 @@ function SidebarMenuButton({
   size,
   className,
   children,
-  render,
   onClick,
   ...props
-}: Omit<useRender.ComponentProps<'button'>, 'className'> & {
+}: Omit<ComponentProps<typeof ButtonPrimitive>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
   /** Whether this row is the page you are on. */
   isActive?: boolean
   /** Its name in the rail, usually its label. */
   tooltip?: ReactNode
 } & VariantProps<typeof sidebarRowVariants>) {
   const closeOnNavigate = useCloseOnNavigate()
-  const row = useRender({
-    defaultTagName: 'button',
-    render,
-    props: mergeProps<'button'>(
-      {
-        type: render ? undefined : 'button',
-        className: cn(sidebarRowVariants({ size }), className),
-        onClick: (event) => {
-          // A disabled row still takes focus, so it can be read, but Enter does nothing.
-          if (event.currentTarget.getAttribute('aria-disabled') === 'true') {
-            event.preventDefault()
-            return
-          }
-          onClick?.(event)
-          closeOnNavigate(event)
-        },
-        children: (
-          <span
-            className={cn(
-              rowContentClassName,
-              contentWidth,
-              size === 'lg' && [
-                'in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height-lg)-var(--control-height-sm)))] items-center',
-                // In the rail the row is as wide as an icon's: the picture glides back to its middle, where the icons above sit.
-                '[&>:first-child]:transition-transform [&>:first-child]:duration-(--motion-layout-duration) [&>:first-child]:ease-(--motion-layout-easing) motion-reduce:[&>:first-child]:transition-none',
-                'group-data-[state=collapsed]/sidebar:[&>:first-child]:-translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)] rtl:group-data-[state=collapsed]/sidebar:[&>:first-child]:translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)]',
-              ],
-            )}
-          >
-            {children}
-          </span>
-        ),
-      },
-      props,
-      // After the given props, so a menu trigger rendering the row can't take its slot.
-      {
-        'data-slot': 'sidebar-menu-button',
-        'data-size': size ?? 'default',
-        'aria-current': isActive ? 'page' : undefined,
-      } as ComponentProps<'button'>,
-    ),
-  })
+  const row = (
+    <ButtonPrimitive
+      // A disabled row still takes focus, so it can be read.
+      focusableWhenDisabled
+      data-sidebar-menu-button=''
+      data-size={size ?? 'default'}
+      aria-current={isActive ? 'page' : undefined}
+      className={cn(sidebarRowVariants({ size }), className)}
+      onClick={(event, details) => {
+        closeOnNavigate(event)
+        return onClick?.(event, details)
+      }}
+      {...props}
+    >
+      <span
+        className={cn(
+          rowContentClassName,
+          contentWidth,
+          size === 'lg' && [
+            'in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height-lg)-var(--control-height-sm)))] items-center',
+            // In the rail the row is as wide as an icon's: the picture glides back to its middle, where the icons above sit.
+            '[&>:first-child]:transition-transform [&>:first-child]:duration-(--motion-layout-duration) [&>:first-child]:ease-(--motion-layout-easing) motion-reduce:[&>:first-child]:transition-none',
+            'group-data-[state=collapsed]/sidebar:[&>:first-child]:-translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)] rtl:group-data-[state=collapsed]/sidebar:[&>:first-child]:translate-x-[calc((var(--control-height-lg)-var(--control-height))/2)]',
+          ],
+        )}
+      >
+        {children}
+      </span>
+    </ButtonPrimitive>
+  )
   return <RowTooltip tooltip={tooltip} row={row} />
 }
 
@@ -859,10 +854,6 @@ function SidebarMenuAction({ className, ...props }: ComponentProps<typeof Button
   )
 }
 
-const SectionContext = createContext<{ setOpen: (open: boolean) => void }>({
-  setOpen: () => {},
-})
-
 /**
  * A row that opens to show more rows, by the disclosure pattern: its
  * chevron turns down as they open on the Collapsible's height. In the rail
@@ -874,26 +865,32 @@ function SidebarMenuSection({
   onOpenChange,
   className,
   ...props
-}: Omit<
-  CollapsiblePrimitive.Root.Props,
-  'className' | 'render' | 'open' | 'defaultOpen' | 'onOpenChange'
-> & {
+}: Omit<ComponentProps<typeof CollapsiblePrimitive>, 'className' | 'render'> & {
   className?: string
-  /** Whether its rows show, when you hold the state. */
-  open?: boolean
-  defaultOpen?: boolean
-  onOpenChange?: (open: boolean) => void
 }) {
+  const { collapsed } = use(SurfaceContext)
+  const sidebar = use(SidebarContext)
   const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange)
   return (
-    <SectionContext value={{ setOpen }}>
-      <CollapsiblePrimitive.Root
-        open={open}
-        onOpenChange={setOpen}
-        render={<SidebarMenuItem className={className} />}
-        {...props}
-      />
-    </SectionContext>
+    <CollapsiblePrimitive
+      render={<SidebarMenuItem className={className} />}
+      // In the rail its rows are folded away, so it reads as closed, and
+      // opens again as it was when the sidebar does.
+      open={collapsed ? false : open}
+      onOpenChange={(next, details) => {
+        // In the rail, it shows what's inside: the sidebar opens, and the
+        // section with it, never closing what the rail only folded away.
+        if (collapsed) {
+          sidebar?.setOpen(true)
+          if (!next) {
+            details.cancel()
+            return
+          }
+        }
+        setOpen(next, details)
+      }}
+      {...props}
+    />
   )
 }
 
@@ -901,44 +898,30 @@ function SidebarMenuSectionTrigger({
   tooltip,
   className,
   children,
-  onClick,
   ...props
-}: Omit<CollapsiblePrimitive.Trigger.Props, 'className'> & {
+}: Omit<ComponentProps<typeof CollapsibleTriggerPrimitive>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
   /** Its name in the rail, usually its label. */
   tooltip?: ReactNode
 }) {
-  const { collapsed } = use(SurfaceContext)
-  const { setOpen } = useSidebar()
-  const section = use(SectionContext)
   const row = (
-    <CollapsiblePrimitive.Trigger
-      data-slot='sidebar-menu-section-trigger'
+    <CollapsibleTriggerPrimitive
+      data-sidebar-menu-section-trigger=''
       className={cn(
         sidebarRowVariants(),
         'group/collapsible-trigger',
-        // Under forced colours, it takes the current page's highlight while it hides that page: closed, or in the rail.
-        'forced-colors:not-data-panel-open:group-has-[[aria-current=page]]/sidebar-item:bg-[Highlight] forced-colors:not-data-panel-open:group-has-[[aria-current=page]]/sidebar-item:text-[HighlightText] forced-colors:not-data-panel-open:group-has-[[aria-current=page]]/sidebar-item:forced-color-adjust-none forced-colors:not-data-panel-open:group-has-[[aria-current=page]]/sidebar-item:*:text-[HighlightText]',
-        'forced-colors:group-data-[state=collapsed]/sidebar:group-has-[[aria-current=page]]/sidebar-item:bg-[Highlight] forced-colors:group-data-[state=collapsed]/sidebar:group-has-[[aria-current=page]]/sidebar-item:text-[HighlightText] forced-colors:group-data-[state=collapsed]/sidebar:group-has-[[aria-current=page]]/sidebar-item:forced-color-adjust-none forced-colors:group-data-[state=collapsed]/sidebar:group-has-[[aria-current=page]]/sidebar-item:*:text-[HighlightText]',
+        // Under forced colours, it takes the current page's highlight while it hides that page, closed or in the rail.
+        'forced-colors:not-data-open:group-has-[[aria-current=page]]/sidebar-item:bg-[Highlight] forced-colors:not-data-open:group-has-[[aria-current=page]]/sidebar-item:text-[HighlightText] forced-colors:not-data-open:group-has-[[aria-current=page]]/sidebar-item:forced-color-adjust-none forced-colors:not-data-open:group-has-[[aria-current=page]]/sidebar-item:*:text-[HighlightText]',
         className,
       )}
-      // In the rail its rows are folded away whatever the section's state.
-      {...(collapsed ? { 'aria-expanded': false } : {})}
-      onClick={(event) => {
-        onClick?.(event)
-        if (event.defaultPrevented || !collapsed) return
-        // In the rail, it shows what's inside: the sidebar opens, and the section with it.
-        event.preventBaseUIHandler()
-        setOpen(true)
-        section.setOpen(true)
-      }}
       {...props}
     >
       <span className={cn(rowContentClassName, contentWidth)}>
         {children}
         <CollapsibleIndicator className='ms-auto' />
       </span>
-    </CollapsiblePrimitive.Trigger>
+    </CollapsibleTriggerPrimitive>
   )
   return <RowTooltip tooltip={tooltip} row={row} />
 }
@@ -950,7 +933,7 @@ function SidebarMenuSectionTrigger({
 function SidebarMenuSub({ className, children, ...props }: ComponentProps<'ul'>) {
   const ref = useRef<HTMLUListElement>(null)
 
-  // Its height in px, which the rail can fold from: Base UI leaves an open
+  // Its height in px, which the rail can fold from: ui-sdk leaves an open
   // panel at `auto`, which CSS can't move. Rows that come and go move it too.
   useEffect(() => {
     const list = ref.current
@@ -968,10 +951,10 @@ function SidebarMenuSub({ className, children, ...props }: ComponentProps<'ul'>)
   }, [])
 
   return (
-    <CollapsiblePrimitive.Panel
+    <CollapsiblePanelPrimitive
       // Kept while closed, so its section knows when it holds the current page.
       keepMounted
-      data-slot='sidebar-menu-sub'
+      data-sidebar-menu-sub=''
       // Clipped down the page only, so a focus ring inside keeps its sides.
       className={cn(
         collapseClassName,
@@ -990,7 +973,7 @@ function SidebarMenuSub({ className, children, ...props }: ComponentProps<'ul'>)
       >
         {children}
       </ul>
-    </CollapsiblePrimitive.Panel>
+    </CollapsiblePanelPrimitive>
   )
 }
 
@@ -1010,52 +993,48 @@ function SidebarMenuSubButton({
   tooltip,
   className,
   children,
-  render,
+  // A link, which takes the row's content and its `href` from ui-sdk's Button.
+  // oxlint-disable-next-line jsx-a11y/anchor-is-valid, jsx-a11y/anchor-has-content
+  render = <a />,
   onClick,
   ...props
-}: Omit<useRender.ComponentProps<'a'>, 'className'> & {
+}: Omit<ComponentProps<typeof ButtonPrimitive>, 'className' | 'children'> & {
   className?: string
+  children?: ReactNode
+  /** Where the row's link goes. */
+  href?: string
   isActive?: boolean
   /** Its name, shown while a long label is cut short. */
   tooltip?: ReactNode
 }) {
   const closeOnNavigate = useCloseOnNavigate()
-  const row = useRender({
-    defaultTagName: 'a',
-    render,
-    props: mergeProps<'a'>(
-      {
-        className: cn(sidebarRowVariants(), className),
-        onClick: (event) => {
-          // A disabled row still takes focus, so it can be read, but Enter does nothing.
-          if (event.currentTarget.getAttribute('aria-disabled') === 'true') {
-            event.preventDefault()
-            return
-          }
-          onClick?.(event)
-          closeOnNavigate(event)
-        },
-        children: (
-          <span
-            className={cn(
-              rowContentClassName,
-              // A sub-row's content: the row's width, less its indent.
-              'w-full in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem)-1.5rem)]',
-            )}
-          >
-            {children}
-          </span>
-        ),
-      },
-      props,
-      {
-        // Read with the sidebar's other rows, by the highlight and the current page's tint.
-        'data-slot': 'sidebar-menu-button',
-        'data-sub': '',
-        'aria-current': isActive ? 'page' : undefined,
-      } as ComponentProps<'a'>,
-    ),
-  })
+  const row = (
+    <ButtonPrimitive
+      render={render}
+      // A disabled row still takes focus, so it can be read.
+      focusableWhenDisabled
+      // Read with the sidebar's other rows, by the highlight and the current page's tint.
+      data-sidebar-menu-button=''
+      data-sub=''
+      aria-current={isActive ? 'page' : undefined}
+      className={cn(sidebarRowVariants(), className)}
+      onClick={(event, details) => {
+        closeOnNavigate(event)
+        return onClick?.(event, details)
+      }}
+      {...props}
+    >
+      <span
+        className={cn(
+          rowContentClassName,
+          // A sub-row's content: the row's width, less its indent.
+          'w-full in-data-[slot=sidebar]:w-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-(var(--control-height)-1rem)-1.5rem)]',
+        )}
+      >
+        {children}
+      </span>
+    </ButtonPrimitive>
+  )
   return <RowTooltip tooltip={tooltip} row={row} />
 }
 

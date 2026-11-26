@@ -2,7 +2,7 @@
 
 import {
   Accordion,
-  AccordionContent,
+  AccordionPanel,
   AccordionItem,
   AccordionTrigger,
 } from '@/registry/components/kino/accordion'
@@ -187,9 +187,9 @@ function FaqTopics({
                             <bdi>{question.question}</bdi>
                           </span>
                         </AccordionTrigger>
-                        <AccordionContent className={cn(faqAnswerClassName, 'pe-10')}>
+                        <AccordionPanel className={cn(faqAnswerClassName, 'pe-10')}>
                           {question.answer}
-                        </AccordionContent>
+                        </AccordionPanel>
                       </AccordionItem>
                     ))}
                   </Accordion>

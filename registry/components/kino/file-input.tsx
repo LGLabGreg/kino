@@ -2,7 +2,7 @@
 
 import { Alert, AlertDescription, AlertTitle } from '@/registry/components/kino/alert'
 import { Button, buttonVariants } from '@/registry/components/kino/button'
-import { Collapsible, CollapsibleContent } from '@/registry/components/kino/collapsible'
+import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
 import { emptyVariants } from '@/registry/components/kino/empty'
 import { InputInvalidIcon, inputBoxClassName } from '@/registry/components/kino/input'
 import { Progress } from '@/registry/components/kino/progress'
@@ -1414,7 +1414,7 @@ function FileInputRejected({
       data-slot='file-input-rejected'
       // Closed, it gives back the gap above it; open, the gap is inside what it measures.
       className={cn(
-        '-mt-3 [&_[data-slot=alert-panel]]:flow-root [&_[data-slot=alert-surface]]:mt-3',
+        '-mt-3 [&_[data-alert-panel]]:flow-root [&_[data-slot=alert-surface]]:mt-3',
         className,
       )}
       {...props}
@@ -1600,7 +1600,7 @@ function FileInputStatus({
       {...props}
     >
       <Collapsible open={state !== 'empty'}>
-        <CollapsibleContent className='p-0 pt-3'>
+        <CollapsiblePanel className='p-0 pt-3'>
           <div
             // As tall with its button as without, so nothing moves when the button comes or goes.
             className='bg-muted/50 relative flex min-h-(--control-height) flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-(--surface-radius) border px-(--control-padding) py-1'
@@ -1664,7 +1664,7 @@ function FileInputStatus({
               </>
             ) : null}
           </div>
-        </CollapsibleContent>
+        </CollapsiblePanel>
       </Collapsible>
     </div>
   )

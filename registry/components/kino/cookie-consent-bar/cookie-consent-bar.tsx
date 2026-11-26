@@ -1,7 +1,7 @@
 'use client'
 
 import { Button } from '@/registry/components/kino/button'
-import { Collapsible, CollapsibleContent } from '@/registry/components/kino/collapsible'
+import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
 import type { Consent } from '@/registry/lib/consent'
 import {
   CookieConsentCategory,
@@ -55,7 +55,7 @@ function CookieConsentBar<Id extends string>({
       {model.ready ? model.region : null}
       {/* Closed on the server and through hydration, so it opens onto the page once it knows to. */}
       <Collapsible open={model.shown}>
-        <CollapsibleContent className='p-0'>
+        <CollapsiblePanel className='p-0'>
           <section
             ref={surfaceRef}
             aria-labelledby={titleId}
@@ -98,7 +98,7 @@ function CookieConsentBar<Id extends string>({
               </div>
             </div>
             <Collapsible open={model.customising}>
-              <CollapsibleContent className='p-0'>
+              <CollapsiblePanel className='p-0'>
                 <div
                   className={cn(
                     pageColumnClassName,
@@ -114,10 +114,10 @@ function CookieConsentBar<Id extends string>({
                     />
                   ))}
                 </div>
-              </CollapsibleContent>
+              </CollapsiblePanel>
             </Collapsible>
           </section>
-        </CollapsibleContent>
+        </CollapsiblePanel>
       </Collapsible>
     </div>
   )

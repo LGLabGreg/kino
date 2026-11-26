@@ -12,9 +12,23 @@ import {
   type NoticeType,
 } from '@/registry/lib/notice'
 import { collapseClassName, followPanelContent } from '@/registry/lib/resize'
-import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible'
+import {
+  CollapsiblePanel as CollapsiblePanelPrimitive,
+  Collapsible as CollapsiblePrimitive,
+  createCollapsibleController,
+} from '@ui-sdk/react/collapsible'
 import { cva } from 'class-variance-authority'
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react'
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  use,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -98,6 +112,9 @@ function AlertSurface({ className, ...props }: ComponentProps<'div'>) {
   )
 }
 
+/** Names the alert by its title, for a screen reader's list of regions and for an agent. */
+const AlertTitleContext = createContext<((id: string | null) => void) | null>(null)
+
 /**
  * A message in the page. It is a live region from the start: what it says
  * when it opens, or when its text changes, is read out, at once for an
@@ -105,6 +122,7 @@ function AlertSurface({ className, ...props }: ComponentProps<'div'>) {
  * as the page loads is read in its place. Given `open`, it stays in the tree
  * while closed, and opening or closing it moves what is below it.
  */
+
 function Alert({
   type = 'info',
   icon,
@@ -116,36 +134,41 @@ function Alert({
   children,
   ...props
 }: Omit<
-  CollapsiblePrimitive.Root.Props,
-  'className' | 'render' | 'disabled' | 'open' | 'defaultOpen' | 'onOpenChange'
+  ComponentProps<typeof CollapsiblePrimitive>,
+  'className' | 'render' | 'disabled' | 'defaultOpen' | 'children' | 'controller'
 > & {
   className?: string
+  children?: ReactNode
   /** Its kind, which picks its icon and colour. */
   type?: NoticeType
   /** An icon in place of the type's own, or `null` for none. */
   icon?: ReactNode
   /** A button at its end that closes it. */
   showCloseButton?: boolean
-  open?: boolean
   defaultOpen?: boolean
-  /** Called when its close button is pressed, with `false`. */
-  onOpenChange?: (open: boolean) => void
 }) {
   const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange)
   const shown = useShown({ type, icon, children }, open)
+  const [controller] = useState(createCollapsibleController)
+  const [titleId, setTitleId] = useState<string | null>(null)
 
   return (
-    <CollapsiblePrimitive.Root
-      data-slot='alert'
+    <CollapsiblePrimitive
+      data-alert=''
       data-type={shown.type}
       role={shown.type === 'error' ? 'alert' : 'status'}
+      aria-labelledby={titleId ?? undefined}
       open={open}
+      onOpenChange={setOpen}
+      controller={controller}
+      // Without its close button the page opens and closes it, so an agent can't either.
+      disabled={!showCloseButton}
       // Closed, it stays in the page as an empty live region, so what it says when it opens is read out.
       className={cn('group/alert min-w-0', className)}
       {...props}
     >
-      <CollapsiblePrimitive.Panel
-        data-slot='alert-panel'
+      <CollapsiblePanelPrimitive
+        data-alert-panel=''
         // Clipped down the page only, so the close button's focus ring keeps its sides.
         className={cn(
           collapseClassName,
@@ -158,18 +181,32 @@ function Alert({
         >
           <NoticeIcon data-slot='alert-icon' type={shown.type} icon={shown.icon} />
           <div data-slot='alert-content' className={noticeTextClassName}>
-            {shown.children}
+            <AlertTitleContext value={setTitleId}>{shown.children}</AlertTitleContext>
           </div>
-          {showCloseButton ? <AlertClose onClick={() => setOpen(false)} /> : null}
+          {showCloseButton ? (
+            <AlertClose
+              onClick={(event) =>
+                controller.close({ reason: 'trigger-press', event: event.nativeEvent })
+              }
+            />
+          ) : null}
         </AlertSurface>
-      </CollapsiblePrimitive.Panel>
-    </CollapsiblePrimitive.Root>
+      </CollapsiblePanelPrimitive>
+    </CollapsiblePrimitive>
   )
 }
 
-function AlertTitle({ className, ...props }: ComponentProps<'div'>) {
+function AlertTitle({ id, className, ...props }: ComponentProps<'div'>) {
+  const own = useId()
+  const titleId = id ?? own
+  const name = use(AlertTitleContext)
+  useLayoutEffect(() => {
+    name?.(titleId)
+    return () => name?.(null)
+  }, [name, titleId])
   return (
     <div
+      id={titleId}
       data-slot='alert-title'
       className={cn(noticeTitleClassName, className)}
       {...props}
