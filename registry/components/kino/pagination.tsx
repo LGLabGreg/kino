@@ -31,13 +31,27 @@ import {
 } from '@/registry/lib/pill'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
-import { Swap } from '@/registry/lib/swap'
+import { Swap, useSwapLeaving } from '@/registry/lib/swap'
 import {
+  createPaginationController,
+  Pagination as PaginationPrimitive,
+  PaginationEllipsis as PaginationEllipsisPrimitive,
+  PaginationFirst as PaginationFirstPrimitive,
+  PaginationItem as PaginationItemPrimitive,
+  PaginationLast as PaginationLastPrimitive,
+  PaginationLink as PaginationLinkPrimitive,
+  PaginationList as PaginationListPrimitive,
+  PaginationNext as PaginationNextPrimitive,
+  PaginationPrevious as PaginationPreviousPrimitive,
+  paginationRange,
+} from '@ui-sdk/react/pagination'
+import type { RenderProp } from '@ui-sdk/react/primitive'
+import {
+  cloneElement,
   type ComponentProps,
   type CSSProperties,
   createContext,
   type HTMLAttributes,
-  type MouseEvent,
   type ReactElement,
   type ReactNode,
   type RefObject,
@@ -49,19 +63,20 @@ import {
   useRef,
   useState,
 } from 'react'
+import { flushSync } from 'react-dom'
 
 import { cn } from '@/lib/utils'
 
 /*
- * A pager in a `nav`: the row of pages with Previous and Next, and beside it
- * what a table's footer needs, where the page sits in the whole ("21–40 of
- * 4,800"), how many rows a page holds, and a field to type a page in. The
- * row looks and moves like the Tabs: labels that darken on hover, a backdrop
- * that glides under the pointer, and a pill in the primary colour that
- * slides to the current page, with a copy of the row inside it so each
- * number changes colour exactly at its edge. The row keeps the same number
- * of places on every page, so nothing beside it moves: in the middle of a
- * long range the pill stays put and the numbers roll past it. A row too
+ * A pager on ui-sdk's Pagination: the row of pages with Previous and Next,
+ * and beside it what a table's footer needs, where the page sits in the
+ * whole ("21–40 of 4,800"), how many rows a page holds, and a field to type
+ * a page in. The row looks and moves like the Tabs: labels that darken on
+ * hover, a backdrop that glides under the pointer, and a pill in the primary
+ * colour that slides to the current page, with a copy of the row inside it
+ * so each number changes colour exactly at its edge. The row keeps the same
+ * number of places on every page, so nothing beside it moves: in the middle
+ * of a long range the pill stays put and the numbers roll past it. A row too
  * wide for its room first drops the words beside Previous and Next, then
  * shows fewer pages.
  */
@@ -92,21 +107,26 @@ const stepArrow = 'flex size-(--control-height) shrink-0 items-center justify-ce
 // Until the row is measured, a narrow one leaves the words out already. Beside
 // the page field they always go: "Previous Page 4" would read as one phrase.
 const stepWord =
-  '[[data-slot=pagination-content]:not([data-words])_&]:sr-only [[data-slot=pagination-content]:has([data-slot=pagination-page-field])_&]:sr-only @max-lg/pagination:[[data-slot=pagination]:not([data-mounted])_&]:sr-only'
+  '[[data-slot=pagination-list]:not([data-words])_&]:sr-only [[data-slot=pagination-list]:has([data-slot=pagination-page-field])_&]:sr-only @max-lg/pagination:[[data-slot=pagination]:not([data-mounted])_&]:sr-only'
 // Before the row is measured (as the page loads, before its script runs), a
 // narrow row shows only the current page, so nothing is cut at its edges.
 const beforeFit =
   '@max-md/pagination:[[data-slot=pagination]:not([data-mounted])_&]:hidden'
 
 // First and Last, when the row has no room for them.
-const edgeHidden = '[[data-slot=pagination-content]:not([data-edges])_&]:hidden'
+const edgeHidden = '[[data-slot=pagination-list]:not([data-edges])_&]:hidden'
 const previousWord = cn(stepWord, '-ms-1 pe-[calc((var(--control-height)-1rem)/2)]')
 const nextWord = cn(stepWord, '-me-1 ps-[calc((var(--control-height)-1rem)/2)]')
 
-/** One place in the row: a page, or an ellipsis for the pages it skips. */
-type PageItem = number | 'start-ellipsis' | 'end-ellipsis'
+type PaginationController = ReturnType<typeof createPaginationController>
 
-type LinkRender = (props: ComponentProps<'a'>) => ReactElement
+/** How many pages the row has room for, and whether its words and First and Last fit. */
+interface Fit {
+  words: boolean
+  siblings: number
+  boundaries: number
+  edges: boolean
+}
 
 interface PaginationContextValue {
   page: number
@@ -117,15 +137,18 @@ interface PaginationContextValue {
   /** How many items there are, when that is known. */
   total: number | null
   pageSize: number
-  /** `pressed` when a page itself was pressed, so focus follows it to its new place. */
-  go: (page: number, pressed?: boolean) => void
+  controller: PaginationController
   setPageSize: (pageSize: number) => void
   /** The page a pressed page went to, so the row moves focus to it once it has rolled. */
   refocusRef: RefObject<number | null>
+  /** The siblings and boundaries asked for. */
   siblings: number
   boundaries: number
-  href?: (page: number) => string
-  renderLink?: LinkRender
+  fit: Fit
+  setFit: (fit: Fit) => void
+  linked: boolean
+  renderLink?: RenderProp
+  disabled: boolean
   locale: Intl.LocalesArgument
 }
 
@@ -140,11 +163,8 @@ function usePagination() {
 /** True inside the pill's copy of the row, where a part is only its label. */
 const PaginationCopyContext = createContext(false)
 
-/** How many pages the row has room for, either side of the current one and at each end; `null` outside the row. */
-const RowContext = createContext<{
-  siblings: number
-  boundaries: number
-} | null>(null)
+/** True inside the row, where a part is one of its places. */
+const RowContext = createContext(false)
 
 function Pagination({
   ref,
@@ -160,39 +180,31 @@ function Pagination({
   hasNextPage = false,
   siblings = 1,
   boundaries = 1,
-  href,
+  getHref,
   renderLink,
+  controller: controllerProp,
+  disabled = false,
   locale = 'en-US',
   style,
   'aria-label': ariaLabel = 'Pagination',
   ...props
-}: Omit<ComponentProps<'nav'>, 'className' | 'onChange'> & {
+}: Omit<
+  ComponentProps<typeof PaginationPrimitive>,
+  'className' | 'style' | 'children' | 'controller'
+> & {
   className?: string
-  /** The current page, counted from 1, when you hold the state. */
-  page?: number
-  /** The page it opens on, when it holds its own state. */
-  defaultPage?: number
-  onPageChange?: (page: number) => void
-  /** How many pages there are. Below 1, it shows one page. Worked out from `total` when that is given. */
-  pageCount?: number
-  /** How many items there are across every page. With neither this nor `pageCount`, the count is unknown. */
-  total?: number
-  /** How many items a page holds, when you hold the state. */
-  pageSize?: number
+  style?: CSSProperties
+  children?: ReactNode
   /** How many items a page holds, when it holds its own state. */
   defaultPageSize?: number
   /** Called with the new size. The page moves, through `onPageChange`, to the one that keeps the first item it showed. */
   onPageSizeChange?: (pageSize: number) => void
   /** Whether there is a page after this one, while the count is unknown, as with a cursor. */
   hasNextPage?: boolean
-  /** How many pages show on each side of the current one, at most. */
-  siblings?: number
-  /** How many pages show at each end, at most. With 0 there are no ellipses. */
-  boundaries?: number
-  /** Makes every page a link to this address. */
-  href?: (page: number) => string
-  /** Draws each link, such as a router's own: give it every prop. */
-  renderLink?: LinkRender
+  /** Renders every page and step, such as your router's `<Link />`, with `getHref`. */
+  renderLink?: RenderProp
+  /** Pages it from anywhere. Create one with `createPaginationController()`. */
+  controller?: PaginationController
   /** The locale numbers are written in. */
   locale?: Intl.LocalesArgument
 }) {
@@ -202,20 +214,17 @@ function Pagination({
     onPageSizeChange,
   )
   const pageSize = Math.max(1, Math.floor(chosenSize) || 1)
-  const [chosen, setPage] = useControllable(pageProp, defaultPage, onPageChange)
+  const [own, setOwn] = useState(defaultPage)
   const known = countOf({ pageCount, total, pageSize })
-  const page = clampPage(chosen, known ?? Number.POSITIVE_INFINITY)
+  const page = clampPage(pageProp ?? own, known ?? Number.POSITIVE_INFINITY)
   // While the count is unknown, the pages known so far: up to this one, and the next when there is one.
   const count = known ?? page + (hasNextPage ? 1 : 0)
+  const [fit, setFit] = useState<Fit>({ words: true, siblings, boundaries, edges: true })
+  const [ownController] = useState(createPaginationController)
+  const controller = controllerProp ?? ownController
 
   const refocusRef = useRef<number | null>(null)
   const navRef = useMemo(() => mergeRefs(markMounted, ref), [ref])
-
-  const go = (next: number, pressed?: boolean) => {
-    const to = clampPage(next, count)
-    if (pressed) refocusRef.current = to
-    setPage(to)
-  }
 
   return (
     <PaginationContext
@@ -225,31 +234,47 @@ function Pagination({
         known: known !== null,
         total: total === undefined ? null : Math.max(0, Math.floor(total)),
         pageSize,
-        go,
+        controller,
         setPageSize: (size) => {
           const next = Math.max(1, Math.floor(size))
           if (next === pageSize) return
-          setPageSize(next)
-          setPage(pageForSize(page, pageSize, next))
+          // The new size first, so the page it moves to is counted in it.
+          flushSync(() => setPageSize(next))
+          controller.setPage(pageForSize(page, pageSize, next))
         },
         refocusRef,
         siblings,
         boundaries,
-        href,
+        fit,
+        setFit,
+        linked: getHref !== undefined,
         renderLink,
+        disabled,
         locale,
       }}
     >
-      <nav
+      <PaginationPrimitive
         ref={navRef}
-        data-slot='pagination'
         aria-label={ariaLabel}
-        style={
-          {
-            '--pagination-digits': String(count).length,
-            ...style,
-          } as CSSProperties
-        }
+        page={page}
+        pageCount={count}
+        siblings={fit.siblings}
+        boundaries={fit.boundaries}
+        getHref={getHref}
+        controller={controller}
+        disabled={disabled}
+        onPageChange={(next, details) => {
+          // While the count is unknown, Last has nowhere to go.
+          if (details.reason === 'last-press' && known === null) {
+            details.cancel()
+            return
+          }
+          onPageChange?.(next, details)
+          if (details.canceled) return
+          if (details.reason === 'item-press') refocusRef.current = next
+          setOwn(next)
+        }}
+        style={{ '--pagination-digits': String(count).length, ...style } as CSSProperties}
         className={cn(
           // Its parts in a row, and the pages on a row of their own when there's too little room.
           'flex w-full min-w-0 flex-wrap items-center justify-center gap-x-4 gap-y-2',
@@ -262,23 +287,31 @@ function Pagination({
 }
 
 /**
- * The row of pages, Previous and Next. It looks and moves like the Tabs, and
- * fits the room it is given: first the words beside Previous and Next go,
- * then pages.
+ * The row of pages, Previous and Next, in ui-sdk's list. It looks and moves
+ * like the Tabs, and fits the room it is given: first the words beside
+ * Previous and Next go, then pages.
  */
-function PaginationContent({
+function PaginationList({
   className,
   children,
   ...props
-}: Omit<ComponentProps<'div'>, 'className'> & { className?: string }) {
-  const { page, pageCount, siblings, boundaries, refocusRef } = usePagination()
-  // As many places as the room holds, measured where the row is laid out.
-  const [fit, setFit] = useState({ words: true, siblings, boundaries, edges: true })
+}: Omit<ComponentProps<typeof PaginationListPrimitive>, 'className' | 'children'> & {
+  children?: ReactNode
+  /** For where the list sits among its neighbours: the box it measures its room in. */
+  className?: string
+}) {
+  const { page, pageCount, siblings, boundaries, fit, setFit, refocusRef } =
+    usePagination()
   const areaRef = useRef<HTMLDivElement>(null)
   const rowRef = useRef<HTMLUListElement>(null)
   const pillRef = useRef<HTMLLIElement>(null)
   const backdropRef = useRef<HTMLLIElement>(null)
+  const fitRef = useRef(fit)
+  useLayoutEffect(() => {
+    fitRef.current = fit
+  })
 
+  // As many places as the room holds, measured where the row is laid out.
   useLayoutEffect(() => {
     const area = areaRef.current
     const row = rowRef.current
@@ -290,21 +323,22 @@ function PaginationContent({
         siblings,
         boundaries,
       })
-      setFit((was) =>
-        was.words === next.words &&
-        was.siblings === next.siblings &&
-        was.boundaries === next.boundaries &&
-        was.edges === next.edges
-          ? was
-          : next,
-      )
+      const was = fitRef.current
+      if (
+        was.words !== next.words ||
+        was.siblings !== next.siblings ||
+        was.boundaries !== next.boundaries ||
+        was.edges !== next.edges
+      ) {
+        setFit(next)
+      }
     }
     measure()
     const resized = new ResizeObserver(measure)
     resized.observe(area)
     resized.observe(row)
     return () => resized.disconnect()
-  }, [pageCount, siblings, boundaries])
+  }, [pageCount, siblings, boundaries, setFit])
 
   useEffect(() => {
     const row = rowRef.current
@@ -324,7 +358,8 @@ function PaginationContent({
     }
   }, [])
 
-  // A pressed page can roll to another place: focus goes with it.
+  // Each place keeps its element as the pages change, so its number rolls: a
+  // pressed page can roll to another place, and focus goes with it.
   useLayoutEffect(() => {
     const pressed = refocusRef.current
     refocusRef.current = null
@@ -335,12 +370,9 @@ function PaginationContent({
   }, [page, refocusRef])
 
   return (
-    <RowContext value={{ siblings: fit.siblings, boundaries: fit.boundaries }}>
+    <RowContext value={true}>
       <div
         ref={areaRef}
-        data-slot='pagination-content'
-        data-words={fit.words ? '' : undefined}
-        data-edges={fit.edges ? '' : undefined}
         className={cn(
           // Grows into the room its neighbours leave, and wraps below them when that is less than a short row.
           '@container/pagination flex min-w-0 flex-[1_1_10rem] justify-center',
@@ -350,9 +382,14 @@ function PaginationContent({
           '[[data-slot=pagination]:not([data-mounted])_&]:[&_[data-slot=roll]_*]:transition-none',
           className,
         )}
-        {...props}
       >
-        <ul ref={rowRef} className={cn(paginationRow, 'relative isolate')}>
+        <PaginationListPrimitive
+          {...props}
+          ref={rowRef}
+          data-words={fit.words ? '' : undefined}
+          data-edges={fit.edges ? '' : undefined}
+          className={cn(paginationRow, 'relative isolate')}
+        >
           {children}
           <li
             ref={backdropRef}
@@ -372,94 +409,22 @@ function PaginationContent({
               <PaginationCopyContext value={true}>{children}</PaginationCopyContext>
             </span>
           </li>
-        </ul>
+        </PaginationListPrimitive>
       </div>
     </RowContext>
   )
 }
 
-/** A click that opens the link elsewhere (a new tab, a download) leaves this page as it is. */
-function opensElsewhere(event: MouseEvent) {
-  return (
-    event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
-  )
-}
+const controlClassName = cn(
+  itemLayout,
+  pillItemClassName,
+  // Until the page hydrates and the pill is placed, the current page draws itself.
+  '[[data-slot=pagination]:not([data-mounted])_&]:aria-[current=page]:bg-primary [[data-slot=pagination]:not([data-mounted])_&]:aria-[current=page]:text-primary-foreground',
+)
 
-/**
- * A page, Previous or Next: a link when the Pagination has `href`, a button
- * otherwise. One that can't go anywhere stays focusable, so focus isn't lost
- * when Next reaches the last page.
- */
-function PaginationControl({
-  to,
-  slot,
-  current = false,
-  className,
-  children,
-  onClick: ownClick,
-  ...props
-}: Omit<ComponentProps<'a'>, 'href' | 'className'> & {
-  to: number | null
-  slot: string
-  current?: boolean
-  className?: string
-}) {
-  const { go, href, renderLink } = usePagination()
-  const shared = {
-    'data-slot': slot,
-    'aria-current': current ? ('page' as const) : undefined,
-    'aria-disabled': to === null ? true : undefined,
-    'data-disabled': to === null ? '' : undefined,
-    className: cn(
-      itemLayout,
-      pillItemClassName,
-      // Until the page hydrates and the pill is placed, the current page draws itself.
-      '[[data-slot=pagination]:not([data-mounted])_&]:aria-[current=page]:bg-primary [[data-slot=pagination]:not([data-mounted])_&]:aria-[current=page]:text-primary-foreground',
-      className,
-    ),
-  }
-  const onClick = (event: MouseEvent<HTMLAnchorElement & HTMLButtonElement>) => {
-    ownClick?.(event)
-    if (to === null) {
-      event.preventDefault()
-      return
-    }
-    if (event.defaultPrevented || (href && opensElsewhere(event))) return
-    go(to, slot === 'pagination-link')
-  }
+type StepPart = typeof PaginationPreviousPrimitive
 
-  if (!href) {
-    return (
-      <button
-        type='button'
-        {...(props as ComponentProps<'button'>)}
-        {...shared}
-        onClick={onClick}
-      >
-        {children}
-      </button>
-    )
-  }
-  const link = {
-    ...props,
-    ...shared,
-    href: to === null ? undefined : href(to),
-    // A link with nowhere to go has no `href`, so it is named a link and kept in the tab order.
-    role: to === null ? 'link' : undefined,
-    tabIndex: to === null ? 0 : props.tabIndex,
-    onClick,
-    children,
-  }
-  return renderLink ? (
-    renderLink(link)
-  ) : (
-    <a {...link} href={link.href}>
-      {children}
-    </a>
-  )
-}
-
-type StepProps = Omit<ComponentProps<'a'>, 'href' | 'className'> & {
+type StepProps = Omit<ComponentProps<StepPart>, 'className' | 'children'> & {
   className?: string
   /** The word beside the arrow, also its name when only the arrow shows. */
   children?: ReactNode
@@ -468,11 +433,11 @@ type StepProps = Omit<ComponentProps<'a'>, 'href' | 'className'> & {
 /**
  * A step to another page: an arrow in a page's square, with its word on
  * the side away from the pages when `word` is set and there is room. Without
- * it, the word is only the step's name.
+ * it, the word is only the step's name. At its end it stays focusable as a
+ * button, so focus isn't lost when Next reaches the last page.
  */
 function PaginationStep({
-  slot,
-  to,
+  Part,
   icon,
   word,
   edge = false,
@@ -480,14 +445,14 @@ function PaginationStep({
   children,
   ...props
 }: StepProps & {
-  slot: string
-  to: number | null
+  Part: StepPart
   icon: ReactElement
   /** Where the word shows: before the arrow, after it, or never. */
   word?: 'before' | 'after'
   /** First or Last, which go when there's no room for them. */
   edge?: boolean
 }) {
+  const { renderLink, linked } = usePagination()
   const arrow = <span className={stepArrow}>{icon}</span>
   const label = (
     <span
@@ -514,27 +479,24 @@ function PaginationStep({
     return <span className={cn(itemLayout, stepLayout, hidden, className)}>{parts}</span>
   }
   return (
-    <li className={cn('flex', hidden)}>
-      <PaginationControl
-        slot={slot}
-        to={to}
-        className={cn(stepLayout, className)}
+    <PaginationItemPrimitive className={cn('flex', hidden)}>
+      <Part
+        render={linked ? renderLink : undefined}
+        className={cn(controlClassName, stepLayout, className)}
         {...props}
       >
         {parts}
-      </PaginationControl>
-    </li>
+      </Part>
+    </PaginationItemPrimitive>
   )
 }
 
 /** Goes to the first page: an arrow only. */
 function PaginationFirst({ children = 'First page', ...props }: StepProps) {
-  const { page } = usePagination()
   return (
     <PaginationStep
-      slot='pagination-first'
+      Part={PaginationFirstPrimitive}
       edge
-      to={page > 1 ? 1 : null}
       icon={
         <IconPlaceholder
           lucide='ChevronsLeftIcon'
@@ -554,11 +516,9 @@ function PaginationFirst({ children = 'First page', ...props }: StepProps) {
 }
 
 function PaginationPrevious({ children = 'Previous', ...props }: StepProps) {
-  const { page } = usePagination()
   return (
     <PaginationStep
-      slot='pagination-previous'
-      to={page > 1 ? page - 1 : null}
+      Part={PaginationPreviousPrimitive}
       word='after'
       icon={
         <IconPlaceholder
@@ -579,11 +539,9 @@ function PaginationPrevious({ children = 'Previous', ...props }: StepProps) {
 }
 
 function PaginationNext({ children = 'Next', ...props }: StepProps) {
-  const { page, pageCount } = usePagination()
   return (
     <PaginationStep
-      slot='pagination-next'
-      to={page < pageCount ? page + 1 : null}
+      Part={PaginationNextPrimitive}
       word='before'
       icon={
         <IconPlaceholder
@@ -603,14 +561,24 @@ function PaginationNext({ children = 'Next', ...props }: StepProps) {
   )
 }
 
+/** A link at its end, as ui-sdk renders one: no address, out of the tab order. */
+function atEnd(renderLink: RenderProp | undefined): RenderProp {
+  return (props, state) => {
+    const { children, ...rest } = props
+    const ended = { ...rest, href: undefined, tabIndex: -1, role: 'link' }
+    if (typeof renderLink === 'function') return renderLink({ ...ended, children }, state)
+    if (renderLink) return cloneElement(renderLink, ended, children)
+    return <a {...ended}>{children}</a>
+  }
+}
+
 /** Goes to the last page: an arrow only. While the count is unknown it has nowhere to go. */
 function PaginationLast({ children = 'Last page', ...props }: StepProps) {
-  const { page, pageCount, known } = usePagination()
+  const { known, linked, renderLink } = usePagination()
   return (
     <PaginationStep
-      slot='pagination-last'
+      Part={PaginationLastPrimitive}
       edge
-      to={known && page < pageCount ? pageCount : null}
       icon={
         <IconPlaceholder
           lucide='ChevronsRightIcon'
@@ -622,6 +590,11 @@ function PaginationLast({ children = 'Last page', ...props }: StepProps) {
           className='rtl:-scale-x-100'
         />
       }
+      // ui-sdk counts the pages known so far as all there are: while the count
+      // is unknown, this marks it at its end as ui-sdk marks a step there, and
+      // the Pagination keeps the page when it is pressed.
+      {...(known ? {} : { 'aria-disabled': true, 'data-disabled': '' })}
+      {...(!known && linked && { render: atEnd(renderLink) })}
       {...props}
     >
       {children}
@@ -629,23 +602,41 @@ function PaginationLast({ children = 'Last page', ...props }: StepProps) {
   )
 }
 
-function PaginationEllipsis({ className }: { className?: string }) {
+/**
+ * A page in the row. One leaving as its place turns into an ellipsis is a
+ * still copy, so ui-sdk counts only the pages that show.
+ */
+function PaginationPage({
+  page,
+  label,
+  className,
+}: {
+  page: number
+  label: string
+  className?: string
+}) {
+  const { linked, renderLink } = usePagination()
+  const number = <RollingNumber value={page} text={String(page)} />
+  if (useSwapLeaving()) {
+    return <span className={cn(controlClassName, className)}>{number}</span>
+  }
   return (
-    <IconPlaceholder
-      lucide='EllipsisIcon'
-      tabler='IconDots'
-      hugeicons='MoreHorizontalIcon'
-      phosphor='DotsThreeIcon'
-      remixicon='RiMoreLine'
-      aria-hidden
-      className={className}
-    />
+    <PaginationLinkPrimitive
+      page={page}
+      render={linked ? renderLink : undefined}
+      className={cn(controlClassName, className)}
+    >
+      {/* The number rolls for the eye; its name is read whole. */}
+      <span className='sr-only'>{label}</span>
+      {number}
+    </PaginationLinkPrimitive>
   )
 }
 
 /**
- * The numbered pages, with an ellipsis for each run it skips. Each place
- * stays the same element as the pages change, so its number rolls.
+ * The numbered pages from ui-sdk's range, with an ellipsis for each run it
+ * skips. Each place stays the same element as the pages change, so its
+ * number rolls.
  */
 function PaginationPages({
   className,
@@ -659,25 +650,35 @@ function PaginationPages({
    */
   pageLabel?: (page: number, of?: number) => string
 }) {
-  const { page, pageCount, known, siblings: asked, boundaries: ends } = usePagination()
-  const { siblings, boundaries } = use(RowContext) ?? {
-    siblings: asked,
-    boundaries: ends,
-  }
+  const { page, pageCount, known, fit } = usePagination()
   const copy = use(PaginationCopyContext)
-  const items = pageItems(page, pageCount, siblings, boundaries)
-  const Place = copy ? 'span' : 'li'
+  const items = pagesOf({
+    page,
+    pageCount,
+    siblings: fit.siblings,
+    boundaries: fit.boundaries,
+  })
   return items.map((item, place) => {
     const number = typeof item === 'number'
     let content: ReactNode
     if (!number) {
-      content = (
-        <span
-          data-slot={copy ? undefined : 'pagination-ellipsis'}
-          className={cn(itemLayout, 'text-foreground/60', className)}
-        >
-          <PaginationEllipsis />
-        </span>
+      const ellipsis = cn(itemLayout, 'text-foreground/60', className)
+      const icon = (
+        <IconPlaceholder
+          lucide='EllipsisIcon'
+          tabler='IconDots'
+          hugeicons='MoreHorizontalIcon'
+          phosphor='DotsThreeIcon'
+          remixicon='RiMoreLine'
+          aria-hidden
+        />
+      )
+      content = copy ? (
+        <span className={ellipsis}>{icon}</span>
+      ) : (
+        <PaginationEllipsisPrimitive className={ellipsis}>
+          {icon}
+        </PaginationEllipsisPrimitive>
       )
     } else if (copy) {
       content = (
@@ -687,29 +688,29 @@ function PaginationPages({
       )
     } else {
       content = (
-        <PaginationControl
-          slot='pagination-link'
-          to={item}
-          current={item === page}
+        <PaginationPage
+          page={item}
+          label={pageLabel(item, item === page && known ? pageCount : undefined)}
           className={className}
-        >
-          {/* The number rolls for the eye; its name is read whole. */}
-          <span className='sr-only'>
-            {pageLabel(item, item === page && known ? pageCount : undefined)}
-          </span>
-          <RollingNumber value={item} text={String(item)} />
-        </PaginationControl>
+        />
       )
     }
-    // A place that turns from a page into an ellipsis, or back, crossfades.
-    return (
-      <Place
+    // Keyed by place, not by page, so a place's number rolls as the range
+    // moves, and one that turns from a page into an ellipsis, or back, crossfades.
+    const swap = <Swap id={number ? 'page' : 'ellipsis'}>{content}</Swap>
+    const placeClassName = cn('flex', item !== page && beforeFit)
+    return copy ? (
+      <span key={place} className={placeClassName}>
+        {swap}
+      </span>
+    ) : (
+      <PaginationItemPrimitive
         key={place}
-        className={cn('flex', item !== page && beforeFit)}
-        aria-hidden={copy || number ? undefined : true}
+        className={placeClassName}
+        aria-hidden={number ? undefined : true}
       >
-        <Swap id={number ? 'page' : 'ellipsis'}>{content}</Swap>
-      </Place>
+        {swap}
+      </PaginationItemPrimitive>
     )
   })
 }
@@ -742,7 +743,14 @@ function PaginationPageField({
   of?: (pageCount: string) => string
   disabled?: boolean
 }) {
-  const { page, pageCount, known, go, locale } = usePagination()
+  const {
+    page,
+    pageCount,
+    known,
+    controller,
+    disabled: allDisabled,
+    locale,
+  } = usePagination()
   const copy = use(PaginationCopyContext)
   // In the row it is one of its places; beside it, a part of its own.
   const Place = use(RowContext) ? 'li' : 'div'
@@ -761,7 +769,7 @@ function PaginationPageField({
     // While the count is unknown, the pages known so far: as far as Next goes.
     const to = value === null ? page : clampPage(value, pageCount)
     setDraft(to)
-    go(to)
+    controller.setPage(to)
   }
   const layout = cn(
     'flex shrink-0 items-center gap-2 text-sm whitespace-nowrap',
@@ -786,13 +794,13 @@ function PaginationPageField({
         min={1}
         max={pageCount}
         step={1}
-        disabled={disabled}
+        disabled={disabled ?? allDisabled}
         locale={numberFormatter(locale).resolvedOptions().locale}
         format={{ maximumFractionDigits: 0, useGrouping: false }}
         onValueChange={(value, details) => {
           setDraft(value)
           // A step goes at once; what is typed or pasted goes when it is sent.
-          if (value !== null && isStep(details.reason)) go(value)
+          if (value !== null && isStep(details.reason)) controller.setPage(value)
         }}
         onValueCommit={send}
       >
@@ -936,7 +944,7 @@ function PaginationPageSize({
   /** The label beside the Select, also its name. */
   children?: ReactNode
 }) {
-  const { pageSize, setPageSize, locale } = usePagination()
+  const { pageSize, setPageSize, disabled: allDisabled, locale } = usePagination()
   const labelId = useId()
   const format = numberFormatter(locale)
   // The size it has, even when it isn't one of the options.
@@ -954,7 +962,7 @@ function PaginationPageSize({
       </span>
       <Select
         value={pageSize}
-        disabled={disabled}
+        disabled={disabled ?? allDisabled}
         onValueChange={(size) => {
           if (size !== null) setPageSize(size)
         }}
@@ -1004,54 +1012,36 @@ function countOf({
   return null
 }
 
-function range(from: number, to: number) {
-  return Array.from({ length: Math.max(0, to - from + 1) }, (_, at) => from + at)
-}
-
-/** How many places a row takes with these counts, once it has more pages than it shows. */
+/**
+ * How many places the row keeps once there are more pages: ui-sdk's range
+ * with the ends and their ellipses, or a window of pages with none.
+ */
 function placesFor(siblings: number, boundaries: number) {
   return boundaries > 0 ? 2 * boundaries + 2 * siblings + 3 : 2 * siblings + 1
 }
 
 /**
- * The row's places for `page` of `pageCount`: the first and last
- * `boundaries` pages, `siblings` pages either side of the current one, and
- * an ellipsis for each run between them. The count of places stays the same
- * on every page, so the row never changes width: near an end, the pages
- * there fill the places an ellipsis would take. An ellipsis always stands
- * for two pages or more. With no boundaries, it is a window of pages.
+ * The row's places: ui-sdk's range while it keeps ends, and with none, a
+ * window of `siblings` pages either side of the current one, held inside the
+ * range, since an ellipsis with no end beyond it stands for nothing a person
+ * can reach.
  */
-function pageItems(
-  page: number,
-  pageCount: number,
-  siblings = 1,
-  boundaries = 1,
-): PageItem[] {
-  const count = Math.max(1, Math.floor(pageCount))
-  const current = clampPage(page, count)
-  const sides = Math.max(0, Math.floor(siblings))
-  const ends = Math.max(0, Math.floor(boundaries))
-  const places = placesFor(sides, ends)
-  if (count <= places) return range(1, count)
-  if (ends === 0) {
-    const start = Math.min(Math.max(1, current - sides), count - places + 1)
-    return range(start, start + places - 1)
-  }
-  // Pages up to the ellipsis, when the current one is close to an end.
-  const run = places - ends - 1
-  if (current <= ends + sides + 2) {
-    return [...range(1, run), 'end-ellipsis', ...range(count - ends + 1, count)]
-  }
-  if (current >= count - ends - sides - 1) {
-    return [...range(1, ends), 'start-ellipsis', ...range(count - run + 1, count)]
-  }
-  return [
-    ...range(1, ends),
-    'start-ellipsis',
-    ...range(current - sides, current + sides),
-    'end-ellipsis',
-    ...range(count - ends + 1, count),
-  ]
+function pagesOf({
+  page,
+  pageCount,
+  siblings,
+  boundaries,
+}: {
+  page: number
+  pageCount: number
+  siblings: number
+  boundaries: number
+}): ReturnType<typeof paginationRange> {
+  if (boundaries > 0) return paginationRange({ page, pageCount, siblings, boundaries })
+  const count = Math.max(1, pageCount)
+  const places = Math.min(count, placesFor(siblings, 0))
+  const start = Math.min(Math.max(1, page - siblings), count - places + 1)
+  return Array.from({ length: places }, (_, at) => start + at)
 }
 
 /**
@@ -1152,9 +1142,9 @@ function placesIn(nav: HTMLElement, row: HTMLElement) {
 
 export {
   Pagination,
-  PaginationContent,
   PaginationFirst,
   PaginationLast,
+  PaginationList,
   PaginationNext,
   PaginationPageField,
   PaginationPages,
@@ -1163,6 +1153,6 @@ export {
   PaginationRange,
   countOf,
   fittingRange,
-  pageItems,
+  pagesOf,
 }
-export type { PageItem, PaginationRangeParts }
+export type { PaginationRangeParts }

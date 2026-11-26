@@ -35,22 +35,13 @@ export const trackClassName =
   'bg-muted relative h-1.5 w-full rounded-full forced-colors:outline'
 
 /**
- * A thumb's dot, inside a 24px thumb marked `group/thumb`: the Slider's, and
- * a colour area's. Held or dragged (`data-dragging`), it shrinks by three
- * times the feel's press scale, as a Checkbox does; hovered or focused, it
- * takes a ring. Its look comes from a variant: the Slider's own, or a colour
- * channel's.
+ * A thumb's dot, inside a thumb marked `group/thumb`: the Slider's, and the
+ * Color picker's. Held or dragged (`data-dragging`), it shrinks by three
+ * times the feel's press scale, as a Checkbox does; hovered, or focused
+ * itself or inside, it takes a ring. Each gives it its own look.
  */
 export const thumbDotClassName =
-  'block rounded-full border-2 transition-[box-shadow,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-easing)] group-active/thumb:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:group-active/thumb:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:group-data-dragging/thumb:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] group-hover/thumb:ring-ring/30 group-hover/thumb:ring-4 group-has-focus-visible/thumb:ring-ring/50 group-has-focus-visible/thumb:ring-4 forced-colors:group-has-focus-visible/thumb:outline-2 forced-colors:group-has-focus-visible/thumb:outline-[Highlight]'
-
-/**
- * A colour channel's dot: filled with `--slider-thumb`, the colour under it,
- * ringed in white and a hairline shadow so it stands out on any colour, in
- * either theme, and kept in forced colours.
- */
-export const channelThumbClassName =
-  'size-5 border-white bg-(--slider-thumb) shadow-[0_0_0_1px_rgb(0_0_0/0.2),0_1px_3px_rgb(0_0_0/0.25)] forced-color-adjust-none'
+  'block rounded-full border-2 transition-[box-shadow,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-easing)] group-active/thumb:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:group-active/thumb:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] motion-safe:group-data-dragging/thumb:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] group-hover/thumb:ring-ring/30 group-hover/thumb:ring-4 group-has-focus-visible/thumb:ring-ring/50 group-has-focus-visible/thumb:ring-4 forced-colors:group-has-focus-visible/thumb:outline-2 forced-colors:group-has-focus-visible/thumb:outline-[Highlight] group-focus-visible/thumb:ring-ring/50 group-focus-visible/thumb:ring-4 forced-colors:group-focus-visible/thumb:outline-2 forced-colors:group-focus-visible/thumb:outline-[Highlight]'
 
 /** In forced colours the fill takes the system highlight whatever colour a state gives it, since backgrounds go. */
 export const trackFillClassName =

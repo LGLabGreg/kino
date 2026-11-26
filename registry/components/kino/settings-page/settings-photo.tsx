@@ -15,8 +15,6 @@ import {
 import { Field, FieldDescription, FieldLabel } from '@/registry/components/kino/field'
 import { FileInput, FileInputTrigger } from '@/registry/components/kino/file-input'
 import {
-  type Crop,
-  cropImage,
   ImageCropper,
   ImageCropperArea,
   ImageCropperPreview,
@@ -24,6 +22,7 @@ import {
   ImageCropperZoom,
 } from '@/registry/components/kino/image-cropper'
 import { FieldCheck } from '@/registry/lib/field-control'
+import { cropImage, type ImageCrop } from '@ui-sdk/core/image'
 import {
   type ReactNode,
   useEffect,
@@ -123,7 +122,7 @@ function PhotoControl({
   const [picked, setPicked] = useState<{ file: File; url: string } | null>(null)
   useEffect(() => (picked ? () => URL.revokeObjectURL(picked.url) : undefined), [picked])
   const [open, setOpen] = useState(false)
-  const [crop, setCrop] = useState<Crop | null>(null)
+  const [crop, setCrop] = useState<ImageCrop | null>(null)
   const [cropping, setCropping] = useState(false)
   const [failed, setFailed] = useState(false)
   // The new image, in a file input, so the form sends it as a File.
@@ -143,8 +142,13 @@ function PhotoControl({
     setCropping(true)
     setFailed(false)
     try {
-      const blob = await cropImage(picked.url, crop, { shape: 'circle', maxWidth: 512 })
-      change(new File([blob], 'photo.png', { type: blob.type || 'image/png' }))
+      // Never larger than the crop itself.
+      const file = await cropImage(picked.url, crop, {
+        shape: 'circle',
+        width: Math.min(512, crop.width),
+        name: 'photo.png',
+      })
+      change(file)
       setOpen(false)
     } catch {
       setFailed(true)
@@ -218,17 +222,14 @@ function PhotoControl({
             {picked ? (
               <ImageCropper
                 key={picked.url}
+                aria-label='Photo'
                 src={picked.url}
-                alt={alt}
+                mode='frame'
                 shape='circle'
-                onValueCommitted={setCrop}
+                onCropCommit={setCrop}
               >
                 <div className='flex min-w-0 gap-4'>
-                  <ImageCropperArea
-                    mode='frame'
-                    className='h-72 flex-1'
-                    aria-label='Photo'
-                  />
+                  <ImageCropperArea alt={alt} className='h-72 flex-1' />
                   <div className='hidden flex-col items-center gap-3 pt-1 @sm:flex'>
                     <ImageCropperPreview className='size-16' />
                     <ImageCropperPreview className='size-10' />

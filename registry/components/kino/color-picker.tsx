@@ -1,11 +1,12 @@
 'use client'
 
 import { Collapsible, CollapsiblePanel } from '@/registry/components/kino/collapsible'
+import { inputControlClassName } from '@/registry/components/kino/input'
 import {
   InputGroup,
   InputGroupAddon,
+  inputGroupBesideStart,
   InputGroupButton,
-  InputGroupInput,
 } from '@/registry/components/kino/input-group'
 import {
   Select,
@@ -14,28 +15,48 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/registry/components/kino/select'
-import { Slider } from '@/registry/components/kino/slider'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { choicePressHandlers } from '@/registry/lib/choice'
-import { mergeRefs } from '@/registry/lib/refs'
-import { markResizing } from '@/registry/lib/resize'
+import { thumbDotClassName, trackDirClassName } from '@/registry/lib/track'
 import {
-  channelThumbClassName,
-  thumbDotClassName,
-  trackDirClassName,
-} from '@/registry/lib/track'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { Radio as RadioPrimitive } from '@base-ui/react/radio'
-import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
+  type Color,
+  type ColorFormat,
+  colorDistance,
+  contrastRatio,
+  convertColor,
+  formatColor,
+  isInGamut,
+  parseColor,
+} from '@ui-sdk/core/color'
+import {
+  type ColorChannel,
+  ColorPickerArea as ColorPickerAreaPrimitive,
+  ColorPickerAreaCanvas as ColorPickerAreaCanvasPrimitive,
+  ColorPickerAreaThumb as ColorPickerAreaThumbPrimitive,
+  ColorPickerChannelInput as ColorPickerChannelInputPrimitive,
+  type ColorPickerController,
+  ColorPickerEyeDropper as ColorPickerEyeDropperPrimitive,
+  ColorPickerInput as ColorPickerInputPrimitive,
+  ColorPicker as ColorPickerPrimitive,
+  ColorPickerSlider as ColorPickerSliderPrimitive,
+  ColorPickerSliderThumb as ColorPickerSliderThumbPrimitive,
+  type ColorPickerSpace,
+  type ColorPickerState,
+  ColorPickerSwatch as ColorPickerSwatchPrimitive,
+  ColorPickerSwatches as ColorPickerSwatchesPrimitive,
+  ColorPickerSwatchItem as ColorPickerSwatchItemPrimitive,
+  type ColorPickerValueChangeDetails,
+  type ColorPickerValueCommitDetails,
+  createColorPickerController,
+} from '@ui-sdk/react/color-picker'
+import { Toggle as TogglePrimitive } from '@ui-sdk/react/toggle'
 import {
   type ComponentProps,
   createContext,
   type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent,
   type ReactNode,
   use,
-  useId,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -43,60 +64,26 @@ import {
 
 import { cn } from '@/lib/utils'
 
-/** Hue in degrees, saturation and brightness from 0 to 1: the area's x is saturation, its y brightness. */
-interface Hsb {
-  h: number
-  s: number
-  b: number
-}
-
-/** Lightness 0 to 1, chroma 0 to about 0.4, hue in degrees. */
-interface Oklch {
-  l: number
-  c: number
-  h: number
-}
-
-/** Red, green and blue from 0 to 1. */
-interface Rgb {
-  r: number
-  g: number
-  b: number
-}
-
-/** The spaces a picker edits in: HSB for an area, OKLCH for channels that mean what they say. */
-type ColorSpace = 'hsb' | 'oklch'
-
-/** How the value is written. */
-type ColorFormat = 'hex' | 'rgb' | 'hsl' | 'oklch'
-
-/**
- * A colour as it was read or set, in the space it's in, with alpha from 0 to
- * 1. An HSB colour read from OKLCH keeps the OKLCH it came from, so writing
- * it back as OKLCH, or showing it on a wide-gamut screen, loses nothing.
+/*
+ * ui-sdk's Color picker with Kino's look. ui-sdk holds the colour, the
+ * pointer and the keys; Kino draws the tracks and thumbs, glides a thumb on
+ * `layout` to a colour picked, typed or keyed, and has it follow a drag at
+ * once.
  */
-type Color =
-  | { space: 'rgb'; rgb: Rgb; alpha: number }
-  | { space: 'hsb'; hsb: Hsb; alpha: number; oklch?: Oklch }
-  | { space: 'oklch'; oklch: Oklch; alpha: number }
 
-/** The colour a picker edits, in its own space. */
-type EditColor = Extract<Color, { space: ColorSpace }>
+type ChangeListener = (value: string, details: ColorPickerValueChangeDetails) => void
 
 interface ColorPickerContextValue {
-  color: EditColor
-  /** The colour as CSS in `format`. */
-  value: string
+  state: ColorPickerState
   format: ColorFormat
   setFormat: (format: ColorFormat) => void
-  disabled: boolean
-  /** Sets the colour, as an edit still under way, and returns it as written. */
-  change: (color: EditColor) => string
-  /** Ends an edit: a drag let go, a key, a typed value, a preset. */
-  commit: (value: string) => void
-  /** Sets a colour from outside the picker's space and ends the edit. */
-  pick: (color: Color) => void
+  /** Sets a colour as a press on a member of the picker does: a change, then a commit. */
+  choose: (value: string, details: { event?: Event; source: CommitSource }) => void
+  /** Hears every change, before the picker's own `onValueChange`. */
+  listen: (listener: ChangeListener) => () => void
 }
+
+type CommitSource = ColorPickerValueCommitDetails['source']
 
 const ColorPickerContext = createContext<ColorPickerContextValue | null>(null)
 
@@ -106,100 +93,116 @@ function useColorPicker() {
   return context
 }
 
-/** The colour last set and how it was written, so the same value coming back in isn't read again. */
-interface Held {
-  color: EditColor
-  written: string
-}
+/** How a picker writes its value when no format is given: as ui-sdk does, hex for HSV and the space otherwise. */
+const formatOf = (space: ColorPickerSpace | undefined): ColorFormat =>
+  space === undefined || space === 'hsv' ? 'hex' : space
 
-const BLACK: Color = { space: 'rgb', rgb: { r: 0, g: 0, b: 0 }, alpha: 1 }
-
-interface ColorPickerProps extends Omit<
-  ComponentProps<'div'>,
-  'defaultValue' | 'onChange'
-> {
-  /**
-   * A CSS colour in hex, `rgb()`, `hsl()`, `oklch()` or `color(srgb …)`. A
-   * value it can't read leaves the colour where it was.
-   */
-  value?: string
-  defaultValue?: string
-  /** Called on every change, including each step of a drag. */
-  onValueChange?: (value: string) => void
-  /** Called once a drag, a key press, a typed value or a preset ends, with the colour as it then is. */
-  onValueCommitted?: (value: string) => void
-  /** The space it edits in: HSB for `ColorPickerArea`, OKLCH for the channel sliders. Hue follows it. */
-  space?: ColorSpace
+type ColorPickerProps = Omit<
+  ComponentProps<typeof ColorPickerPrimitive>,
+  'className' | 'children' | 'format'
+> & {
+  className?: string
+  children?: ReactNode
+  /** How the value is written; `ColorPickerFormat` changes it. */
   format?: ColorFormat
   defaultFormat?: ColorFormat
   onFormatChange?: (format: ColorFormat) => void
-  disabled?: boolean
 }
 
 function ColorPicker({
-  space = 'hsb',
-  value,
-  defaultValue,
-  onValueChange,
-  onValueCommitted,
+  space,
+  gamut = false,
   format: formatProp,
   defaultFormat,
   onFormatChange,
-  disabled = false,
+  value,
+  defaultValue,
+  onValueChange,
+  onValueCommit,
+  controller: controllerProp,
   className,
   children,
+  'aria-label': ariaLabel = 'Colour picker',
   ...props
 }: ColorPickerProps) {
-  const [formatState, setFormatState] = useState<ColorFormat>(
-    defaultFormat ?? (space === 'oklch' ? 'oklch' : 'hex'),
-  )
+  const [formatState, setFormatState] = useState(defaultFormat ?? formatOf(space))
   const format = formatProp ?? formatState
-  const [held, setHeld] = useState<Held>(() => {
-    const color = inSpace(parseColor(value ?? defaultValue ?? '') ?? BLACK, space)
-    return { color, written: writeColor(color, format) }
+  const [ownController] = useState(createColorPickerController)
+  const controller: ColorPickerController = controllerProp ?? ownController
+  // While a drag runs the thumbs follow it at once; a press, a key or a new colour glides.
+  // A drag ends in a commit; one that ends where it began commits nothing, and the next
+  // change, which commits at once, clears it before it draws.
+  const [following, setFollowing] = useState(false)
+  const listeners = useRef(new Set<ChangeListener>())
+  const commitRef = useRef(onValueCommit)
+  useLayoutEffect(() => {
+    commitRef.current = onValueCommit
   })
-  // Controlled, the colour moves only when `value` follows; the held colour
-  // keeps the hue a grey has lost.
-  const color = shownColor(held, value, space)
-  const current = writeColor(color, format)
 
-  const write = (next: EditColor, nextFormat: ColorFormat) => {
-    const written = writeColor(next, nextFormat)
-    setHeld({ color: next, written })
-    if (written !== current) onValueChange?.(written)
-    return written
-  }
-  const change = (next: EditColor) => write(next, format)
-  const commit = (written: string) => onValueCommitted?.(written)
+  // A new format rewrites the value: ui-sdk writes it in the format it has once it renders.
+  const written = useRef(format)
+  useLayoutEffect(() => {
+    if (written.current === format) return
+    written.current = format
+    controller.setValue(controller.getValue())
+  }, [controller, format])
 
-  const context: ColorPickerContextValue = {
-    color,
-    value: current,
+  const context = (state: ColorPickerState): ColorPickerContextValue => ({
+    state,
     format,
     setFormat: (next) => {
       setFormatState(next)
       onFormatChange?.(next)
-      write(color, next)
     },
-    disabled,
-    change,
-    commit,
-    pick: (next) => commit(change(inSpace(next, space, color))),
-  }
+    choose: (value, { event, source }) => {
+      if (!controller.setValue(value, { reason: 'item-press', event })) return
+      const color = parseColor(value)
+      if (!color) return
+      commitRef.current?.(controller.getValue(), {
+        reason: 'item-press',
+        event: event as MouseEvent | KeyboardEvent | undefined,
+        source,
+        color: convertColor(color, state.space),
+      })
+    },
+    listen: (listener) => {
+      listeners.current.add(listener)
+      return () => listeners.current.delete(listener)
+    },
+  })
 
   return (
-    <ColorPickerContext value={context}>
-      <div
-        data-slot='color-picker'
-        role='group'
-        aria-label='Colour picker'
-        data-disabled={disabled || undefined}
-        className={cn('flex w-full min-w-0 flex-col gap-(--surface-gap)', className)}
-        {...props}
-      >
-        {children}
-      </div>
-    </ColorPickerContext>
+    <ColorPickerPrimitive
+      space={space}
+      gamut={gamut}
+      format={format}
+      value={value === undefined ? undefined : inFormat(value, format)}
+      defaultValue={
+        defaultValue === undefined ? undefined : inFormat(defaultValue, format)
+      }
+      controller={controller}
+      aria-label={ariaLabel}
+      data-following={following || undefined}
+      onValueChange={(value, details) => {
+        for (const listener of listeners.current) listener(value, details)
+        if (details.reason === 'drag') setFollowing(true)
+        onValueChange?.(value, details)
+      }}
+      onValueCommit={(value, details) => {
+        setFollowing(false)
+        onValueCommit?.(value, details)
+      }}
+      className={cn(
+        'group/color-picker flex w-full min-w-0 flex-col gap-(--surface-gap)',
+        trackDirClassName,
+        className,
+      )}
+      {...props}
+    >
+      {(state) => (
+        <ColorPickerContext value={context(state)}>{children}</ColorPickerContext>
+      )}
+    </ColorPickerPrimitive>
   )
 }
 
@@ -214,27 +217,22 @@ const checkerboard =
 const swatchBackground = (color: string) =>
   `linear-gradient(${color}, ${color}), ${checkerboard}`
 
-/**
- * A colour shown as a square: the current colour beside a value, or in a
- * trigger. It's a picture of a value, so it's hidden from screen readers;
- * the text beside it names the colour. It needs no ColorPicker around it.
- */
+/** `--color-picker-color`, ui-sdk's colour on a part, over the checkerboard. */
+const swatchFillClassName =
+  '[background:linear-gradient(var(--color-picker-color),var(--color-picker-color)),repeating-conic-gradient(var(--muted)_0_25%,var(--background)_0_50%)_0_0/0.5rem_0.5rem] inset-ring inset-ring-foreground/10 forced-color-adjust-none'
+
+/** The colour as a square, named for screen readers: beside the value, or in a trigger. */
 function ColorPickerSwatch({
-  color,
   className,
-  style,
   ...props
-}: Omit<ComponentProps<'span'>, 'color' | 'children'> & {
-  /** Any CSS colour. */
-  color: string
+}: Omit<ComponentProps<typeof ColorPickerSwatchPrimitive>, 'className'> & {
+  className?: string
 }) {
   return (
-    <span
-      data-slot='color-picker-swatch'
-      aria-hidden
-      style={{ background: swatchBackground(color), ...style }}
+    <ColorPickerSwatchPrimitive
       className={cn(
-        'inline-block size-4 shrink-0 rounded-(--control-radius-xs) inset-ring inset-ring-foreground/10 forced-color-adjust-none',
+        'inline-block size-4 shrink-0 rounded-(--control-radius-xs)',
+        swatchFillClassName,
         className,
       )}
       {...props}
@@ -245,344 +243,295 @@ function ColorPickerSwatch({
 // ---------------------------------------------------------------------------
 // Area
 
-const percent = (n: number) => `${Math.round(n * 100)}%`
+/** Whether ui-sdk draws an area with a gradient: saturation across, brightness or lightness up, in HSV or HSL. */
+function areaHasGradient(
+  space: ColorPickerSpace,
+  x: ColorChannel | undefined,
+  y: ColorChannel | undefined,
+) {
+  if (space !== 'hsv' && space !== 'hsl') return false
+  const down = y ?? (space === 'hsv' ? 'brightness' : 'lightness')
+  return (
+    (x ?? 'saturation') === 'saturation' &&
+    (down === 'brightness' || down === 'lightness')
+  )
+}
 
 /**
- * Saturation across and brightness down, at the colour's hue. The thumb
- * glides on `layout` to a colour picked, typed or keyed, and follows a drag
- * at once, as a Slider's does. Its keyboard and screen reader controls are
- * two hidden range inputs, one per axis, so touch screen readers can move
- * each one.
+ * A colour channel's dot: filled with `--slider-thumb`, the colour under it,
+ * ringed in white and a hairline shadow so it stands out on any colour, in
+ * either theme, and kept in forced colours.
  */
-function ColorPickerArea({
-  ref,
-  className,
-  style,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onLostPointerCapture,
-  'aria-label': ariaLabel = 'Saturation and brightness',
-  ...props
-}: Omit<ComponentProps<'div'>, 'children'>) {
-  const { color, change, commit, disabled } = useColorPicker()
-  const rtl = useDirection() === 'rtl'
-  const [following, setFollowing] = useState(false)
-  const [held, setHeld] = useState(false)
-  // The colour a press has set so far, committed when it is let go.
-  const pressed = useRef<string | null>(null)
-  const id = useId()
-  const hsb = toHsb(color)
-  const name = colorName(color)
+const channelThumbClassName =
+  'size-5 border-white bg-(--slider-thumb) shadow-[0_0_0_1px_rgb(0_0_0/0.2),0_1px_3px_rgb(0_0_0/0.25)] forced-color-adjust-none'
 
-  const set = (next: Hsb) =>
-    change(inSpace({ space: 'hsb', hsb: next, alpha: color.alpha }, color.space, color))
+/** A thumb's place glides on `layout`, and follows a drag at once. */
+const thumbMoveClassName =
+  'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/color-picker:duration-0 motion-reduce:transition-none'
 
-  const move = (event: PointerEvent<HTMLDivElement>) => {
-    const { s, b } = areaPoint(
-      event.currentTarget.getBoundingClientRect(),
-      event.clientX,
-      event.clientY,
-      rtl,
-    )
-    pressed.current = set({ h: hsb.h, s, b })
-  }
-
-  const end = () => {
-    setFollowing(false)
-    setHeld(false)
-    if (pressed.current === null) return
-    commit(pressed.current)
-    pressed.current = null
-  }
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    const next = areaKeyMove(hsb, event.key, event.shiftKey, rtl)
-    if (!next) return
-    event.preventDefault()
-    commit(set({ h: hsb.h, ...next }))
-  }
-
-  const thumbStyle = {
-    // Rounded, so the server's arithmetic and the browser's write the same style.
-    '--area-x': Math.round(hsb.s * 10000) / 100,
-    '--area-y': Math.round(hsb.b * 10000) / 100,
-    translate:
-      'calc(var(--track-dir) * (var(--area-x) * 1cqw - 50%)) calc((100 - var(--area-y)) * 1cqh - 50%)',
-    '--slider-thumb': cssColor({ space: 'hsb', hsb, alpha: 1 }),
-  } as CSSProperties
-
+/**
+ * The dot a thumb shows, centred on its point: the same as a channel
+ * Slider's, so the two press and focus alike. It shrinks while the area or
+ * the track under it is held.
+ */
+function ThumbDot({ held, className }: { held: string; className: string }) {
   return (
-    <div
-      data-slot='color-picker-area'
-      role='group'
-      aria-label={ariaLabel}
-      ref={mergeRefs(markResizing, ref)}
-      data-following={following || undefined}
-      data-disabled={disabled || undefined}
-      {...props}
-      onPointerDown={(event) => {
-        onPointerDown?.(event)
-        if (event.defaultPrevented || disabled || event.button !== 0) return
-        event.preventDefault()
-        event.currentTarget.setPointerCapture(event.pointerId)
-        setHeld(true)
-        // A press shows no focus ring, as a press on a channel Slider doesn't.
-        document
-          .getElementById(`${id}-s`)
-          ?.focus({ preventScroll: true, focusVisible: false })
-        move(event)
-      }}
-      onPointerMove={(event) => {
-        onPointerMove?.(event)
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
-        setFollowing(true)
-        move(event)
-      }}
-      onPointerUp={(event) => {
-        onPointerUp?.(event)
-        end()
-      }}
-      onLostPointerCapture={(event) => {
-        onLostPointerCapture?.(event)
-        end()
-      }}
-      style={{ '--area-hue': `hsl(${hsb.h} 100% 50%)`, ...style } as CSSProperties}
+    <span
       className={cn(
-        'group/area relative h-40 w-full touch-none rounded-(--control-radius-capped) select-none [container-type:size] forced-color-adjust-none',
-        trackDirClassName,
-        // Brightness falls to black at the bottom; saturation rises from white at the start.
-        '[background:linear-gradient(to_top,#000,transparent),linear-gradient(to_right,#fff,var(--area-hue))] rtl:[background:linear-gradient(to_top,#000,transparent),linear-gradient(to_left,#fff,var(--area-hue))]',
-        'inset-ring inset-ring-foreground/10 data-disabled:pointer-events-none data-disabled:opacity-50',
+        'pointer-events-auto absolute start-0 flex size-6 [translate:calc(var(--track-dir)*-50%)_-50%] items-center justify-center',
         className,
       )}
     >
-      <div
-        data-slot='color-picker-area-thumb'
-        data-dragging={held || undefined}
-        style={thumbStyle}
-        className={cn(
-          'group/thumb absolute start-0 top-0 flex size-6 items-center justify-center rounded-full',
-          // After a press, a key or a new colour it glides on `layout`; dragged, it follows at once.
-          'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/area:duration-0 group-data-resizing/area:transition-none motion-reduce:transition-none',
-        )}
-      >
-        {/* The same dot as a channel Slider's thumb, so the two press and focus alike. */}
-        <span aria-hidden className={cn(thumbDotClassName, channelThumbClassName)} />
-        <input
-          id={`${id}-s`}
-          type='range'
-          className='sr-only'
-          aria-label='Saturation'
-          aria-roledescription='2D slider'
-          aria-valuetext={`Saturation ${percent(hsb.s)}, brightness ${percent(hsb.b)}, ${name}`}
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round(hsb.s * 100)}
-          disabled={disabled}
-          onChange={(event) =>
-            commit(set({ ...hsb, s: Number(event.target.value) / 100 }))
-          }
-          onKeyDown={onKeyDown}
-        />
-        <input
-          type='range'
-          tabIndex={-1}
-          className='sr-only'
-          aria-label='Brightness'
-          aria-roledescription='2D slider'
-          aria-valuetext={`Brightness ${percent(hsb.b)}, saturation ${percent(hsb.s)}, ${name}`}
-          min={0}
-          max={100}
-          step={1}
-          value={Math.round(hsb.b * 100)}
-          disabled={disabled}
-          onChange={(event) =>
-            commit(set({ ...hsb, b: Number(event.target.value) / 100 }))
-          }
-          onKeyDown={onKeyDown}
-        />
-      </div>
-    </div>
+      <span aria-hidden className={cn(thumbDotClassName, channelThumbClassName, held)} />
+    </span>
+  )
+}
+
+/**
+ * The colour as a surface for two channels: saturation across and
+ * brightness up, by default. ui-sdk draws it with a gradient where one can,
+ * and with a `ColorPickerAreaCanvas` otherwise, such as OKLCH's chroma by
+ * lightness. Without children it holds its thumb, and the canvas it needs.
+ */
+function ColorPickerArea({
+  className,
+  children,
+  x,
+  y,
+  ...props
+}: Omit<ComponentProps<typeof ColorPickerAreaPrimitive>, 'className'> & {
+  className?: string
+}) {
+  const { state } = useColorPicker()
+  return (
+    <ColorPickerAreaPrimitive
+      x={x}
+      y={y}
+      className={cn(
+        'group/area h-40 w-full shrink-0 rounded-(--control-radius-capped) select-none [background:var(--color-area-background)] inset-ring inset-ring-foreground/10 forced-color-adjust-none data-disabled:pointer-events-none data-disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    >
+      {children ?? (
+        <>
+          {areaHasGradient(state.space, x, y) ? null : <ColorPickerAreaCanvas />}
+          <ColorPickerAreaThumb />
+        </>
+      )}
+    </ColorPickerAreaPrimitive>
+  )
+}
+
+/** Paints the area where no gradient can, inside its rounded corners. */
+function ColorPickerAreaCanvas({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof ColorPickerAreaCanvasPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <ColorPickerAreaCanvasPrimitive
+      className={cn('rounded-(--control-radius-capped)', className)}
+      {...props}
+    />
+  )
+}
+
+/**
+ * The area's thumb, a slider screen readers hear as both channels. It spans
+ * the area and moves its dot by `translate`, from ui-sdk's `--area-x` and
+ * `--area-y`, so it glides on the compositor.
+ */
+function ColorPickerAreaThumb({
+  className,
+  style,
+  ...props
+}: Omit<
+  ComponentProps<typeof ColorPickerAreaThumbPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+}) {
+  return (
+    <ColorPickerAreaThumbPrimitive
+      style={(state) => ({
+        '--slider-thumb': cssOf({ ...state.color, alpha: 1 }),
+        ...(typeof style === 'function' ? style(state) : style),
+      })}
+      className={cn(
+        // ui-sdk places it with insets, which motion.md won't let us animate: it fills the area instead.
+        'group/thumb pointer-events-none absolute inset-0! [translate:calc(var(--track-dir)*var(--area-x)*100%)_calc((1-var(--area-y))*100%)] focus-visible:outline-hidden',
+        thumbMoveClassName,
+        className,
+      )}
+      {...props}
+    >
+      <ThumbDot
+        className='top-0'
+        held='motion-safe:group-active/area:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] group-active/area:duration-[calc(var(--motion-press-duration)*0.4)]'
+      />
+    </ColorPickerAreaThumbPrimitive>
   )
 }
 
 // ---------------------------------------------------------------------------
 // Channel sliders
 
-type Channel = 'hue' | 'alpha' | 'lightness' | 'chroma'
-
-/** The largest chroma the channels offer: a little past the most vivid sRGB colour. */
-const MAX_CHROMA = 0.37
-
-const CHANNELS: Record<
-  Channel,
-  {
-    label: string
-    min: number
-    max: number
-    step: number
-    format: Intl.NumberFormatOptions
-  }
-> = {
-  hue: {
-    label: 'Hue',
-    min: 0,
-    max: 360,
-    step: 1,
-    format: {
-      style: 'unit',
-      unit: 'degree',
-      unitDisplay: 'narrow',
-      maximumFractionDigits: 0,
-    },
-  },
-  alpha: { label: 'Opacity', min: 0, max: 1, step: 0.01, format: { style: 'percent' } },
-  lightness: {
-    label: 'Lightness',
-    min: 0,
-    max: 1,
-    step: 0.005,
-    format: { style: 'percent', maximumFractionDigits: 1 },
-  },
-  chroma: {
-    label: 'Chroma',
-    min: 0,
-    max: MAX_CHROMA,
-    step: 0.001,
-    format: { minimumFractionDigits: 3, maximumFractionDigits: 3 },
-  },
-}
+/** The channel a slider edits, for its thumb. */
+const SliderChannelContext = createContext<ColorChannel>('hue')
 
 /** Every hue at full saturation, red round to red. */
 const HUE_STOPS = '#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00'
 
-/** Along the track, start to end: 90deg, or -90deg right to left, from the Slider's `--track-dir`. */
+/** Along the track, start to end: 90deg, or -90deg right to left, from `--track-dir`. */
 const ALONG = 'calc(90deg * var(--track-dir))'
+
+/** A colour as CSS: OKLCH as OKLCH, so a colour past sRGB keeps it, and the rest as `rgb()`. */
+const cssOf = (color: Color) =>
+  formatColor(color, color.space === 'oklch' ? 'oklch' : 'srgb')
 
 /** OKLCH hue stops every 30 degrees at `l` and `c`. */
 const oklchHueStops = (l: number, c: number) =>
   Array.from({ length: 13 }, (_, i) => `oklch(${l} ${c} ${i * 30})`).join(', ')
 
+/** The most chroma a lightness or chroma track runs to: ui-sdk's own end for chroma. */
+const MAX_CHROMA = 0.4
+
 /**
- * The channel's track, as a CSS background, and its thumb's colour: the
+ * A channel's track, as a CSS background, and its thumb's colour: the
  * colours the channel runs through with the others held where they are.
+ * A hue runs round the wheel even for a grey, which has none of its own.
+ * Channels it doesn't draw take ui-sdk's `--color-slider-background`.
  */
 function channelPaint(
-  color: EditColor,
-  channel: Channel,
+  color: Color,
+  channel: ColorChannel,
 ): { track: string; thumb: string } {
-  const solid = cssColor({ ...color, alpha: 1 })
+  const solid = cssOf({ ...color, alpha: 1 })
   if (channel === 'alpha') {
     return {
-      track: `linear-gradient(${ALONG}, ${cssColor({ ...color, alpha: 0 })}, ${solid}), ${checkerboard}`,
-      thumb: cssColor(color),
+      track: `linear-gradient(${ALONG}, ${cssOf({ ...color, alpha: 0 })}, ${solid}), ${checkerboard}`,
+      thumb: cssOf(color),
     }
   }
-  if (channel === 'hue' && color.space === 'hsb') {
+  if (channel === 'hue' && color.space !== 'oklch') {
+    const hue = convertColor(color, 'hsv').coords[0] ?? 0
     return {
       track: `linear-gradient(${ALONG}, ${HUE_STOPS})`,
-      thumb: `hsl(${color.hsb.h} 100% 50%)`,
+      thumb: `hsl(${round(hue)} 100% 50%)`,
     }
   }
-  const { l, c, h } = toOklch(color)
-  if (channel === 'hue') {
-    // A grey has no hue to show, so the track keeps enough chroma to see each one.
-    const shown = Math.max(c, 0.1)
-    return {
-      track: `linear-gradient(${ALONG} in oklch, ${oklchHueStops(l, shown)})`,
-      thumb: `oklch(${l} ${shown} ${h})`,
+  if (color.space === 'oklch') {
+    const [l = 0, c = 0, h = 0] = color.coords.map((n) => round(n ?? 0))
+    if (channel === 'hue') {
+      const shown = Math.max(c, 0.1)
+      return {
+        track: `linear-gradient(${ALONG} in oklch, ${oklchHueStops(l, shown)})`,
+        thumb: `oklch(${l} ${shown} ${h})`,
+      }
+    }
+    if (channel === 'lightness') {
+      return {
+        track: `linear-gradient(${ALONG} in oklch, oklch(0 ${c} ${h}), oklch(0.5 ${c} ${h}), oklch(1 ${c} ${h}))`,
+        thumb: solid,
+      }
+    }
+    if (channel === 'chroma') {
+      return {
+        track: `linear-gradient(${ALONG} in oklch, oklch(${l} 0 ${h}), oklch(${l} ${MAX_CHROMA} ${h}))`,
+        thumb: solid,
+      }
     }
   }
-  if (channel === 'lightness') {
-    return {
-      track: `linear-gradient(${ALONG} in oklch, oklch(0 ${c} ${h}), oklch(0.5 ${c} ${h}), oklch(1 ${c} ${h}))`,
-      thumb: solid,
-    }
-  }
-  return {
-    track: `linear-gradient(${ALONG} in oklch, oklch(${l} 0 ${h}), oklch(${l} ${MAX_CHROMA} ${h}))`,
-    thumb: solid,
-  }
+  return { track: 'var(--color-slider-background)', thumb: solid }
 }
 
-type ChannelSliderProps = Omit<
-  ComponentProps<typeof Slider<number>>,
-  'value' | 'defaultValue' | 'min' | 'max' | 'step' | 'format' | 'variant'
->
+/** Rounded to four places, so the server's arithmetic and the browser's write the same style. */
+const round = (n: number) => Math.round(n * 1e4) / 1e4
 
 /**
- * One channel as a Kino Slider, its track drawn in the colours it runs
- * through. Its children are a `SliderLabel` and `SliderValue`; without them,
- * the channel's name labels it.
+ * One channel of the colour, such as `hue` or `alpha`, on a track drawn in
+ * the colours it runs through. Without children it holds its thumb.
  */
-function ChannelSlider({
+function ColorPickerSlider({
   channel,
+  className,
   style,
   children,
-  'aria-label': ariaLabel,
-  getAriaValueText,
-  onValueChange,
-  onValueCommit,
-  disabled,
   ...props
-}: ChannelSliderProps & { channel: Channel }) {
-  const { color, format, change, commit, disabled: pickerDisabled } = useColorPicker()
-  const spec = CHANNELS[channel]
-  const paint = channelPaint(color, channel)
+}: Omit<
+  ComponentProps<typeof ColorPickerSliderPrimitive>,
+  'className' | 'style' | 'orientation' | 'children'
+> & {
+  className?: string
+  style?: CSSProperties
+  /** The thumb; without one it holds its own. */
+  children?: ReactNode
+}) {
+  const { state } = useColorPicker()
+  const shown = channel ?? (state.space === 'srgb' ? 'blue' : 'hue')
+  const paint = channelPaint(state.color, shown)
   return (
-    <Slider
-      variant='channel'
-      value={channelValue(color, channel)}
-      min={spec.min}
-      max={spec.max}
-      step={spec.step}
-      format={spec.format}
-      disabled={disabled ?? pickerDisabled}
-      aria-label={children ? undefined : (ariaLabel ?? spec.label)}
-      getAriaValueText={
-        getAriaValueText ?? ((formatted) => `${formatted}, ${colorName(color)}`)
-      }
-      onValueChange={(next, details) => {
-        change(withChannel(color, channel, next))
-        onValueChange?.(next, details)
-      }}
-      onValueCommit={(next, details) => {
-        commit(writeColor(withChannel(color, channel, next), format))
-        onValueCommit?.(next, details)
-      }}
-      style={(state) =>
-        ({
-          '--slider-track': paint.track,
-          '--slider-thumb': paint.thumb,
-          ...(typeof style === 'function' ? style(state) : style),
-        }) as CSSProperties
-      }
-      {...props}
-    >
-      {children}
-    </Slider>
+    <SliderChannelContext value={shown}>
+      <ColorPickerSliderPrimitive
+        channel={channel}
+        style={
+          {
+            '--slider-track': paint.track,
+            '--slider-thumb': paint.thumb,
+            ...style,
+          } as CSSProperties
+        }
+        className={cn(
+          'group/channel flex h-(--control-height-xs) w-full shrink-0 items-center select-none data-disabled:pointer-events-none data-disabled:opacity-50',
+          className,
+        )}
+        {...props}
+      >
+        {/* A channel's track is its colours, which forced colours must keep. */}
+        <span
+          aria-hidden
+          className='h-3 w-full rounded-full [background:var(--slider-track)] shadow-[inset_0_0_0_1px_var(--border)] forced-color-adjust-none'
+        />
+        {children ?? <ColorPickerSliderThumb />}
+      </ColorPickerSliderPrimitive>
+    </SliderChannelContext>
   )
 }
 
-/** Hue, in the picker's space: HSB's hue round the colour wheel, or OKLCH's. */
-function ColorPickerHue(props: ChannelSliderProps) {
-  return <ChannelSlider channel='hue' {...props} />
-}
-
-function ColorPickerAlpha(props: ChannelSliderProps) {
-  return <ChannelSlider channel='alpha' {...props} />
-}
-
-/** OKLCH lightness, so two colours at the same value look as light. */
-function ColorPickerLightness(props: ChannelSliderProps) {
-  return <ChannelSlider channel='lightness' {...props} />
-}
-
-/** OKLCH chroma, up to a little past the most vivid colour an sRGB screen shows. */
-function ColorPickerChroma(props: ChannelSliderProps) {
-  return <ChannelSlider channel='chroma' {...props} />
+/**
+ * The slider's thumb. It spans the track and moves its dot by `translate`,
+ * from ui-sdk's `--color-slider-thumb-position`, so it glides on the
+ * compositor. The alpha channel is called Opacity.
+ */
+function ColorPickerSliderThumb({
+  className,
+  ...props
+}: Omit<
+  ComponentProps<typeof ColorPickerSliderThumbPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+}) {
+  const channel = use(SliderChannelContext)
+  return (
+    <ColorPickerSliderThumbPrimitive
+      aria-label={channel === 'alpha' ? 'Opacity' : undefined}
+      className={cn(
+        // ui-sdk places it with an inset, which motion.md won't let us animate: it spans the track instead.
+        'group/thumb pointer-events-none absolute inset-y-0! start-0! end-0! [translate:calc(var(--track-dir)*var(--color-slider-thumb-position))_0] focus-visible:outline-hidden',
+        thumbMoveClassName,
+        className,
+      )}
+      {...props}
+    >
+      <ThumbDot
+        className='top-1/2'
+        held='motion-safe:group-active/channel:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_3)] group-active/channel:duration-[calc(var(--motion-press-duration)*0.4)]'
+      />
+    </ColorPickerSliderThumbPrimitive>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -594,19 +543,11 @@ function ColorPickerChroma(props: ChannelSliderProps) {
  * shows.
  */
 function ColorPickerPreview({ className, ...props }: ComponentProps<'div'>) {
-  const { color } = useColorPicker()
-  const outside = !inSrgb(oklchToRgb(toOklch(color)))
+  const { state } = useColorPicker()
+  const outside = !isInGamut(state.color, 'srgb')
   return (
-    <div
-      data-slot='color-picker-preview'
-      className={cn('flex flex-col gap-1.5', className)}
-      {...props}
-    >
-      <div
-        aria-hidden
-        style={{ background: swatchBackground(cssColor(color)) }}
-        className='h-14 w-full rounded-(--control-radius-capped) inset-ring inset-ring-foreground/10 forced-color-adjust-none'
-      />
+    <div className={cn('flex flex-col gap-1.5', className)} {...props}>
+      <ColorPickerSwatch className='h-14 w-full rounded-(--control-radius-capped)' />
       <p
         className={cn(
           'text-muted-foreground text-xs transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing)',
@@ -626,90 +567,67 @@ function ColorPickerPreview({ className, ...props }: ComponentProps<'div'>) {
 // ---------------------------------------------------------------------------
 // Typing a colour
 
-/** What was typed, and the value it was typed over. */
-interface Draft {
-  text: string
-  over: string
-  invalid: boolean
-}
+/** The text the colour's inputs share: written left to right in any language, at the start right to left. */
+const colorTextClassName = cn(
+  inputControlClassName,
+  inputGroupBesideStart,
+  'tabular-nums rtl:text-right',
+)
 
 /**
- * The colour as text, with its swatch at the start. What's typed is read on
- * Enter or when focus leaves; Escape puts the colour back. Something that
- * isn't a colour stays as typed and is marked invalid. A colour's name, such
- * as `rebeccapurple`, is read by the browser.
+ * The colour as text, with its swatch at the start. ui-sdk reads what's
+ * typed on Enter or when focus leaves, puts back the colour on Escape, and
+ * puts it back too for text that isn't a colour. A colour's name, such as
+ * `rebeccapurple`, reads too.
  */
 function ColorPickerInput({
   className,
   children,
   'aria-label': ariaLabel = 'Colour',
-  disabled,
-  onChange,
-  onBlur,
-  onKeyDown,
   ...props
-}: Omit<
-  ComponentProps<typeof InputGroupInput>,
-  'value' | 'defaultValue' | 'children' | 'type'
-> & {
+}: Omit<ComponentProps<typeof ColorPickerInputPrimitive>, 'className' | 'children'> & {
+  className?: string
   /** Buttons at the end of the box, such as `ColorPickerEyeDropper`. */
   children?: ReactNode
 }) {
-  const { color, value, pick, disabled: pickerDisabled } = useColorPicker()
-  const [typed, setTyped] = useState<Draft | null>(null)
-  // Once the colour changes another way, what was typed gives way to it.
-  if (typed && typed.over !== value) setTyped(null)
-  const draft = typed?.over === value ? typed : null
-
-  const apply = () => {
-    if (!draft) return
-    const parsed = readColor(draft.text)
-    if (!parsed) {
-      setTyped({ ...draft, invalid: true })
-      return
-    }
-    pick(parsed)
-    setTyped(null)
-  }
-
   return (
     <InputGroup data-color-picker-input='' className={cn('w-full', className)}>
       <InputGroupAddon>
-        <ColorPickerSwatch color={cssColor(color)} />
+        <ColorPickerSwatch aria-hidden />
       </InputGroupAddon>
-      <InputGroupInput
+      <ColorPickerInputPrimitive
         aria-label={ariaLabel}
-        aria-invalid={draft?.invalid || undefined}
-        spellCheck={false}
-        autoComplete='off'
-        autoCapitalize='off'
-        // A colour is written left to right in any language; right to left it still sits at the start.
         dir='ltr'
-        className='tabular-nums rtl:text-right'
+        className={colorTextClassName}
         {...props}
-        value={draft?.text ?? value}
-        disabled={disabled ?? pickerDisabled}
-        onChange={(event) => {
-          onChange?.(event)
-          setTyped({ text: event.target.value, over: value, invalid: false })
-        }}
-        onBlur={(event) => {
-          onBlur?.(event)
-          apply()
-        }}
-        onKeyDown={(event) => {
-          onKeyDown?.(event)
-          if (event.defaultPrevented) return
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            apply()
-          } else if (event.key === 'Escape' && draft) {
-            // Only puts the colour back; a second Escape closes what the picker sits in.
-            event.preventDefault()
-            event.stopPropagation()
-            setTyped(null)
-          }
-        }}
+      />
+      {children}
+    </InputGroup>
+  )
+}
+
+/**
+ * One channel as a number, in the units people read it in: 0 to 100 for
+ * lightness and opacity, degrees for hue. Its children sit at the end of the
+ * box, such as the unit.
+ */
+function ColorPickerChannelInput({
+  className,
+  children,
+  ...props
+}: Omit<
+  ComponentProps<typeof ColorPickerChannelInputPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+  children?: ReactNode
+}) {
+  return (
+    <InputGroup className={cn('h-(--control-height-sm) w-24 shrink-0', className)}>
+      <ColorPickerChannelInputPrimitive
+        dir='ltr'
+        className={cn(colorTextClassName, 'h-full text-end rtl:text-left')}
+        {...props}
       />
       {children}
     </InputGroup>
@@ -718,7 +636,7 @@ function ColorPickerInput({
 
 const FORMATS: { value: ColorFormat; label: string }[] = [
   { value: 'hex', label: 'Hex' },
-  { value: 'rgb', label: 'RGB' },
+  { value: 'srgb', label: 'RGB' },
   { value: 'hsl', label: 'HSL' },
   { value: 'oklch', label: 'OKLCH' },
 ]
@@ -729,12 +647,12 @@ function ColorPickerFormat({
   disabled,
   ...props
 }: ComponentProps<typeof SelectTrigger>) {
-  const { format, setFormat, disabled: pickerDisabled } = useColorPicker()
+  const { state, format, setFormat } = useColorPicker()
   return (
     <Select
       items={FORMATS}
       value={format}
-      disabled={disabled ?? pickerDisabled}
+      disabled={disabled ?? state.disabled}
       onValueChange={(next) => {
         if (next) setFormat(next)
       }}
@@ -757,10 +675,6 @@ function ColorPickerFormat({
   )
 }
 
-interface EyeDropperApi {
-  new (): { open: () => Promise<{ sRGBHex: string }> }
-}
-
 const noSubscribe = () => () => {}
 
 /**
@@ -769,11 +683,9 @@ const noSubscribe = () => () => {}
  * isn't drawn at all.
  */
 function ColorPickerEyeDropper({
-  disabled,
-  onClick,
+  'aria-label': ariaLabel = 'Pick a colour from the screen',
   ...props
 }: Omit<ComponentProps<typeof InputGroupButton>, 'children'>) {
-  const { pick, disabled: pickerDisabled } = useColorPicker()
   const supported = useSyncExternalStore(
     noSubscribe,
     () => 'EyeDropper' in window,
@@ -782,25 +694,8 @@ function ColorPickerEyeDropper({
   if (!supported) return null
   return (
     <InputGroupAddon align='inline-end'>
-      <InputGroupButton
-        size='icon-xs'
-        aria-label='Pick a colour from the screen'
-        {...props}
-        disabled={disabled ?? pickerDisabled}
-        onClick={(event, details) => {
-          onClick?.(event, details)
-          if (event.defaultPrevented) return
-          const EyeDropper = (window as unknown as { EyeDropper: EyeDropperApi })
-            .EyeDropper
-          new EyeDropper()
-            .open()
-            .then(({ sRGBHex }) => {
-              const parsed = parseColor(sRGBHex)
-              if (parsed) pick(parsed)
-            })
-            // Escape, or a click away, cancels it: nothing changes.
-            .catch(() => {})
-        }}
+      <ColorPickerEyeDropperPrimitive
+        render={<InputGroupButton size='icon-xs' aria-label={ariaLabel} {...props} />}
       >
         <IconPlaceholder
           lucide='PipetteIcon'
@@ -810,171 +705,104 @@ function ColorPickerEyeDropper({
           remixicon='RiSipLine'
           aria-hidden
         />
-      </InputGroupButton>
+      </ColorPickerEyeDropperPrimitive>
     </InputGroupAddon>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Presets
+// Swatches
 
 /** A preset colour and its name. */
 interface ColorPreset {
-  /** A CSS colour: hex, `rgb()`, `hsl()` or `oklch()`. */
+  /** Any CSS colour. */
   value: string
-  /** Its name, for screen readers; without one it's described in words, such as "dark blue". */
+  /** Its name, for screen readers; without one ui-sdk describes it, such as "dark blue". */
   label?: string
 }
 
-const presetsClassName =
+const swatchesClassName =
   'grid grid-cols-[repeat(auto-fill,var(--control-height-xs))] justify-between gap-2'
 
-/** The ring a checked swatch takes, 2px out from it, and the press it shares with a Radio. */
-const presetClassName = cn(
-  'group/preset relative inline-grid size-(--control-height-xs) shrink-0 place-items-center rounded-(--control-radius-xs) *:col-start-1 *:row-start-1 inset-ring inset-ring-foreground/10 forced-color-adjust-none',
+/** The ring a picked swatch takes, 2px out from it, and the press it shares with a Radio. */
+const swatchItemClassName = cn(
+  'group/swatch relative inline-grid size-(--control-height-xs) shrink-0 place-items-center rounded-(--control-radius-xs) *:col-start-1 *:row-start-1',
   'transition-[scale] duration-(--motion-press-duration) ease-(--motion-press-easing) active:duration-[calc(var(--motion-press-duration)*0.4)] data-pressing:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:active:scale-(--motion-press-scale) motion-safe:data-pressing:scale-(--motion-press-scale)',
-  // Focus draws outside the checked ring, so the swatch picked and focused still shows it.
+  // Focus draws outside the picked ring, so the swatch picked and focused still shows it.
   'focus-visible:outline-ring focus-visible:outline-2 focus-visible:outline-offset-4 forced-colors:focus-visible:outline-[Highlight]',
   // The ring sits 2px out, 2px thick: its corner is the swatch's plus 4px (arbitrary, to follow it).
-  'after:border-foreground after:pointer-events-none after:absolute after:-inset-1 after:rounded-[calc(var(--control-radius-xs)+4px)] after:border-2 after:opacity-0 after:transition-[opacity,scale] after:duration-(--motion-press-duration) after:ease-(--motion-press-easing) motion-safe:after:scale-90 data-checked:after:opacity-100 motion-safe:data-checked:after:scale-100',
+  'after:border-foreground after:pointer-events-none after:absolute after:-inset-1 after:rounded-[calc(var(--control-radius-xs)+4px)] after:border-2 after:opacity-0 after:transition-[opacity,scale] after:duration-(--motion-press-duration) after:ease-(--motion-press-easing) motion-safe:after:scale-90 data-[selected]:after:opacity-100 motion-safe:data-[selected]:after:scale-100 aria-pressed:after:opacity-100 motion-safe:aria-pressed:after:scale-100',
   'data-disabled:pointer-events-none data-disabled:opacity-50',
 )
 
+/** A swatch's tick: in, while it's the colour. */
 const tickClassName =
-  'size-3.5 opacity-0 transition-[opacity,scale] duration-(--motion-press-duration) ease-(--motion-press-easing) motion-safe:scale-50 group-data-checked/preset:opacity-100 motion-safe:group-data-checked/preset:scale-100'
+  'size-3.5 opacity-0 transition-[opacity,scale] duration-(--motion-press-duration) ease-(--motion-press-easing) motion-safe:scale-50 group-data-[selected]/swatch:opacity-100 motion-safe:group-data-[selected]/swatch:scale-100 group-aria-pressed/swatch:opacity-100 motion-safe:group-aria-pressed/swatch:scale-100'
+
+function Tick({ light }: { light: boolean }) {
+  return (
+    <IconPlaceholder
+      lucide='CheckIcon'
+      tabler='IconCheck'
+      hugeicons='Tick02Icon'
+      phosphor='CheckIcon'
+      remixicon='RiCheckLine'
+      aria-hidden
+      strokeWidth={3}
+      className={cn(tickClassName, light ? 'text-white' : 'text-black')}
+    />
+  )
+}
 
 /**
- * One preset colour, a radio inside `ColorPickerPresets`. It's checked while
- * the colour, as the picker writes it, is this one.
+ * A row of preset colours, a list that's one stop in the tab order: the
+ * arrow keys move between them, and Enter, Space or a press picks one. The
+ * one that is the colour is picked; while the colour is one of its own, none is.
  */
-function ColorPickerPreset({
-  value,
-  label,
+function ColorPickerSwatches({
+  className,
+  'aria-label': ariaLabel = 'Presets',
   ...props
-}: Omit<PresetRadioProps, 'value' | 'shown' | 'label'> & ColorPreset) {
-  const { color, format } = useColorPicker()
+}: Omit<ComponentProps<typeof ColorPickerSwatchesPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <PresetRadio
-      value={presetValue(value, color.space, format) ?? value}
-      shown={parseColor(value)}
-      label={label}
+    <ColorPickerSwatchesPrimitive
+      aria-label={ariaLabel}
+      className={cn(swatchesClassName, className)}
       {...props}
     />
   )
 }
 
-type PresetRadioProps = Omit<RadioPrimitive.Root.Props, 'value' | 'className'> & {
-  value: string
-  shown: Color | null
-  label: string | undefined
-  className?: string
-}
-
-/**
- * One swatch of a preset row, a radio. It shows `shown` (or nothing when
- * that's `null`), and its children are a mark shown while it isn't checked,
- * in the tick's place.
- */
-function PresetRadio({
+/** One preset colour, inside `ColorPickerSwatches`: picked while it's the colour. */
+function ColorPickerSwatchItem({
   value,
-  shown,
   label,
   className,
-  style,
-  children,
   onKeyDown,
   onKeyUp,
   onBlur,
   ...props
-}: PresetRadioProps) {
+}: Omit<ComponentProps<typeof ColorPickerSwatchItemPrimitive>, 'className' | 'children'> &
+  ColorPreset & { className?: string }) {
   return (
-    <RadioPrimitive.Root
-      data-slot='color-picker-preset'
-      aria-label={label ?? (shown ? colorName(shown) : undefined)}
-      className={cn(presetClassName, className)}
-      style={(state) => ({
-        background: shown ? swatchBackground(cssColor(shown)) : undefined,
-        ...(typeof style === 'function' ? style(state) : style),
-      })}
+    <ColorPickerSwatchItemPrimitive
+      value={value}
+      aria-label={label}
+      className={cn(swatchItemClassName, swatchFillClassName, className)}
       {...choicePressHandlers({ onKeyDown, onKeyUp, onBlur })}
       {...props}
-      value={value}
     >
-      {children}
-      <IconPlaceholder
-        lucide='CheckIcon'
-        tabler='IconCheck'
-        hugeicons='Tick02Icon'
-        phosphor='CheckIcon'
-        remixicon='RiCheckLine'
-        aria-hidden
-        strokeWidth={3}
-        className={cn(
-          tickClassName,
-          !shown || prefersLightMark(shown) ? 'text-white' : 'text-black',
-        )}
-      />
-    </RadioPrimitive.Root>
+      <Tick light={prefersLightMark(value)} />
+    </ColorPickerSwatchItemPrimitive>
   )
 }
 
-type PresetsProps = Omit<
-  RadioGroupPrimitive.Props,
-  'className' | 'value' | 'defaultValue' | 'onValueChange' | 'children'
-> & {
-  className?: string
-}
-
 /**
- * A row of preset colours, one stop in the tab order, picked with the arrow
- * keys as radios are. The preset that matches the colour, as the picker
- * writes it, is checked; while the colour is one of its own, none is.
- */
-function ColorPickerPresets({
-  presets,
-  children,
-  className,
-  'aria-label': ariaLabel = 'Presets',
-  disabled,
-  ...props
-}: PresetsProps &
-  (
-    | {
-        /** The colours, a `ColorPickerPreset` each. */ presets: readonly ColorPreset[]
-        children?: never
-      }
-    | {
-        presets?: never
-        /** `ColorPickerPreset`s, to compose them yourself. */ children: ReactNode
-      }
-  )) {
-  const { value, pick, disabled: pickerDisabled } = useColorPicker()
-  return (
-    <RadioGroupPrimitive
-      data-slot='color-picker-presets'
-      aria-label={ariaLabel}
-      disabled={disabled ?? pickerDisabled}
-      className={cn(presetsClassName, className)}
-      {...props}
-      value={value}
-      onValueChange={(next) => {
-        const parsed = typeof next === 'string' ? parseColor(next) : null
-        if (parsed) pick(parsed)
-      }}
-    >
-      {presets
-        ? presets.map((preset) => <ColorPickerPreset key={preset.value} {...preset} />)
-        : children}
-    </RadioGroupPrimitive>
-  )
-}
-
-const CUSTOM = 'custom'
-
-/**
- * Presets first: the presets and a Custom swatch after them. Picking Custom
- * opens the children, the controls for a colour of your own, under the row
- * on `layout`; they stay open while the colour is your own, even when a drag
+ * Presets first: the presets and a Custom swatch after them. Custom opens
+ * the children, the controls for a colour of your own, under the row on
+ * `layout`; they stay open while the colour is your own, even when a drag
  * passes over a preset's colour. Your own colour is kept while a preset is
  * tried, and Custom puts it back.
  */
@@ -982,59 +810,74 @@ function ColorPickerPalette({
   presets,
   className,
   'aria-label': ariaLabel = 'Presets',
-  disabled,
   children,
-  ...props
-}: PresetsProps & {
+}: {
   /** The colours before Custom; the Palette needs them all to know when the colour is your own. */
   presets: readonly ColorPreset[]
   /** The controls for a colour of your own, such as an area, a hue and an input. */
   children: ReactNode
+  className?: string
+  'aria-label'?: string
 }) {
-  const { color, value, format, pick, disabled: pickerDisabled } = useColorPicker()
-  const presetValues = presets.map(
-    (preset) => presetValue(preset.value, color.space, format) ?? preset.value,
-  )
+  const { state, choose, listen } = useColorPicker()
+  const values = presets.map((preset) => preset.value)
   const [palette, setPalette] = useState<PaletteState>({ mode: 'preset', own: null })
-  const custom = paletteShowsCustom(palette, value, presetValues)
+  const custom = paletteShowsCustom(palette, state.value, values)
+
+  // A preset picked from the row keeps the colour you had, if it was your own, for Custom.
+  const latest = useRef({ palette, value: state.value, values })
+  useLayoutEffect(() => {
+    latest.current = { palette, value: state.value, values }
+  })
+  useLayoutEffect(
+    () =>
+      listen((_next, details) => {
+        if (details.reason !== 'item-press') return
+        const { palette: was, value, values: shown } = latest.current
+        setPalette(paletteStep(was, 'preset', value, shown))
+      }),
+    [listen],
+  )
 
   return (
-    <Collapsible open={custom} className={className}>
-      <RadioGroupPrimitive
-        data-slot='color-picker-presets'
-        aria-label={ariaLabel}
-        disabled={disabled ?? pickerDisabled}
-        className={presetsClassName}
-        {...props}
-        value={custom ? CUSTOM : value}
-        onValueChange={(next) => {
-          if (typeof next !== 'string') return
-          const toCustom = next === CUSTOM
-          setPalette(
-            paletteStep(palette, toCustom ? 'custom' : 'preset', value, presetValues),
-          )
-          // Custom puts your own colour back, if a preset was tried since.
-          const parsed = parseColor(toCustom ? (palette.own ?? '') : next)
-          if (parsed) pick(parsed)
-        }}
-      >
-        {presets.map((preset, index) => (
-          <PresetRadio
-            key={preset.value}
-            value={presetValues[index]}
-            shown={parseColor(preset.value)}
-            label={preset.label}
-          />
-        ))}
-        <PresetRadio
-          value={CUSTOM}
-          shown={custom ? color : null}
-          label='Custom colour'
-          style={
-            custom
-              ? undefined
-              : { background: `conic-gradient(from 90deg, ${HUE_STOPS})` }
-          }
+    <Collapsible
+      open={custom}
+      aria-label='Custom colour controls'
+      // Custom and the presets open and close it, so an agent can't either.
+      disabled
+      className={className}
+    >
+      <div className={swatchesClassName}>
+        {/* The row is one grid with Custom, which isn't a preset and so isn't in the list. */}
+        <ColorPickerSwatches aria-label={ariaLabel} className='contents'>
+          {presets.map((preset) => (
+            <ColorPickerSwatchItem key={preset.value} {...preset} />
+          ))}
+        </ColorPickerSwatches>
+        {/* Custom is picked, not opened: a preset unpicks it, so pressing it again does nothing. */}
+        <TogglePrimitive
+          aria-label='Custom colour'
+          pressed={custom}
+          onPressedChange={(pressed, details) => {
+            if (!pressed) return details.cancel()
+            // Custom puts your own colour back, if a preset was tried since. Before Custom's own
+            // step, which the step that change makes as a preset would otherwise overwrite.
+            if (palette.own !== null && palette.own !== state.value) {
+              choose(palette.own, details)
+            }
+            setPalette(paletteStep(palette, 'custom', state.value, values))
+          }}
+          disabled={state.disabled}
+          style={{
+            background: custom
+              ? swatchBackground('var(--color-picker-color)')
+              : `conic-gradient(from 90deg, ${HUE_STOPS})`,
+          }}
+          className={cn(
+            swatchItemClassName,
+            'inset-ring inset-ring-foreground/10 forced-color-adjust-none',
+          )}
+          {...choicePressHandlers({})}
         >
           <IconPlaceholder
             lucide='PlusIcon'
@@ -1044,10 +887,11 @@ function ColorPickerPalette({
             remixicon='RiAddLine'
             aria-hidden
             strokeWidth={3}
-            className='size-3.5 text-white drop-shadow-[0_1px_1px_rgb(0_0_0/0.4)] transition-[opacity,scale] duration-(--motion-press-duration) ease-(--motion-press-easing) group-data-checked/preset:opacity-0 motion-safe:group-data-checked/preset:scale-50'
+            className='size-3.5 text-white drop-shadow-[0_1px_1px_rgb(0_0_0/0.4)] transition-[opacity,scale] duration-(--motion-press-duration) ease-(--motion-press-easing) group-aria-pressed/swatch:opacity-0 motion-safe:group-aria-pressed/swatch:scale-50'
           />
-        </PresetRadio>
-      </RadioGroupPrimitive>
+          <Tick light={prefersLightMark(state.value)} />
+        </TogglePrimitive>
+      </div>
       {/* The room above and below keeps the area's thumb and the focus rings clear of the panel's clip. */}
       <CollapsiblePanel className='flex flex-col gap-(--surface-gap) ps-0 pe-0 pt-(--surface-gap) pb-1'>
         {children}
@@ -1071,488 +915,47 @@ function paletteStep(
   state: PaletteState,
   picked: 'preset' | 'custom',
   value: string,
-  presetValues: readonly string[],
+  presets: readonly string[],
 ): PaletteState {
   if (picked === 'custom') return { ...state, mode: 'custom' }
   return {
     mode: 'preset',
-    own: paletteShowsCustom(state, value, presetValues) ? value : state.own,
+    own: paletteShowsCustom(state, value, presets) ? value : state.own,
   }
 }
 
-/** Whether Custom is checked and its controls open: picked, or the colour is no preset. */
+/**
+ * A colour given to the picker, written in its format, as the field shows
+ * it: ui-sdk keeps a value as it is given until it changes. A colour the
+ * format can't hold, such as one past sRGB in hex, stays as it is, since
+ * ui-sdk reads the colour from the value and would clip it. So does text
+ * that isn't a colour.
+ */
+function inFormat(value: string, format: ColorFormat) {
+  const color = parseColor(value)
+  if (!color) return value
+  if (format !== 'oklch' && !isInGamut(color, 'srgb')) return value
+  return formatColor(color, format)
+}
+
+/** Whether Custom is picked and its controls open: picked, or the colour is no preset. */
 function paletteShowsCustom(
   state: PaletteState,
   value: string,
-  presetValues: readonly string[],
+  presets: readonly string[],
 ) {
-  return state.mode === 'custom' || !presetValues.includes(value)
-}
-
-// ---------------------------------------------------------------------------
-// Colour arithmetic. Channels are 0 to 1, hue in degrees from 0 to 360, alpha 0 to 1.
-
-const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value))
-
-/** A hue brought into 0 to 360. */
-function wrapHue(hue: number) {
-  const wrapped = hue % 360
-  return wrapped < 0 ? wrapped + 360 : wrapped
+  return state.mode === 'custom' || !presets.some((preset) => sameColor(preset, value))
 }
 
 /**
- * Rounded to six places: far finer than a screen shows, and coarse enough
- * that the server's arithmetic and the browser's agree when the page hydrates.
+ * Whether two CSS colours look the same, as ui-sdk matches a swatch to the
+ * colour: a preset written in another format, or rounded, still matches.
  */
-const round6 = (n: number) => Math.round(n * 1e6) / 1e6
-
-function hsbToRgb({ h, s, b }: Hsb): Rgb {
-  const channel = (n: number) => {
-    const k = (n + h / 60) % 6
-    return b - b * s * Math.max(0, Math.min(k, 4 - k, 1))
-  }
-  return { r: channel(5), g: channel(3), b: channel(1) }
-}
-
-/** `hue` is kept when the colour has none of its own: a grey, black or white. */
-function rgbToHsb({ r, g, b }: Rgb, hue = 0): Hsb {
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  const range = max - min
-  let h = hue
-  if (range > 1e-6) {
-    if (max === r) h = 60 * (((g - b) / range + 6) % 6)
-    else if (max === g) h = 60 * ((b - r) / range + 2)
-    else h = 60 * ((r - g) / range + 4)
-  }
-  return { h: wrapHue(h), s: max === 0 ? 0 : range / max, b: max }
-}
-
-/** HSL's saturation and lightness, from HSB's. */
-function hsbToHsl({ h, s, b }: Hsb) {
-  const l = b * (1 - s / 2)
-  const sl = l === 0 || l === 1 ? 0 : (b - l) / Math.min(l, 1 - l)
-  return { h, s: sl, l }
-}
-
-function hslToHsb(h: number, s: number, l: number): Hsb {
-  const b = l + s * Math.min(l, 1 - l)
-  return { h: wrapHue(h), s: b === 0 ? 0 : 2 * (1 - l / b), b }
-}
-
-const toLinear = (c: number) =>
-  Math.abs(c) <= 0.04045
-    ? c / 12.92
-    : Math.sign(c) * ((Math.abs(c) + 0.055) / 1.055) ** 2.4
-const fromLinear = (c: number) =>
-  Math.abs(c) <= 0.0031308
-    ? c * 12.92
-    : Math.sign(c) * (1.055 * Math.abs(c) ** (1 / 2.4) - 0.055)
-
-/** `hue` is kept when the colour has none of its own. */
-function rgbToOklch(rgb: Rgb, hue = 0): Oklch {
-  const r = toLinear(rgb.r)
-  const g = toLinear(rgb.g)
-  const b = toLinear(rgb.b)
-  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
-  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
-  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
-  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s
-  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s
-  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
-  const c = Math.hypot(A, B)
-  return {
-    l: L,
-    c: c < 1e-4 ? 0 : c,
-    h: c < 1e-4 ? hue : wrapHue((Math.atan2(B, A) * 180) / Math.PI),
-  }
-}
-
-/** The sRGB colour, which falls outside 0 to 1 when OKLCH asks for more chroma than sRGB has. */
-function oklchToRgb({ l, c, h }: Oklch): Rgb {
-  const angle = (h * Math.PI) / 180
-  const A = c * Math.cos(angle)
-  const B = c * Math.sin(angle)
-  const l3 = (l + 0.3963377774 * A + 0.2158037573 * B) ** 3
-  const m3 = (l - 0.1055613458 * A - 0.0638541728 * B) ** 3
-  const s3 = (l - 0.0894841775 * A - 1.291485548 * B) ** 3
-  return {
-    r: fromLinear(4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3),
-    g: fromLinear(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3),
-    b: fromLinear(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3),
-  }
-}
-
-/** Whether sRGB can show the colour, give or take a rounding error. */
-function inSrgb({ r, g, b }: Rgb) {
-  return [r, g, b].every((c) => c >= -0.0005 && c <= 1.0005)
-}
-
-const clipRgb = ({ r, g, b }: Rgb): Rgb => ({ r: clamp(r), g: clamp(g), b: clamp(b) })
-
-/**
- * The colour sRGB shows for `color`: the same lightness and hue with as much
- * of its chroma as sRGB holds, as CSS Color 4 maps a colour into a gamut.
- */
-function oklchToSrgb(color: Oklch): Rgb {
-  const exact = oklchToRgb(color)
-  if (inSrgb(exact)) return clipRgb(exact)
-  let low = 0
-  let high = color.c
-  while (high - low > 1e-4) {
-    const mid = (low + high) / 2
-    if (inSrgb(oklchToRgb({ ...color, c: mid }))) low = mid
-    else high = mid
-  }
-  return clipRgb(oklchToRgb({ ...color, c: low }))
-}
-
-/** The colour in HSB, keeping `hue` for one that has none. */
-function toHsb(color: Color, hue = 0): Hsb {
-  switch (color.space) {
-    case 'hsb':
-      return color.hsb
-    case 'rgb':
-      return rgbToHsb(color.rgb, hue)
-    case 'oklch':
-      return rgbToHsb(oklchToSrgb(color.oklch), hue)
-  }
-}
-
-/** The colour in OKLCH, keeping `hue` for one that has none. */
-function toOklch(color: Color, hue = 0): Oklch {
-  switch (color.space) {
-    case 'oklch':
-      return color.oklch
-    case 'rgb':
-      return rgbToOklch(color.rgb, hue)
-    case 'hsb':
-      return color.oklch ?? rgbToOklch(hsbToRgb(color.hsb), hue)
-  }
-}
-
-/** The colour sRGB shows for it. */
-function toRgb(color: Color): Rgb {
-  switch (color.space) {
-    case 'rgb':
-      return color.rgb
-    case 'hsb':
-      return hsbToRgb(color.hsb)
-    case 'oklch':
-      return oklchToSrgb(color.oklch)
-  }
-}
-
-const roundOklch = ({ l, c, h }: Oklch): Oklch => ({
-  l: round6(l),
-  c: round6(c),
-  h: round6(h),
-})
-
-/**
- * `color` in `space`, keeping `previous`'s hue for a colour that has none.
- * An OKLCH colour taken into HSB keeps its OKLCH, so it's written back as it was.
- */
-function inSpace(color: Color, space: ColorSpace, previous?: EditColor): EditColor {
-  if (space === 'hsb') {
-    const { h, s, b } = toHsb(color, previous ? toHsb(previous).h : 0)
-    const oklch = color.space === 'rgb' ? undefined : color.oklch
-    return {
-      space,
-      hsb: { h: round6(h), s: round6(s), b: round6(b) },
-      alpha: color.alpha,
-      ...(oklch && { oklch: roundOklch(oklch) }),
-    }
-  }
-  return {
-    space,
-    oklch: roundOklch(toOklch(color, previous ? toOklch(previous).h : 0)),
-    alpha: color.alpha,
-  }
-}
-
-/** The colour with one channel set. Lightness and chroma are OKLCH's, in either space. */
-function channelValue(color: EditColor, channel: Channel) {
-  switch (channel) {
-    case 'alpha':
-      return color.alpha
-    case 'hue':
-      return color.space === 'hsb' ? color.hsb.h : color.oklch.h
-    case 'lightness':
-      return toOklch(color).l
-    case 'chroma':
-      return Math.min(MAX_CHROMA, toOklch(color).c)
-  }
-}
-
-/** The colour with one channel set. */
-function withChannel(color: EditColor, channel: Channel, value: number): EditColor {
-  if (channel === 'alpha') return { ...color, alpha: value }
-  if (channel === 'hue') {
-    return color.space === 'hsb'
-      ? { space: 'hsb', hsb: { ...color.hsb, h: value }, alpha: color.alpha }
-      : { ...color, oklch: { ...color.oklch, h: value } }
-  }
-  const oklch: Oklch = { ...toOklch(color), [channel === 'lightness' ? 'l' : 'c']: value }
-  return inSpace({ space: 'oklch', oklch, alpha: color.alpha }, color.space, color)
-}
-
-/** The colour to show: the one held, unless a `value` from outside says otherwise. */
-function shownColor(held: Held, value: string | undefined, space: ColorSpace): EditColor {
-  if (value === undefined || value === held.written) return held.color
-  const parsed = parseColor(value)
-  return parsed ? inSpace(parsed, space, held.color) : held.color
-}
-
-/** A preset as a picker in `space` writes it in `format`, so it matches the colour once picked; `null` for one that isn't a colour. */
-function presetValue(preset: string, space: ColorSpace, format: ColorFormat) {
-  const parsed = parseColor(preset)
-  return parsed ? writeColor(inSpace(parsed, space), format) : null
-}
-
-/** Where a pointer at `x`, `y` falls on an area, as saturation and brightness from 0 to 1. */
-function areaPoint(
-  rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
-  x: number,
-  y: number,
-  rtl: boolean,
-) {
-  const across = rect.width > 0 ? clamp((x - rect.left) / rect.width) : 0
-  const down = rect.height > 0 ? clamp((y - rect.top) / rect.height) : 0
-  return { s: rtl ? 1 - across : across, b: 1 - down }
-}
-
-/**
- * Where a key moves the area's thumb: the arrows by 1%, or 10% with Shift,
- * Page Up and Page Down 10% in brightness, Home and End to either end of
- * saturation. Left and right follow the screen, so right to left they're
- * reversed. `null` for a key the area doesn't take.
- */
-function areaKeyMove(
-  point: { s: number; b: number },
-  key: string,
-  shift: boolean,
-  rtl: boolean,
-): { s: number; b: number } | null {
-  const step = shift ? 0.1 : 0.01
-  const near = (n: number) => clamp(Math.round(n * 1000) / 1000)
-  const right = rtl ? -step : step
-  switch (key) {
-    case 'ArrowRight':
-      return { s: near(point.s + right), b: point.b }
-    case 'ArrowLeft':
-      return { s: near(point.s - right), b: point.b }
-    case 'ArrowUp':
-      return { s: point.s, b: near(point.b + step) }
-    case 'ArrowDown':
-      return { s: point.s, b: near(point.b - step) }
-    case 'PageUp':
-      return { s: point.s, b: near(point.b + 0.1) }
-    case 'PageDown':
-      return { s: point.s, b: near(point.b - 0.1) }
-    case 'Home':
-      return { s: 0, b: point.b }
-    case 'End':
-      return { s: 1, b: point.b }
-    default:
-      return null
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Reading CSS
-
-const NUMBER = String.raw`[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?`
-
-/** A number, or a percentage of `percentOf`; `null` when it isn't one. */
-function readNumber(token: string, percentOf: number): number | null {
-  const match = new RegExp(`^(${NUMBER})(%)?$`, 'i').exec(token)
-  if (!match) return token.toLowerCase() === 'none' ? 0 : null
-  const value = Number(match[1])
-  return match[2] ? (value / 100) * percentOf : value
-}
-
-/** An angle in degrees, from a bare number or deg, grad, rad or turn. */
-function readHue(token: string): number | null {
-  const match = new RegExp(`^(${NUMBER})(deg|grad|rad|turn)?$`, 'i').exec(token)
-  if (!match) return token.toLowerCase() === 'none' ? 0 : null
-  const value = Number(match[1])
-  const unit = match[2]?.toLowerCase()
-  const degrees =
-    unit === 'turn'
-      ? value * 360
-      : unit === 'rad'
-        ? (value * 180) / Math.PI
-        : unit === 'grad'
-          ? value * 0.9
-          : value
-  return wrapHue(degrees)
-}
-
-/** The function's arguments and its alpha, in modern or comma syntax. */
-function readArguments(body: string): { args: string[]; alpha: string | null } | null {
-  const trimmed = body.trim()
-  if (trimmed.includes(',')) {
-    const parts = trimmed.split(',').map((part) => part.trim())
-    if (parts.length !== 3 && parts.length !== 4) return null
-    return { args: parts.slice(0, 3), alpha: parts[3] ?? null }
-  }
-  const [main, alpha, ...rest] = trimmed.split('/').map((part) => part.trim())
-  if (rest.length > 0) return null
-  const args = main.split(/\s+/).filter(Boolean)
-  if (args.length !== 3) return null
-  return { args, alpha: alpha ?? null }
-}
-
-function readAlpha(token: string | null): number | null {
-  if (token === null) return 1
-  const value = readNumber(token, 1)
-  return value === null ? null : clamp(value)
-}
-
-function readHex(text: string): Color | null {
-  const match = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(text)
-  if (!match) return null
-  const digits =
-    match[1].length <= 4
-      ? match[1]
-          .split('')
-          .map((d) => d + d)
-          .join('')
-      : match[1]
-  const byteAt = (index: number) => Number.parseInt(digits.slice(index, index + 2), 16)
-  return {
-    space: 'rgb',
-    rgb: { r: byteAt(0) / 255, g: byteAt(2) / 255, b: byteAt(4) / 255 },
-    alpha: digits.length === 8 ? byteAt(6) / 255 : 1,
-  }
-}
-
-/**
- * Reads a hex colour, `rgb()`, `hsl()`, `oklch()`, `color(srgb …)` or
- * `transparent`, in the modern or the comma syntax. Returns `null` for
- * anything else, such as a colour's name, which only a browser reads.
- */
-function parseColor(input: string): Color | null {
-  const text = input.trim().toLowerCase()
-  if (text === 'transparent') return { ...BLACK, alpha: 0 }
-  if (text.startsWith('#')) return readHex(text)
-  const fn = /^([a-z]+)\((.*)\)$/.exec(text)
-  if (!fn) return null
-  const [, name, body] = fn
-  if (name === 'color') {
-    const [space, ...rest] = body.trim().split(/\s+/)
-    if (space !== 'srgb') return null
-    const parsed = readArguments(rest.join(' '))
-    if (!parsed) return null
-    const [r, g, b] = parsed.args.map((arg) => readNumber(arg, 1))
-    const alpha = readAlpha(parsed.alpha)
-    if (r === null || g === null || b === null || alpha === null) return null
-    return { space: 'rgb', rgb: clipRgb({ r, g, b }), alpha }
-  }
-  const parsed = readArguments(body)
-  if (!parsed) return null
-  const alpha = readAlpha(parsed.alpha)
-  if (alpha === null) return null
-  const [first, second, third] = parsed.args
-  switch (name) {
-    case 'rgb':
-    case 'rgba': {
-      const [r, g, b] = [first, second, third].map((arg) => readNumber(arg, 255))
-      if (r === null || g === null || b === null) return null
-      return { space: 'rgb', rgb: clipRgb({ r: r / 255, g: g / 255, b: b / 255 }), alpha }
-    }
-    case 'hsl':
-    case 'hsla': {
-      const h = readHue(first)
-      // Modern syntax allows bare numbers out of 100; percentages are the usual way.
-      const s = readNumber(second.endsWith('%') ? second : `${second}%`, 1)
-      const l = readNumber(third.endsWith('%') ? third : `${third}%`, 1)
-      if (h === null || s === null || l === null) return null
-      return { space: 'hsb', hsb: hslToHsb(h, clamp(s), clamp(l)), alpha }
-    }
-    case 'oklch': {
-      const l = readNumber(first, 1)
-      const c = readNumber(second, 0.4)
-      const h = readHue(third)
-      if (l === null || c === null || h === null) return null
-      return { space: 'oklch', oklch: { l: clamp(l), c: clamp(c, 0, 0.5), h }, alpha }
-    }
-    default:
-      return null
-  }
-}
-
-/**
- * Reads what a person typed: what `parseColor` reads, or anything else the
- * browser takes as a colour, such as `rebeccapurple`.
- */
-function readColor(text: string): Color | null {
-  const parsed = parseColor(text)
-  if (parsed || typeof document === 'undefined') return parsed
-  const trimmed = text.trim()
-  if (/^currentcolor$/i.test(trimmed) || !CSS.supports('color', trimmed)) return null
-  const probe = document.createElement('span')
-  // Mixed with nothing, any colour comes back as OKLCH, which parseColor
-  // reads: lab(), display-p3 and the rest, keeping their full chroma.
-  probe.style.color = `color-mix(in oklch, ${trimmed} 100%, transparent)`
-  if (!probe.style.color) probe.style.color = trimmed
-  document.body.append(probe)
-  const computed = getComputedStyle(probe).color
-  probe.remove()
-  return parseColor(computed)
-}
-
-// ---------------------------------------------------------------------------
-// Writing CSS
-
-const byte = (c: number) => Math.round(clamp(c) * 255)
-const hex2 = (n: number) => n.toString(16).padStart(2, '0')
-/** Up to `places` decimals, without trailing zeros. */
-const fixed = (n: number, places: number) => String(Number(n.toFixed(places)))
-const alphaSuffix = (alpha: number) =>
-  alpha >= 1 ? '' : ` / ${fixed(clamp(alpha) * 100, 1)}%`
-
-/** An sRGB colour as CSS in `format`. */
-function formatColor(rgb: Rgb, alpha: number, format: ColorFormat): string {
-  switch (format) {
-    case 'hex': {
-      const digits = [rgb.r, rgb.g, rgb.b].map((c) => hex2(byte(c))).join('')
-      return `#${digits}${alpha >= 1 ? '' : hex2(byte(alpha))}`
-    }
-    case 'rgb':
-      return `rgb(${byte(rgb.r)} ${byte(rgb.g)} ${byte(rgb.b)}${alphaSuffix(alpha)})`
-    case 'hsl': {
-      const { h, s, l } = hsbToHsl(rgbToHsb(clipRgb(rgb)))
-      return `hsl(${Math.round(h) % 360} ${Math.round(s * 100)}% ${Math.round(l * 100)}%${alphaSuffix(alpha)})`
-    }
-    case 'oklch':
-      return formatOklch(rgbToOklch(clipRgb(rgb)), alpha)
-  }
-}
-
-/** OKLCH as CSS, to three decimals as shadcn writes its tokens. */
-function formatOklch({ l, c, h }: Oklch, alpha: number) {
-  return `oklch(${fixed(l, 3)} ${fixed(c, 3)} ${fixed(c === 0 ? 0 : h, 3)}${alphaSuffix(alpha)})`
-}
-
-/** The colour as CSS in `format`. OKLCH is written as it is, even past sRGB. */
-function writeColor(color: EditColor, format: ColorFormat) {
-  if (format === 'oklch' && color.oklch) return formatOklch(color.oklch, color.alpha)
-  return formatColor(toRgb(color), color.alpha, format)
-}
-
-/** A colour with its alpha as CSS a browser draws: OKLCH as it is, so a wide-gamut screen shows it all. */
-function cssColor(color: Color) {
-  if (color.space !== 'rgb' && color.oklch) return formatOklch(color.oklch, color.alpha)
-  const { r, g, b } = toRgb(color)
-  return `rgb(${fixed(r * 255, 2)} ${fixed(g * 255, 2)} ${fixed(b * 255, 2)} / ${fixed(color.alpha, 3)})`
-}
-
-/** WCAG relative luminance, 0 for black to 1 for white. */
-function luminance(color: Color) {
-  const { r, g, b } = toRgb(color)
-  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)
+function sameColor(one: string, other: string) {
+  const a = parseColor(one)
+  const b = parseColor(other)
+  if (!a || !b) return one === other
+  return colorDistance(a, b) < 2e-3 && Math.abs(a.alpha - b.alpha) < 5e-3
 }
 
 /**
@@ -1560,92 +963,38 @@ function luminance(color: Color) {
  * the one with the higher WCAG contrast. A colour mostly see-through shows
  * the page under it, so it takes black.
  */
-function prefersLightMark(color: Color) {
-  const y = luminance(color)
-  return color.alpha > 0.35 && 1.05 / (y + 0.05) >= (y + 0.05) / 0.05
+function prefersLightMark(color: string) {
+  const parsed = parseColor(color)
+  if (!parsed) return true
+  if (parsed.alpha <= 0.35) return false
+  const opaque = { ...parsed, alpha: 1 }
+  return contrastRatio(WHITE, opaque) >= contrastRatio(BLACK, opaque)
 }
 
-// ---------------------------------------------------------------------------
-// Words
-
-// Where each name's OKLCH hue ends, set from the CSS named colours and Tailwind's 500s.
-const HUE_NAMES: readonly [number, string][] = [
-  [12, 'pink'],
-  [40, 'red'],
-  [80, 'orange'],
-  [120, 'yellow'],
-  [137, 'yellow green'],
-  [175, 'green'],
-  [190, 'teal'],
-  [245, 'cyan'],
-  [285, 'blue'],
-  [315, 'violet'],
-  [340, 'magenta'],
-  [360, 'pink'],
-]
-
-/**
- * A few words for the colour that a screen reader speaks beside its numbers,
- * such as "dark blue" or "light grey", from its OKLCH lightness, chroma and hue.
- */
-function colorName(color: Color): string {
-  const { l, c, h } = toOklch(color)
-  let name: string
-  if (c < 0.03) {
-    if (l > 0.97) name = 'white'
-    else if (l < 0.15) name = 'black'
-    else name = l > 0.75 ? 'light grey' : l < 0.4 ? 'dark grey' : 'grey'
-  } else {
-    const hue = HUE_NAMES.find(([end]) => h < end)?.[1] ?? 'pink'
-    // A dark orange is brown, and a vivid yellow or green is light by nature, not "light".
-    if (hue === 'orange' && l < 0.6) name = 'brown'
-    else {
-      const tone = l > 0.8 && c < 0.15 ? 'light ' : l < 0.45 ? 'dark ' : ''
-      const muted = c < 0.07 ? 'greyish ' : ''
-      name = `${tone}${muted}${hue}`
-    }
-  }
-  return color.alpha < 1 ? `${name}, ${Math.round(color.alpha * 100)}% opaque` : name
-}
+const WHITE: Color = { space: 'srgb', coords: [1, 1, 1], alpha: 1 }
+const BLACK: Color = { space: 'srgb', coords: [0, 0, 0], alpha: 1 }
 
 export {
   ColorPicker,
-  ColorPickerAlpha,
   ColorPickerArea,
-  ColorPickerChroma,
+  ColorPickerAreaCanvas,
+  ColorPickerAreaThumb,
+  ColorPickerChannelInput,
   ColorPickerEyeDropper,
   ColorPickerFormat,
-  ColorPickerHue,
   ColorPickerInput,
-  ColorPickerLightness,
   ColorPickerPalette,
-  ColorPickerPreset,
-  ColorPickerPresets,
   ColorPickerPreview,
+  ColorPickerSlider,
+  ColorPickerSliderThumb,
   ColorPickerSwatch,
-  areaKeyMove,
-  areaPoint,
-  channelValue,
-  colorName,
-  cssColor,
-  formatColor,
-  formatOklch,
-  hsbToRgb,
-  inSpace,
-  inSrgb,
-  oklchToRgb,
-  oklchToSrgb,
+  ColorPickerSwatches,
+  ColorPickerSwatchItem,
+  channelPaint,
+  inFormat,
   paletteShowsCustom,
   paletteStep,
-  parseColor,
   prefersLightMark,
-  presetValue,
-  rgbToHsb,
-  rgbToOklch,
-  shownColor,
-  toHsb,
-  toOklch,
-  withChannel,
-  writeColor,
+  sameColor,
 }
-export type { Color, ColorFormat, ColorPickerProps, ColorPreset, ColorSpace, EditColor }
+export type { ColorPickerProps, ColorPreset }

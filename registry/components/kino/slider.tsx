@@ -4,7 +4,6 @@ import { Tooltip } from '@/registry/components/kino/tooltip'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { markResizing } from '@/registry/lib/resize'
 import {
-  channelThumbClassName,
   thumbDotClassName,
   trackClassName,
   trackDirClassName,
@@ -25,7 +24,6 @@ import {
   type SliderValueChangeReason,
 } from '@ui-sdk/react/slider'
 import { TooltipContent as TooltipContentPrimitive } from '@ui-sdk/react/tooltip'
-import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
   createContext,
@@ -101,42 +99,18 @@ function thumbShowsValue(state: ThumbReveal, index: number) {
 }
 
 // In forced colours the fill turns to the system highlight, so a dashed track keeps the invalid state.
-const sliderTrackVariants = cva(
-  cn(
-    trackClassName,
-    'forced-colors:group-has-aria-invalid/slider:outline-2 forced-colors:group-has-aria-invalid/slider:outline-dashed forced-colors:group-aria-invalid/slider:outline-2 forced-colors:group-aria-invalid/slider:outline-dashed',
-  ),
-  {
-    variants: {
-      variant: {
-        default: '',
-        // A channel's track is its colours, which forced colours must keep.
-        channel:
-          'h-3 [background:var(--slider-track)] shadow-[inset_0_0_0_1px_var(--border)] forced-color-adjust-none',
-      },
-    },
-    defaultVariants: { variant: 'default' },
-  },
+const sliderTrackClassName = cn(
+  trackClassName,
+  'forced-colors:group-has-aria-invalid/slider:outline-2 forced-colors:group-has-aria-invalid/slider:outline-dashed forced-colors:group-aria-invalid/slider:outline-2 forced-colors:group-aria-invalid/slider:outline-dashed',
 )
 
 // ui-sdk's Field marks a single thumb's input invalid, and a range's group.
-const sliderThumbVariants = cva(
-  cn(
-    thumbDotClassName,
-    'group-has-aria-invalid/slider:border-destructive group-has-aria-invalid/slider:ring-destructive/20 dark:group-has-aria-invalid/slider:ring-destructive/40',
-    'group-aria-invalid/slider:border-destructive group-aria-invalid/slider:ring-destructive/20 dark:group-aria-invalid/slider:ring-destructive/40',
-    'group-data-disabled/slider:ring-0',
-  ),
-  {
-    variants: {
-      variant: {
-        default:
-          'bg-background border-primary size-4 shadow-sm forced-colors:border-[CanvasText]',
-        channel: channelThumbClassName,
-      },
-    },
-    defaultVariants: { variant: 'default' },
-  },
+const sliderThumbClassName = cn(
+  thumbDotClassName,
+  'bg-background border-primary size-4 shadow-sm forced-colors:border-[CanvasText]',
+  'group-has-aria-invalid/slider:border-destructive group-has-aria-invalid/slider:ring-destructive/20 dark:group-has-aria-invalid/slider:ring-destructive/40',
+  'group-aria-invalid/slider:border-destructive group-aria-invalid/slider:ring-destructive/20 dark:group-aria-invalid/slider:ring-destructive/40',
+  'group-data-disabled/slider:ring-0',
 )
 
 /** The slider's label's id, for its thumbs or its group, and the text the visible value shows. */
@@ -166,11 +140,6 @@ type SliderProps<Value extends number | number[]> = Omit<
   'aria-label'?: string
   /** The label and value, in a row above the track. */
   children?: ReactNode
-  /**
-   * `channel` draws one channel of a colour: the track is the `--slider-track`
-   * background, with no fill, and the thumb is filled with `--slider-thumb`.
-   */
-  variant?: VariantProps<typeof sliderTrackVariants>['variant']
 }
 
 function Slider<Value extends number | number[]>({
@@ -192,7 +161,6 @@ function Slider<Value extends number | number[]>({
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
   style,
-  variant = 'default',
   ...props
 }: SliderProps<Value>) {
   const count = thumbCount(value ?? defaultValue)
@@ -272,21 +240,19 @@ function Slider<Value extends number | number[]>({
                 onPointerDown={() => send({ type: 'press' })}
                 className='group/control @container relative flex h-(--control-height-xs) w-full touch-none items-center select-none data-disabled:pointer-events-none data-disabled:opacity-50'
               >
-                <SliderTrackPrimitive className={sliderTrackVariants({ variant })}>
-                  {variant === 'channel' ? null : (
-                    <SliderIndicatorPrimitive
-                      // ui-sdk sizes the fill with `width`, which moves on the main thread: it stays the track's width and is clipped instead.
-                      render={(fill) => <span {...fill} style={undefined} />}
-                      className={cn(
-                        trackFillClassName,
-                        'pointer-events-none inset-x-0',
-                        'transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 motion-reduce:transition-none',
-                        '[clip-path:inset(0_calc(100%-var(--slider-end)*1%)_0_calc(var(--slider-start)*1%)_round_9999px)]',
-                        'rtl:[clip-path:inset(0_calc(var(--slider-start)*1%)_0_calc(100%-var(--slider-end)*1%)_round_9999px)]',
-                        'group-has-aria-invalid/slider:bg-destructive group-aria-invalid/slider:bg-destructive',
-                      )}
-                    />
-                  )}
+                <SliderTrackPrimitive className={sliderTrackClassName}>
+                  <SliderIndicatorPrimitive
+                    // ui-sdk sizes the fill with `width`, which moves on the main thread: it stays the track's width and is clipped instead.
+                    render={(fill) => <span {...fill} style={undefined} />}
+                    className={cn(
+                      trackFillClassName,
+                      'pointer-events-none inset-x-0',
+                      'transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 motion-reduce:transition-none',
+                      '[clip-path:inset(0_calc(100%-var(--slider-end)*1%)_0_calc(var(--slider-start)*1%)_round_9999px)]',
+                      'rtl:[clip-path:inset(0_calc(var(--slider-start)*1%)_0_calc(100%-var(--slider-end)*1%)_round_9999px)]',
+                      'group-has-aria-invalid/slider:bg-destructive group-aria-invalid/slider:bg-destructive',
+                    )}
+                  />
                   {Array.from({ length: count }, (_, index) => (
                     // oxlint-disable-next-line react/no-array-index-key -- a thumb is its index in the value
                     <Fragment key={index}>
@@ -313,7 +279,7 @@ function Slider<Value extends number | number[]>({
                           'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 group-data-resizing/control:transition-none motion-reduce:transition-none',
                         )}
                       >
-                        <span aria-hidden className={sliderThumbVariants({ variant })} />
+                        <span aria-hidden className={sliderThumbClassName} />
                       </SliderThumbPrimitive>
                       <SliderThumbValue
                         control={control}
@@ -490,6 +456,8 @@ export {
   Slider,
   SliderLabel,
   SliderValue,
+  sliderThumbClassName,
+  sliderTrackClassName,
   thumbCount,
   thumbShowsValue,
   trailStep,

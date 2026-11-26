@@ -290,7 +290,11 @@ function swapTo(
   const next = items.map((item): SwapItem => {
     if (item.key === key) return { ...item, phase: 'in', returned: true }
     const leaving = item.phase === 'in'
-    const out: SwapItem = { ...item, phase: 'out', back: leaving ? back : item.back }
+    const out: SwapItem = {
+      ...item,
+      phase: 'out',
+      back: leaving ? back : item.back,
+    }
     // What was showing leaves the way the change goes; what was already leaving keeps going.
     // A change with no slide never slides what leaves, however it once arrived.
     if (leaving && trend) out.side = trend === 1 ? -1 : 1
@@ -315,6 +319,18 @@ function dropLeft(items: readonly SwapItem[], left: readonly string[]): SwapItem
   return items.filter((item) => item.phase === 'in' || !left.includes(item.key))
 }
 
+/** False inside content that is leaving. */
+const SwapShowingContext = createContext(true)
+
+/**
+ * Whether the content around it is leaving, so a part that registers itself
+ * somewhere, such as one of ui-sdk's, can draw a still copy instead and leave
+ * its place to the content that replaced it.
+ */
+function useSwapLeaving() {
+  return !use(SwapShowingContext)
+}
+
 /**
  * Content as it last showed: what leaves keeps what it said at the end, as
  * content under one `id` (a line with a bar that grows) changes while it shows.
@@ -332,7 +348,15 @@ function SwapHeld({
 }) {
   const [held, setHeld] = useState(children)
   if (showing && held !== children) setHeld(children)
-  return flattenChildren(showing ? children : held).map((child, index) =>
+  return (
+    <SwapShowingContext value={showing}>
+      {heldParts(showing ? children : held, wrap)}
+    </SwapShowingContext>
+  )
+}
+
+function heldParts(children: ReactNode, wrap: boolean) {
+  return flattenChildren(children).map((child, index) =>
     typeof child === 'string' || typeof child === 'number' ? (
       wrap ? (
         // oxlint-disable-next-line react/no-array-index-key -- the parts of one piece of content keep their order
@@ -886,5 +910,6 @@ export {
   swapTo,
   SwapText,
   useSwapFocus,
+  useSwapLeaving,
 }
 export type { SwapItem, SwapTextView }
