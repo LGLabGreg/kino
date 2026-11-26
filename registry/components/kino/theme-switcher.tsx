@@ -40,7 +40,6 @@ import { MenuRadioItem as MenuRadioItemPrimitive } from '@ui-sdk/react/menu'
 import { usePreference } from '@ui-sdk/react/preferences'
 import {
   type ComponentProps,
-  type KeyboardEvent,
   type ReactNode,
   useEffect,
   useId,
@@ -625,22 +624,6 @@ const segmentLayout = cn(
   'size-[calc(var(--control-height-sm)_-_2px)] min-h-6 min-w-6 px-0',
 )
 
-/**
- * The menu moves with Up and Down; in a row, Left and Right move along it
- * too, the way the row reads, staying on the first or last at its ends.
- */
-function moveAlongRow(event: KeyboardEvent<HTMLElement>) {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-  const segment = event.currentTarget
-  const rtl = getComputedStyle(segment).direction === 'rtl'
-  const forward = (event.key === 'ArrowRight') !== rtl
-  const next = forward ? segment.nextElementSibling : segment.previousElementSibling
-  // A submenu's row would take Left or Right as close or open: here they stay in the row.
-  event.preventDefault()
-  event.stopPropagation()
-  if (next instanceof HTMLElement && next.matches(SEGMENT)) next.focus()
-}
-
 /** The three as icons in a track, as the Segmented control draws them, the pill on the pick. */
 function ThemeMenuSegments() {
   const trackRef = useRef<HTMLSpanElement>(null)
@@ -677,7 +660,6 @@ function ThemeMenuSegments() {
           label={theme.label}
           aria-label={theme.label}
           data-theme-menu-segment=''
-          onKeyDown={moveAlongRow}
           className={cn(segmentLayout, pillItemClassName, 'cursor-default')}
         >
           {theme.icon}

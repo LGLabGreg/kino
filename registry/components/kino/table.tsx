@@ -6,6 +6,7 @@ import { Progress } from '@/registry/components/kino/progress'
 import { SkeletonText } from '@/registry/components/kino/skeleton'
 import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
+import { columnResize, type ColumnResizeReason } from '@/registry/lib/column-resize'
 import { CutTooltip } from '@/registry/lib/cut'
 import { flowItemClassName, followFlow } from '@/registry/lib/flow'
 import {
@@ -22,6 +23,8 @@ import {
   scrollRegionRingClassName,
   useScrollRegion,
 } from '@/registry/lib/scroll'
+import type { ChangeDetails } from '@ui-sdk/core'
+import { usePart, usePrimitive } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -162,7 +165,7 @@ function followResizable(table: HTMLTableElement): () => void {
       // Within the bounds of a column that resizes, so its handle never reads out of them.
       const widths = unsized.map((head) => {
         const width = head.getBoundingClientRect().width
-        const handle = head.querySelector(':scope > [data-slot=table-resize]')
+        const handle = head.querySelector(':scope > [data-slot=column-resize]')
         if (!handle) return width
         const min = Number(handle.getAttribute('aria-valuemin') ?? 0)
         const max = Number(handle.getAttribute('aria-valuemax') ?? Infinity)
@@ -175,7 +178,7 @@ function followResizable(table: HTMLTableElement): () => void {
     }
     // A handle whose column hasn't been resized reads out the width it was laid out at.
     for (const head of all) {
-      const handle = head.querySelector<HTMLElement>(':scope > [data-slot=table-resize]')
+      const handle = head.querySelector<HTMLElement>(':scope > [data-slot=column-resize]')
       const width = String(Math.round(widthOf(head)))
       if (handle && handle.getAttribute('aria-valuenow') !== width) {
         handle.setAttribute('aria-valuenow', width)
@@ -526,8 +529,11 @@ function TableHead({
   minWidth?: number
   /** The widest a resize takes it, in px. */
   maxWidth?: number
-  /** With it, the column's end edge drags, and its handle takes the arrow keys, to resize it; undefined puts it back. */
-  onWidthChange?: (width: number | undefined) => void
+  /** With it, the column's end edge drags, and its handle takes the arrow keys, to resize it; undefined puts it back. `details.reason` says how, and `details.cancel()` refuses it. */
+  onWidthChange?: (
+    width: number | undefined,
+    details: ChangeDetails<ColumnResizeReason>,
+  ) => void
   /** The handle's name: “Resize” and the label by default. */
   resizeLabel?: string
 }) {
@@ -585,6 +591,7 @@ function TableHead({
             resizeLabel ??
             (typeof children === 'string' ? `Resize ${children}` : 'Resize column')
           }
+          name={typeof children === 'string' ? children : 'Column'}
           width={width}
           minWidth={minWidth}
           maxWidth={maxWidth}
@@ -595,149 +602,47 @@ function TableHead({
   )
 }
 
-/** How far one press of an arrow key resizes a column, in px; with Shift, four times as far. */
-const RESIZE_STEP = 16
-
-/**
- * A column's width once it is dragged or keyed `delta` px towards its end
- * edge from `start`, held between `min` and `max`, in whole px.
- */
-function resizedWidth(start: number, delta: number, min: number, max: number) {
-  return Math.round(Math.min(Math.max(start + delta, min), max))
-}
-
-/**
- * Makes a resize by key or double-click land at once, as a drag does: the
- * table, whose width follows its columns at once, and the columns move together.
- */
-function resizeAtOnce(handle: HTMLElement, change: () => void) {
-  const table = handle.closest('table')
-  if (!table) return change()
-  table.dataset.resizing = ''
-  change()
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      delete table.dataset.resizing
-    }),
-  )
-}
-
-/**
- * Follows a drag of a column's edge from `event`: the column takes each new
- * width at once, and `done` hears the last one when the pointer lets go.
- * The table is marked `data-resizing` meanwhile, so its columns don't ease.
- */
-function dragColumnEdge(
-  handle: HTMLElement,
-  event: PointerEvent,
-  { min, max, done }: { min: number; max: number; done: (width: number) => void },
-) {
-  const head = handle.closest('th')
-  const table = handle.closest('table')
-  if (!head || !table) return
-  // From the width it is going to, not one partway through an ease.
-  const start =
-    Number.parseFloat(head.style.getPropertyValue('--column-width')) ||
-    head.getBoundingClientRect().width
-  const from = event.clientX
-  const rtl = getComputedStyle(table).direction === 'rtl'
-  let width = start
-  handle.setPointerCapture(event.pointerId)
-  table.dataset.resizing = ''
-  handle.dataset.dragging = ''
-  const move = (next: PointerEvent) => {
-    width = resizedWidth(start, (next.clientX - from) * (rtl ? -1 : 1), min, max)
-    head.style.setProperty('--column-width', `${width}px`)
-  }
-  const end = () => {
-    handle.removeEventListener('pointermove', move)
-    handle.removeEventListener('pointerup', end)
-    handle.removeEventListener('pointercancel', end)
-    delete table.dataset.resizing
-    delete handle.dataset.dragging
-    // A press that never moved, such as a double-click's first, changes nothing.
-    if (width !== start) done(width)
-  }
-  handle.addEventListener('pointermove', move)
-  handle.addEventListener('pointerup', end)
-  handle.addEventListener('pointercancel', end)
-}
-
 /**
  * The edge of a column that resizes it: a separator a pointer drags, the
- * arrow keys move (Shift for farther), Home and End take to its bounds, and a
- * double press puts back.
+ * arrow keys move (Shift for farther), Home and End take to its bounds, and
+ * Enter or a double press puts back.
  */
 function TableResizeHandle({
   label,
+  name,
   width,
   minWidth,
   maxWidth,
   onWidthChange,
 }: {
   label: string
+  name: string
   width: number | undefined
   minWidth: number
   maxWidth: number
-  onWidthChange: (width: number | undefined) => void
+  onWidthChange: (
+    width: number | undefined,
+    details: ChangeDetails<ColumnResizeReason>,
+  ) => void
 }) {
-  // The width it is going to, not one partway through an ease.
-  const now = (handle: HTMLElement) => {
-    const head = handle.closest('th')
-    const kept = head
-      ? Number.parseFloat(head.style.getPropertyValue('--column-width'))
-      : NaN
-    if (!Number.isNaN(kept)) return kept
-    return width ?? head?.getBoundingClientRect().width ?? minWidth
-  }
-  return (
-    <span
-      role='separator'
-      aria-orientation='vertical'
-      aria-label={label}
-      aria-valuemin={minWidth}
-      aria-valuemax={maxWidth}
-      aria-valuenow={width === undefined ? undefined : Math.round(width)}
-      tabIndex={0}
-      data-slot='table-resize'
-      onPointerDown={(event) => {
-        if (event.button !== 0) return
-        event.preventDefault()
-        dragColumnEdge(event.currentTarget, event.nativeEvent, {
-          min: minWidth,
-          max: maxWidth,
-          done: onWidthChange,
-        })
-      }}
-      onDoubleClick={(event) =>
-        resizeAtOnce(event.currentTarget, () => onWidthChange(undefined))
-      }
-      onKeyDown={(event) => {
-        const handle = event.currentTarget
-        const rtl = getComputedStyle(handle).direction === 'rtl'
-        const step = RESIZE_STEP * (event.shiftKey ? 4 : 1)
-        const by: Partial<Record<string, number>> = {
-          ArrowRight: rtl ? -step : step,
-          ArrowLeft: rtl ? step : -step,
-        }
-        const to =
-          event.key === 'Enter'
-            ? null
-            : event.key === 'Home'
-              ? minWidth
-              : event.key === 'End'
-                ? maxWidth
-                : by[event.key] === undefined
-                  ? undefined
-                  : resizedWidth(now(handle), by[event.key] ?? 0, minWidth, maxWidth)
-        if (to === undefined) return
-        event.preventDefault()
-        // Enter puts it back, as a double-click does.
-        resizeAtOnce(handle, () => onWidthChange(to === null ? undefined : to))
-      }}
+  const resize = usePrimitive(columnResize, {
+    width: width ?? null,
+    name,
+    min: minWidth,
+    max: maxWidth,
+    onWidthChange: (next, details) => onWidthChange(next ?? undefined, details),
+  })
+  return usePart(
+    resize,
+    'root',
+    {},
+    {
+      'aria-label': label,
       // 24px across the column's edge: a resizable table gives every column 12px of room beside it.
-      className='absolute inset-y-0 -end-3 z-10 w-6 cursor-col-resize touch-none rounded-(--control-radius-xs) after:absolute after:inset-y-2 after:start-1/2 after:w-px after:-translate-x-1/2 after:bg-border after:opacity-0 after:transition-[opacity,background-color] after:duration-(--motion-press-duration) after:ease-(--motion-press-fade-easing) group-hover/head:after:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden focus-visible:after:opacity-100 data-dragging:after:bg-primary data-dragging:after:opacity-100 forced-colors:after:bg-[CanvasText] rtl:after:translate-x-1/2'
-    />
+      className:
+        'absolute inset-y-0 -end-3 z-10 w-6 cursor-col-resize touch-none rounded-(--control-radius-xs) after:absolute after:inset-y-2 after:start-1/2 after:w-px after:-translate-x-1/2 after:bg-border after:opacity-0 after:transition-[opacity,background-color] after:duration-(--motion-press-duration) after:ease-(--motion-press-fade-easing) group-hover/head:after:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden focus-visible:after:opacity-100 data-dragging:after:bg-primary data-dragging:after:opacity-100 forced-colors:after:bg-[CanvasText] rtl:after:translate-x-1/2',
+    },
+    'span',
   )
 }
 
@@ -1044,5 +949,4 @@ export {
   TableRow,
   TableSkeleton,
   clearOfPinned,
-  resizedWidth,
 }
