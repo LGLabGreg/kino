@@ -486,7 +486,7 @@ function AppShellWorkspaces({
     />
   )
   const menu = (
-    <UserMenuContent title={label} align='start' side='bottom'>
+    <UserMenuContent align='start' side='bottom'>
       <UserMenuWorkspaces<string>
         label={label}
         value={value}
@@ -611,7 +611,7 @@ function AppShellUser({
         >
           {avatar}
         </UserMenuTrigger>
-        <UserMenuContent title={label}>
+        <UserMenuContent>
           <UserMenuHeader name={name} email={email} avatar={avatar} />
           <UserMenuSeparator />
           {children}
@@ -649,7 +649,7 @@ function AppShellUser({
               className='text-muted-foreground ms-auto self-center'
             />
           </UserMenuTrigger>
-          <UserMenuContent title={label} side='top' align='start'>
+          <UserMenuContent side='top' align='start'>
             {children}
           </UserMenuContent>
         </UserMenu>

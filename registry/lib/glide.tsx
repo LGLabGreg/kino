@@ -219,20 +219,6 @@ export function useGlideGroupItem<Handle, Content>(
   }, [group, id])
 }
 
-/**
- * What a trigger of the old library in a group takes: the shared handle, its
- * item's id as the payload, and the short close delay that lets the popup
- * slide on.
- */
-export function glideTriggerProps<Handle, Content>(
-  group: GlideGroup<Handle, Content> | null,
-  id: string | null,
-) {
-  return group && id
-    ? { handle: group.handle, payload: id, closeDelay: GLIDE_GROUP_CLOSE_DELAY }
-    : {}
-}
-
 function cssPixels(element: HTMLElement, name: string) {
   return Number.parseFloat(element.style.getPropertyValue(name))
 }
@@ -322,15 +308,8 @@ const moved = (box: ScreenBox, [x, y]: Shift, sign: 1 | -1 = 1): ScreenBox => ({
 /** Where the popup was placed, without the shift it shows at. */
 const placeOf = (popup: HTMLElement, shift: Shift) => moved(boxOf(popup), shift, -1)
 
-/**
- * Whether the library asks for no animation; `placed` is the element it
- * places, and `first` is the popup's first placing.
- */
-export type GlideInstant = (parts: {
-  popup: HTMLElement
-  placed: HTMLElement
-  first: boolean
-}) => boolean
+/** Whether the library asks for no animation; `first` is the popup's first placing. */
+export type GlideInstant = (parts: { popup: HTMLElement; first: boolean }) => boolean
 
 interface GlideOptions {
   /**
@@ -340,12 +319,6 @@ interface GlideOptions {
    */
   reopen: 'slide' | 'grow'
   instant: GlideInstant
-  /**
-   * Which library places the popup: ui-sdk places the popup itself and keeps
-   * it in the page while closed; Base UI places a positioner around it and
-   * mounts it only while open.
-   */
-  placedBy: 'ui-sdk' | 'base-ui'
 }
 
 const popupInstant: GlideInstant = ({ popup, first }) =>
@@ -359,11 +332,10 @@ const popupInstant: GlideInstant = ({ popup, first }) =>
 function trackGlide(
   content: HTMLElement,
   memory: GlideMemory | null,
-  { reopen, instant, placedBy }: GlideOptions,
+  { reopen, instant }: GlideOptions,
 ) {
   const popup = content.parentElement
-  const placed = placedBy === 'ui-sdk' ? popup : popup?.parentElement
-  if (!popup || !placed) return
+  if (!popup) return
   let phase: GlidePhase = 'waiting'
   let last = ''
   let popupBox: ScreenBox | null = null
@@ -425,7 +397,7 @@ function trackGlide(
     const side = physicalSide(popup.dataset.side as PopupSide | undefined, direction())
     const across = side === 'top' || side === 'bottom'
     const anchor = cssPixels(popup, '--arrow-offset')
-    const anchorLength = cssPixels(placed, across ? '--anchor-width' : '--anchor-height')
+    const anchorLength = cssPixels(popup, across ? '--anchor-width' : '--anchor-height')
     const length = across ? box.width : box.height
     return anchorStrip(
       side,
@@ -483,7 +455,7 @@ function trackGlide(
   }
 
   // A ui-sdk popup stays in the page once it has closed, hidden: the next
-  // open starts afresh, as a Base UI popup mounted again does.
+  // open starts afresh.
   const reset = () => {
     if (phase === 'waiting') return
     if (memory && popupBox) memory.closedAt = performance.now()
@@ -496,15 +468,11 @@ function trackGlide(
     last = ''
   }
 
-  // Not placed yet: Base UI keeps its positioner see-through until it has
-  // placed it, and ui-sdk sets the side once it has.
-  const waiting = () =>
-    placedBy === 'ui-sdk'
-      ? popup.hidden || !popup.dataset.side
-      : placed.style.opacity === '0'
+  // Not placed yet: ui-sdk sets the side once it has.
+  const waiting = () => popup.hidden || !popup.dataset.side
 
   const write = () => {
-    if (placedBy === 'ui-sdk' && popup.hidden) {
+    if (popup.hidden) {
       reset()
       return
     }
@@ -528,7 +496,7 @@ function trackGlide(
     writeBox(popup, 'strip', box, strip)
     const [next, step] = glideNext(phase, {
       kind: 'measured',
-      instant: instant({ popup, placed, first: phase === 'waiting' }),
+      instant: instant({ popup, first: phase === 'waiting' }),
       scrolled: scroll.followed(popupBox, box),
       // Under a pixel, the clip's edges simply follow the popup's.
       resized:
@@ -590,7 +558,7 @@ function trackGlide(
       '--viewport-width',
       '--viewport-height',
     ]
-      .map((name) => placed.style.getPropertyValue(name))
+      .map((name) => popup.style.getPropertyValue(name))
       .join()
   let seen = placing()
   const placedMoved = () => {
@@ -604,7 +572,7 @@ function trackGlide(
   const resize = new ResizeObserver(write)
   resize.observe(popup)
   const style = new MutationObserver(placedMoved)
-  style.observe(placed, { attributes: true, attributeFilter: ['style'] })
+  style.observe(popup, { attributes: true, attributeFilter: ['style'] })
   const change = new MutationObserver(write)
   change.observe(popup, {
     attributes: true,
@@ -697,24 +665,21 @@ export function GlideSurface({
 
 /**
  * The popup's content, clipped to the same box as its surface. Goes after
- * `GlideSurface`, and in a popup of the old library, before an anchor from
- * `basePopupGrow`. `reopen`, `instant` and `placedBy` say how it starts and
- * who places it (see `GlideOptions`); by default, ui-sdk places it, a popup
- * that opens soon after its group's last one slides from it, and
- * `data-instant` on the popup skips the grow.
+ * `GlideSurface`. `reopen` and `instant` say how it starts (see
+ * `GlideOptions`); by default, a popup that opens soon after its group's last
+ * one slides from it, and `data-instant` on the popup skips the grow.
  */
 export function GlideContent({
   children,
   reopen = 'slide',
   instant = popupInstant,
-  placedBy = 'ui-sdk',
 }: { children?: ReactNode } & Partial<GlideOptions>) {
   const memory = use(GlideMemoryContext)
   // Stable, so a render doesn't start the tracking over.
   const track = useCallback(
     (element: HTMLDivElement | null) =>
-      element ? trackGlide(element, memory, { reopen, instant, placedBy }) : undefined,
-    [memory, reopen, instant, placedBy],
+      element ? trackGlide(element, memory, { reopen, instant }) : undefined,
+    [memory, reopen, instant],
   )
   return (
     <div

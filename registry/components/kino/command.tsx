@@ -19,7 +19,7 @@ import {
   filterListSeparatorClassName,
 } from '@/registry/lib/filter-list'
 import { leaveAsCopy } from '@/registry/lib/flow'
-import { MenuShortcut } from '@/registry/lib/menu'
+import { RowShortcut } from '@/registry/lib/list-rows'
 import { panelFooterTint } from '@/registry/lib/panel'
 import { mergeRefs } from '@/registry/lib/refs'
 import { followHeight, withoutTransition } from '@/registry/lib/resize'
@@ -515,7 +515,7 @@ function CommandItemIcon({
 
 /** A command's shortcut, at the row's end: its `shortcut`, or `Kbd` keys, as in the menus. */
 function CommandShortcut(props: ComponentProps<typeof CommandShortcutPrimitive>) {
-  return <CommandShortcutPrimitive render={<MenuShortcut />} {...props} />
+  return <CommandShortcutPrimitive render={<RowShortcut />} {...props} />
 }
 
 function CommandSeparator({

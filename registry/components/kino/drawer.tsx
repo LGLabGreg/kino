@@ -20,7 +20,6 @@ import {
   useFollowHeight,
   useScrollRegion,
 } from '@/registry/lib/panel'
-import { PopupLayerContext, useOwnPopupLayer } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { useSheetPhysics } from '@/registry/lib/sheet-physics'
 import {
@@ -237,18 +236,10 @@ function DrawerContent<Payload = unknown>({
 }) {
   const { content, onDrag } = use(DrawerContext)
   const below = use(PanelBelowContext)
-  const [layer, setLayer] = useOwnPopupLayer(true)
   const own = useMemo(
     () =>
-      mergeRefs(
-        ref,
-        setLayer,
-        content,
-        holdFocusedStill,
-        stackHeights(below),
-        followDrag(onDrag),
-      ),
-    [ref, setLayer, content, below, onDrag],
+      mergeRefs(ref, content, holdFocusedStill, stackHeights(below), followDrag(onDrag)),
+    [ref, content, below, onDrag],
   )
   return (
     <>
@@ -284,34 +275,32 @@ function DrawerContent<Payload = unknown>({
         {...props}
       >
         {(state) => (
-          <PopupLayerContext value={layer}>
-            <PanelBelowContext value={content ?? null}>
-              <ExpandedContext value={state.expanded}>
-                <DrawerSurface
-                  vertical={state.side === 'top' || state.side === 'bottom'}
-                  closeButton={
-                    showCloseButton ? (
-                      <DrawerClosePrimitive
-                        render={
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            className={panelCloseClassName}
-                          />
-                        }
-                        aria-label='Close'
-                      >
-                        <PanelCloseIcon />
-                      </DrawerClosePrimitive>
-                    ) : null
-                  }
-                >
-                  {state.side === 'bottom' ? <DrawerHandle /> : null}
-                  {typeof children === 'function' ? children(state) : children}
-                </DrawerSurface>
-              </ExpandedContext>
-            </PanelBelowContext>
-          </PopupLayerContext>
+          <PanelBelowContext value={content ?? null}>
+            <ExpandedContext value={state.expanded}>
+              <DrawerSurface
+                vertical={state.side === 'top' || state.side === 'bottom'}
+                closeButton={
+                  showCloseButton ? (
+                    <DrawerClosePrimitive
+                      render={
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          className={panelCloseClassName}
+                        />
+                      }
+                      aria-label='Close'
+                    >
+                      <PanelCloseIcon />
+                    </DrawerClosePrimitive>
+                  ) : null
+                }
+              >
+                {state.side === 'bottom' ? <DrawerHandle /> : null}
+                {typeof children === 'function' ? children(state) : children}
+              </DrawerSurface>
+            </ExpandedContext>
+          </PanelBelowContext>
         )}
       </DrawerContentPrimitive>
     </>

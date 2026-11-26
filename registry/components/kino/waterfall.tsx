@@ -42,7 +42,11 @@ import {
   rowHighlightClassName,
   tintedRowTextClassName,
 } from '@/registry/lib/highlight'
-import { menuIndicatorClassName, menuIndicatorSlot, MenuTick } from '@/registry/lib/menu'
+import {
+  menuIndicatorClassName,
+  menuIndicatorSlot,
+  MenuTick,
+} from '@/registry/lib/list-rows'
 import { NoticeIcon } from '@/registry/lib/notice'
 import {
   placeholderBreatheClassName,

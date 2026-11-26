@@ -13,7 +13,11 @@ import {
   rowHighlightClassName,
   tintedRowTextClassName,
 } from '@/registry/lib/highlight'
-import { menuIndicatorClassName, menuIndicatorSlot, MenuTick } from '@/registry/lib/menu'
+import {
+  menuIndicatorClassName,
+  menuIndicatorSlot,
+  MenuTick,
+} from '@/registry/lib/list-rows'
 import { mergeRefs } from '@/registry/lib/refs'
 import { collapseClassName, followPanelContent } from '@/registry/lib/resize'
 import {

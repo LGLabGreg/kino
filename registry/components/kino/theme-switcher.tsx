@@ -2,10 +2,10 @@
 
 import { Button } from '@/registry/components/kino/button'
 import {
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-} from '@/registry/components/kino/dropdown-menu'
+  MenuGroupLabel,
+  MenuRadioGroup,
+  MenuRadioItem,
+} from '@/registry/components/kino/menu'
 import { colorSchemePreference } from '@/registry/components/kino/preferences'
 import {
   SegmentedControl,
@@ -34,9 +34,9 @@ import {
   pillTrackClassName,
 } from '@/registry/lib/pill'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import type { ChangeReason, ChangeSource } from '@ui-sdk/core'
 import { withSource } from '@ui-sdk/core/observe'
+import { MenuRadioItem as MenuRadioItemPrimitive } from '@ui-sdk/react/menu'
 import { usePreference } from '@ui-sdk/react/preferences'
 import {
   type ComponentProps,
@@ -191,7 +191,11 @@ function crossoverCss(
 }
 
 /** What a switcher hands on with a change: its `onValueChange` reads them all. */
-type ThemeChange = { reason?: ChangeReason; event?: Event; source?: ChangeSource }
+type ThemeChange = {
+  reason?: ChangeReason
+  event?: Event
+  source?: ChangeSource
+}
 
 /** The crossover running now: the theme it leaves, whether it is turning back to it, and the change asked for last. */
 let crossing: {
@@ -565,7 +569,7 @@ function ThemeMenuRadioGroup({
   className,
   ...props
 }: Omit<
-  MenuPrimitive.RadioGroup.Props,
+  ComponentProps<typeof MenuRadioGroup<Theme>>,
   'value' | 'defaultValue' | 'onValueChange' | 'children' | 'className'
 > & {
   className?: string
@@ -578,12 +582,10 @@ function ThemeMenuRadioGroup({
 }) {
   const { value } = useTheme()
   return (
-    <DropdownMenuRadioGroup
-      data-slot='theme-menu-radio-group'
+    <MenuRadioGroup<Theme>
+      data-theme-menu-radio-group=''
       value={value}
-      onValueChange={(next: Theme, details) =>
-        changeTheme(next, crossover, { event: details.event })
-      }
+      onValueChange={(next, details) => changeTheme(next, crossover, details)}
       className={cn(
         inline && 'flex items-center gap-3 py-0.5 ps-(--control-padding) pe-0.5',
         className,
@@ -592,27 +594,27 @@ function ThemeMenuRadioGroup({
     >
       {inline ? (
         <>
-          <DropdownMenuLabel className='text-foreground min-w-0 flex-1 p-0 text-sm font-normal group-has-[:is([data-menu-indicator]:last-child,[data-menu-indicator]+:not(svg))]/menu:ps-0'>
+          <MenuGroupLabel className='text-foreground min-w-0 flex-1 p-0 text-sm font-normal'>
             {label}
-          </DropdownMenuLabel>
+          </MenuGroupLabel>
           <ThemeMenuSegments />
         </>
       ) : (
         <>
-          {label === null ? null : <DropdownMenuLabel>{label}</DropdownMenuLabel>}
+          {label === null ? null : <MenuGroupLabel>{label}</MenuGroupLabel>}
           {THEMES.map((theme) => (
-            <DropdownMenuRadioItem key={theme.value} value={theme.value}>
+            <MenuRadioItem key={theme.value} value={theme.value}>
               {theme.icon}
               {theme.label}
-            </DropdownMenuRadioItem>
+            </MenuRadioItem>
           ))}
         </>
       )}
-    </DropdownMenuRadioGroup>
+    </MenuRadioGroup>
   )
 }
 
-const SEGMENT = '[data-slot=theme-menu-segment]'
+const SEGMENT = '[data-theme-menu-segment]'
 
 // The row and the pill's copy of it share this, so every icon sits exactly on its twin.
 const segmentRow = cn('flex', pillRowClassName)
@@ -669,17 +671,17 @@ function ThemeMenuSegments() {
       className={cn(pillTrackClassName, segmentRow, 'relative isolate shrink-0')}
     >
       {THEMES.map((theme) => (
-        <MenuPrimitive.RadioItem
+        <MenuRadioItemPrimitive
           key={theme.value}
           value={theme.value}
           label={theme.label}
           aria-label={theme.label}
-          data-slot='theme-menu-segment'
+          data-theme-menu-segment=''
           onKeyDown={moveAlongRow}
           className={cn(segmentLayout, pillItemClassName, 'cursor-default')}
         >
           {theme.icon}
-        </MenuPrimitive.RadioItem>
+        </MenuRadioItemPrimitive>
       ))}
       <span
         ref={backdropRef}

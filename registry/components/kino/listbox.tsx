@@ -10,12 +10,13 @@ import {
 import {
   listIndicatorClassName,
   menuIndicatorSlot,
+  menuGutterClassName,
   menuLabelClassName,
   menuNoticeClassName,
   menuRowVariants,
   menuSeparatorClassName,
   MenuTick,
-} from '@/registry/lib/menu'
+} from '@/registry/lib/list-rows'
 import { followHeight } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import {
@@ -49,7 +50,10 @@ import { cn } from '@/lib/utils'
  */
 
 /** Where `ListboxEmpty` shows, beside the list, which holds only options and groups, and whether the list has none. */
-const EmptyContext = createContext<{ slot: HTMLElement | null; empty: boolean }>({
+const EmptyContext = createContext<{
+  slot: HTMLElement | null
+  empty: boolean
+}>({
   slot: null,
   empty: false,
 })
@@ -68,7 +72,10 @@ function Listbox<Value = string, Multiple extends boolean | undefined = false>({
   children,
   activation = 'manual',
   ...props
-}: ListboxProps<Value, Multiple> & { className?: string; children?: ReactNode }) {
+}: ListboxProps<Value, Multiple> & {
+  className?: string
+  children?: ReactNode
+}) {
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
   const [empty, setEmpty] = useState(false)
   const emptyId = useId()
@@ -136,7 +143,10 @@ function Listbox<Value = string, Multiple extends boolean | undefined = false>({
               aria-describedby={empty ? emptyId : undefined}
               // The 4px around the rows is the highlight's margin, as in a
               // menu, so it stays the same at every density.
-              className='group/menu flex min-w-0 flex-col p-1 focus-visible:outline-hidden'
+              className={cn(
+                'group/menu flex min-w-0 flex-col p-1 focus-visible:outline-hidden',
+                menuGutterClassName,
+              )}
               {...(props as ListboxProps<Value, Multiple>)}
             >
               <EmptyContext value={{ slot, empty }}>{children}</EmptyContext>

@@ -10,7 +10,6 @@ import {
   panelOverlayClassName,
   panelTitleClassName,
 } from '@/registry/lib/panel'
-import { PopupLayerContext, useOwnPopupLayer } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { refuse } from '@/registry/lib/refuse'
 import {
@@ -103,8 +102,7 @@ function AlertDialogContent<Payload = unknown>({
   variant?: 'default' | 'badge'
 }) {
   const box = use(AlertDialogBoxContext)
-  const [layer, setLayer] = useOwnPopupLayer(!inline)
-  const own = useMemo(() => mergeRefs(ref, box, setLayer), [ref, box, setLayer])
+  const own = useMemo(() => mergeRefs(ref, box), [ref, box])
   return (
     <>
       <AlertDialogBackdrop />
@@ -116,11 +114,9 @@ function AlertDialogContent<Payload = unknown>({
         {...props}
       >
         {(state) => (
-          <PopupLayerContext value={layer}>
-            <PanelSurface>
-              {typeof children === 'function' ? children(state) : children}
-            </PanelSurface>
-          </PopupLayerContext>
+          <PanelSurface>
+            {typeof children === 'function' ? children(state) : children}
+          </PanelSurface>
         )}
       </AlertDialogContentPrimitive>
     </>

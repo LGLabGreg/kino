@@ -1,13 +1,7 @@
 'use client'
 
 import { reducesMotion, watchReducedMotion } from '@/registry/lib/reduce-motion'
-import {
-  type CSSProperties,
-  createContext,
-  use,
-  useState,
-  useSyncExternalStore,
-} from 'react'
+import { useState, useSyncExternalStore } from 'react'
 
 /*
  * How every popup anchored to a trigger opens and closes: it grows out from
@@ -66,7 +60,7 @@ export function usePopupPresentationAt<P extends PopupPresentation>(
 }
 
 export type PhysicalSide = 'top' | 'bottom' | 'left' | 'right'
-/** A side as Base UI names it: the inline sides follow the reading direction. */
+/** A side as ui-sdk names it: the inline sides follow the reading direction. */
 export type PopupSide = PhysicalSide | 'inline-start' | 'inline-end'
 export type ReadingDirection = 'ltr' | 'rtl'
 
@@ -150,8 +144,7 @@ export const popupSurfaceClassName =
  * A popup ui-sdk places: the box it grows from, on the side it landed on
  * (`popupGrowFrom`, written out for Tailwind), and `group/popup`, which the
  * box inside it (`popupGrowBoxClassName`) and its content read. It paints
- * nothing itself, so a popup of the old library opened inside it shows whole:
- * ui-sdk clears the browser's own popover styles on some popups only, not
+ * nothing itself: ui-sdk clears the browser's own popover styles on some popups only, not
  * the Select's or the lists', so it clears the ones that would show, the
  * background behind the surface's corners and the scroll box that clips its
  * ring and shadow. ui-sdk keeps the room left on screen to the popup itself,
@@ -171,9 +164,8 @@ export const popupGrowBoxClassName =
 
 /**
  * The same box for a popup that carries its open state on itself
- * (`data-starting-style`), such as the AI chat popup's window or a popup of
- * the old library, with its `--popup-grow-from` set by its own code or by
- * `basePopupGrow`.
+ * (`data-starting-style`), such as the AI chat popup's window, with its
+ * `--popup-grow-from` set by its own code.
  */
 export const popupGrowClassName =
   '[--popup-grow-to:inset(-2rem_round_calc(var(--surface-radius)+2rem))] [clip-path:var(--popup-grow-to)] transition-[clip-path,opacity] duration-(--motion-morph-duration) ease-(--motion-morph-easing) data-starting-style:[clip-path:var(--popup-grow-from)] data-ending-style:[clip-path:var(--popup-grow-from)] data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) motion-reduce:transition-opacity motion-reduce:data-starting-style:opacity-0 motion-reduce:data-starting-style:[clip-path:var(--popup-grow-to)] motion-reduce:data-ending-style:opacity-0 motion-reduce:data-ending-style:[clip-path:var(--popup-grow-to)]'
@@ -184,82 +176,3 @@ export const popupGrowClassName =
  */
 export const popupGrowContentClassName =
   'transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-open/popup:delay-[calc(var(--motion-morph-duration)*0.15)] group-data-starting-style/popup:opacity-0 group-data-ending-style/popup:opacity-0 group-data-ending-style/popup:duration-[calc(var(--motion-exit-duration)*0.4)]'
-
-/*
- * Two libraries on one page, until the last popup of the old one moves
- * (`scripts/lib/library-rules.test.ts` keeps this to files still on it):
- * ui-sdk opens its popups in the browser's top layer, above everything in
- * `<body>`, so a popup of the old library, which portals to `<body>`, would
- * open behind a ui-sdk dialog or popover and take no presses. A ui-sdk
- * Dialog, Alert dialog or Popover is the layer for what opens inside it.
- */
-
-/** The ui-sdk popup a popup of the old library opens inside, if any. */
-export const PopupLayerContext = createContext<HTMLElement | null>(null)
-
-/**
- * For the content of a ui-sdk Dialog, Alert dialog or Popover: the layer to
- * hand to `PopupLayerContext` around what is inside it, and the ref for its
- * element. Only content in the top layer is one: content shown `inline` is
- * in the page, as the old library's popups are.
- */
-export function useOwnPopupLayer(inTopLayer: boolean) {
-  const around = use(PopupLayerContext)
-  const [element, setElement] = useState<HTMLElement | null>(null)
-  return [(inTopLayer ? element : null) ?? around, setElement] as const
-}
-
-/** Where a popup of the old library portals: inside the ui-sdk popup around it, or `<body>`. */
-export function usePopupLayer(): HTMLElement | undefined {
-  return use(PopupLayerContext) ?? undefined
-}
-
-/**
- * What a popup of the old library needs to grow from its trigger, given the
- * reading direction its Base UI provider says: its `dir`, a function for its
- * `style` prop that sets `--popup-grow-from`, and `anchor`, the props for an
- * empty arrow part inside it that writes `--arrow-offset` on the popup.
- */
-export function basePopupGrow(direction: ReadingDirection) {
-  return {
-    dir: direction,
-    style: ({ side }: { side: PopupSide }) =>
-      ({
-        '--popup-grow-from': popupGrowFrom(physicalSide(side, direction)),
-      }) as CSSProperties,
-    anchor: {
-      ref: (marker: HTMLElement | null) => (marker ? trackAnchor(marker) : undefined),
-      'data-popup-anchor': '',
-      className: 'pointer-events-none absolute size-0',
-    },
-  }
-}
-
-/*
- * Base UI centres an arrow on the trigger, past any shift. A marker the size
- * of nothing in the arrow's place tells the popup where that is, as ui-sdk's
- * `--arrow-offset` does. Kept outside any hook: the React Compiler can drop
- * side effects written inside one.
- */
-function trackAnchor(marker: HTMLElement) {
-  const write = () => {
-    const popup = marker.parentElement
-    const offset = marker.style.left || marker.style.top
-    if (popup && offset) popup.style.setProperty('--arrow-offset', offset)
-  }
-  write()
-  const observer = new MutationObserver(write)
-  observer.observe(marker, { attributes: true, attributeFilter: ['style'] })
-  return () => observer.disconnect()
-}
-
-/**
- * What every anchored popup of the old library's positioner takes: 8px from
- * the screen's edge, an arrow free to sit right under the trigger, and its
- * own layer above the page.
- */
-export const basePositionerProps = {
-  collisionPadding: POPUP_COLLISION_PADDING,
-  arrowPadding: 0,
-  className: 'isolate z-50 outline-hidden',
-} as const

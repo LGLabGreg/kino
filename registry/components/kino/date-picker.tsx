@@ -513,7 +513,6 @@ function DatePickerContent({
       {({ presentation }) => (
         <PopoverBox
           presentation={presentation}
-          layer={content.layer}
           className={cn(
             'w-auto flex-row flex-wrap items-start gap-(--surface-gap) max-sm:justify-center',
             className,

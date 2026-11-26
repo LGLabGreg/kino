@@ -68,7 +68,7 @@ function SiteHeaderIsland({
            */}
           <div
             aria-hidden
-            className='bg-background/80 ring-foreground/12 pointer-events-none absolute -inset-x-3 inset-y-0 -z-10 rounded-[calc(var(--control-radius)+--spacing(3))] opacity-0 shadow-lg shadow-black/8 ring-1 backdrop-blur-lg transition-[opacity,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:inset(0_0_round_calc(var(--control-radius)+--spacing(3)))] group-data-scrolled/header:opacity-100 group-data-drawn/header:[clip-path:inset(0_var(--site-header-inset)_round_calc(var(--control-radius)+--spacing(3)))] group-has-data-popup-open/header:opacity-100 motion-reduce:transition-[opacity] dark:shadow-black/40 forced-colors:bg-[Canvas]'
+            className='bg-background/80 ring-foreground/12 pointer-events-none absolute -inset-x-3 inset-y-0 -z-10 rounded-[calc(var(--control-radius)+--spacing(3))] opacity-0 shadow-lg shadow-black/8 ring-1 backdrop-blur-lg transition-[opacity,clip-path] duration-(--motion-layout-duration) ease-[var(--motion-layout-fade-easing),var(--motion-layout-easing)] [clip-path:inset(0_0_round_calc(var(--control-radius)+--spacing(3)))] group-data-scrolled/header:opacity-100 group-data-drawn/header:[clip-path:inset(0_var(--site-header-inset)_round_calc(var(--control-radius)+--spacing(3)))] group-has-[[aria-haspopup][aria-expanded=true]]/header:opacity-100 motion-reduce:transition-[opacity] dark:shadow-black/40 forced-colors:bg-[Canvas]'
           />
           <div
             data-site-header-part='start'

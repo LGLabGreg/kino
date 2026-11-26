@@ -11,11 +11,12 @@ import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { followRows } from '@/registry/lib/highlight'
 import {
   MenuHighlight,
+  menuGutterClassName,
   menuLabelClassName,
   menuNoticeClassName,
   menuRowVariants,
   menuSeparatorClassName,
-} from '@/registry/lib/menu'
+} from '@/registry/lib/list-rows'
 import {
   PanelHandle,
   panelSheetBackdropClassName,
@@ -173,6 +174,7 @@ function FilterListRows({
         // padding, so it stays the same at every density. With no rows, it
         // takes no room, so the notice sits alone.
         'group/menu relative flex flex-col p-1 [&:not(:has([data-menu-row]))]:p-0',
+        menuGutterClassName,
         className,
       )}
     >

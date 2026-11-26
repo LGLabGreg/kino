@@ -1,12 +1,6 @@
 'use client'
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLinkItem,
-  DropdownMenuTrigger,
-} from '@/registry/components/kino/dropdown-menu'
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/registry/components/kino/menu'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
 import { followPointer, highlightClassName, itemMatching } from '@/registry/lib/highlight'
@@ -72,7 +66,7 @@ function BreadcrumbList({
     if (!layer || !list) return
     return followPointer(list, layer, {
       itemOf: itemMatching(list, CRUMB_TARGETS),
-      current: '[data-slot=breadcrumb-ellipsis][data-popup-open]',
+      current: '[data-breadcrumb-ellipsis][data-open]',
       focus: true,
     })
   }, [])
@@ -196,7 +190,7 @@ function BreadcrumbSeparator({ className, children, ...props }: ComponentProps<'
 }
 
 /** What the highlight glides between: the links and "…". */
-const CRUMB_TARGETS = '[data-slot=breadcrumb-link],[data-slot=breadcrumb-ellipsis]'
+const CRUMB_TARGETS = '[data-slot=breadcrumb-link],[data-breadcrumb-ellipsis]'
 
 /** A folded crumb, as its row in the menu: its name, and the link or button it stands for. */
 interface FoldedCrumb {
@@ -235,7 +229,7 @@ function BreadcrumbOverflow({
         data-collapsed=''
         className='inline-flex shrink-0 items-center data-collapsed:hidden'
       >
-        <DropdownMenu
+        <Menu
           onOpenChange={(open) => {
             const list = item.current?.parentElement
             if (!open || !list) return
@@ -248,13 +242,13 @@ function BreadcrumbOverflow({
               requestAnimationFrame(() => item.current?.removeAttribute('data-menu'))
           }}
         >
-          <DropdownMenuTrigger
-            data-slot='breadcrumb-ellipsis'
+          <MenuTrigger
+            data-breadcrumb-ellipsis=''
             aria-label={label}
             className={cn(
               crumbClassName,
               crumbLinkClassName,
-              'data-popup-open:text-foreground',
+              'data-open:text-foreground',
             )}
           >
             <IconPlaceholder
@@ -265,36 +259,42 @@ function BreadcrumbOverflow({
               remixicon='RiMoreLine'
               aria-hidden
             />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
+          </MenuTrigger>
+          <MenuContent>
             {folded.map((crumb, index) =>
               crumb.href === null ? (
                 // A crumb that is a button, such as a chart's way back out, is a row that presses it.
-                <DropdownMenuItem
+                <MenuItem
                   // oxlint-disable-next-line react/no-array-index-key -- the folded crumbs keep their order
                   key={index}
                   disabled={!crumb.link}
-                  onClick={() => crumb.link?.click()}
+                  onSelect={() => crumb.link?.click()}
                 >
                   {crumb.label}
-                </DropdownMenuItem>
+                </MenuItem>
               ) : (
-                <DropdownMenuLinkItem
+                <MenuItem
                   // oxlint-disable-next-line react/no-array-index-key -- the folded crumbs keep their order
                   key={index}
-                  href={crumb.href}
-                  onClick={(event) => {
-                    if (!crumb.link || opensElsewhere(event)) return
-                    event.preventDefault()
-                    crumb.link.click()
-                  }}
+                  render={
+                    // The row gives the link its content.
+                    // oxlint-disable-next-line jsx-a11y/control-has-associated-label, jsx-a11y/anchor-has-content
+                    <a
+                      href={crumb.href}
+                      onClick={(event) => {
+                        if (!crumb.link || opensElsewhere(event)) return
+                        event.preventDefault()
+                        crumb.link.click()
+                      }}
+                    />
+                  }
                 >
                   {crumb.label}
-                </DropdownMenuLinkItem>
+                </MenuItem>
               ),
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </MenuContent>
+        </Menu>
       </li>
       {cloneElement(separator, {
         'data-collapsed': '',
@@ -359,9 +359,7 @@ function fitTrail(list: HTMLOListElement) {
     const overflow = list.querySelector<HTMLElement>(
       ':scope > [data-slot=breadcrumb-overflow]',
     )
-    const trigger = overflow?.querySelector<HTMLElement>(
-      '[data-slot=breadcrumb-ellipsis]',
-    )
+    const trigger = overflow?.querySelector<HTMLElement>('[data-breadcrumb-ellipsis]')
     // While "…" has its menu open or closing, what it lists stays folded, so
     // focus has "…" to come back to; the menu settling refits.
     if (overflow?.hasAttribute('data-menu')) return

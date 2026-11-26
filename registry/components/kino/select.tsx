@@ -8,11 +8,12 @@ import {
   listIndicatorClassName,
   MenuHighlight,
   menuIndicatorSlot,
+  menuGutterClassName,
   menuLabelClassName,
   menuRowVariants,
   menuSeparatorClassName,
   MenuTick,
-} from '@/registry/lib/menu'
+} from '@/registry/lib/list-rows'
 import {
   PanelHandle,
   panelSheetBackdropClassName,
@@ -430,6 +431,7 @@ function SelectContent({
                 // The 4px around the rows is the highlight's margin, not a
                 // surface's padding, so it stays the same at every density.
                 'group/menu relative flex flex-col p-1',
+                menuGutterClassName,
                 presentation === 'sheet' ? null : popupGrowContentClassName,
                 selectRowsClassName,
                 className,

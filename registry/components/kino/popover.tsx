@@ -12,12 +12,10 @@ import {
 import {
   HOVER_DELAY,
   POPUP_COLLISION_PADDING,
-  PopupLayerContext,
   popupGrowBoxClassName,
   popupGrowContentClassName,
   popupPlacedClassName,
   popupSurfaceClassName,
-  useOwnPopupLayer,
   usePopupPresentation,
 } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
@@ -108,13 +106,10 @@ const popoverContentClassName = cn(
  */
 function PopoverBox({
   presentation,
-  layer,
   className,
   children,
 }: {
   presentation: 'popover' | 'sheet'
-  /** The popup's own layer, from `useOwnPopupLayer`, which popups opened inside it open in. */
-  layer: HTMLElement | null
   className?: string
   children?: ReactNode
 }) {
@@ -133,7 +128,7 @@ function PopoverBox({
     >
       {presentation === 'sheet' ? <PanelHandle /> : null}
       <PopoverScroller sheet={presentation === 'sheet'} className={className}>
-        <PopupLayerContext value={layer}>{children}</PopupLayerContext>
+        {children}
       </PopoverScroller>
     </div>
   )
@@ -159,7 +154,7 @@ function PopoverContent({
   className?: string
   children?: ReactNode
 }) {
-  const content = usePopoverContent(ref, !inline)
+  const content = usePopoverContent(ref)
   return (
     <PopoverContentPrimitive
       {...content.props}
@@ -170,11 +165,7 @@ function PopoverContent({
       {...props}
     >
       {({ presentation }) => (
-        <PopoverBox
-          presentation={presentation}
-          layer={content.layer}
-          className={className}
-        >
+        <PopoverBox presentation={presentation} className={className}>
           {children}
         </PopoverBox>
       )}
@@ -331,16 +322,12 @@ function PopoverFooter({
 
 /**
  * What a popup on the Popover's look puts on ui-sdk's content part: its ref,
- * which gives it a layer of its own for what opens inside it (`layer`), its
- * offset and padding from the screen's edges, and its class.
+ * its offset and padding from the screen's edges, and its class.
  */
-function usePopoverContent(ref: Ref<HTMLDivElement> | undefined, ownLayer = true) {
-  const [layer, setLayer] = useOwnPopupLayer(ownLayer)
-  const own = useMemo(() => mergeRefs(ref, setLayer), [ref, setLayer])
+function usePopoverContent(ref: Ref<HTMLDivElement> | undefined) {
   return {
-    layer,
     props: {
-      ref: own,
+      ref,
       sideOffset: 6,
       collisionPadding: POPUP_COLLISION_PADDING,
       arrowPadding: 0,

@@ -844,7 +844,7 @@ function SidebarMenuAction({ className, ...props }: ComponentProps<typeof Button
       size='icon-xs'
       className={cn(
         'text-muted-foreground absolute top-[calc((var(--control-height)-var(--control-height-xs))/2)] z-30 start-[calc(var(--sidebar-width,16rem)-1px-2*var(--control-padding)-var(--control-height-xs)-(var(--control-height)-var(--control-height-xs))/2)]',
-        'opacity-0 group-hover/sidebar-item:opacity-100 group-focus-within/sidebar-item:opacity-100 data-popup-open:opacity-100 pointer-coarse:opacity-100',
+        'opacity-0 group-hover/sidebar-item:opacity-100 group-focus-within/sidebar-item:opacity-100 aria-expanded:opacity-100 pointer-coarse:opacity-100',
         hiddenInRail,
         className,
       )}
@@ -1039,6 +1039,9 @@ function SidebarMenuSubButton({
 }
 
 /** The icon rail's width: a row's height, a gutter either side and the sidebar's border. */
+// A menu's or a popover's trigger while it is open, never a section that has expanded.
+const OPEN_POPUP = '[aria-haspopup][aria-expanded=true]'
+
 const railVariable =
   '[--sidebar-rail:var(--sidebar-width-icon,calc(var(--control-height)+2*var(--control-padding)+1px))]'
 
@@ -1233,8 +1236,7 @@ function usePeek({
     clearTimers()
     const panel = panelRef.current
     if (!panel) return
-    if (panel.querySelector('[data-popup-open]') || panel.querySelector(':focus-visible'))
-      return
+    if (panel.querySelector(OPEN_POPUP) || panel.querySelector(':focus-visible')) return
     // A row pressed inside it holds focus, which would fall to the page once it hides.
     if (panel.contains(document.activeElement)) trigger()?.focus({ preventScroll: true })
     setPeek((now) => (now === 'open' ? 'closing' : now))
@@ -1268,12 +1270,12 @@ function usePeek({
       if (focused) trigger()?.focus()
     }
     const menus = new MutationObserver(() => {
-      if (!inside.current && !panel.querySelector('[data-popup-open]')) scheduleClose()
+      if (!inside.current && !panel.querySelector(OPEN_POPUP)) scheduleClose()
     })
     menus.observe(panel, {
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-popup-open'],
+      attributeFilter: ['aria-expanded'],
     })
     document.addEventListener('keydown', keyDown)
     return () => {

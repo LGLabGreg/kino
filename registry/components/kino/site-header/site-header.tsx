@@ -52,7 +52,7 @@ function SiteHeader({
       {/* The surface, behind the bar: the page shows through it, softened. */}
       <div
         aria-hidden
-        className='bg-background/80 pointer-events-none absolute inset-0 -z-10 border-b opacity-0 backdrop-blur-lg transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-scrolled/header:opacity-100 group-has-data-popup-open/header:opacity-100 forced-colors:bg-[Canvas] forced-colors:opacity-100'
+        className='bg-background/80 pointer-events-none absolute inset-0 -z-10 border-b opacity-0 backdrop-blur-lg transition-opacity duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) group-data-scrolled/header:opacity-100 group-has-[[aria-haspopup][aria-expanded=true]]/header:opacity-100 forced-colors:bg-[Canvas] forced-colors:opacity-100'
       />
       <div className={cn(siteHeaderColumnClassName, 'flex h-16 items-center gap-6')}>
         <div data-site-header-part='start' className='flex shrink-0 items-center'>

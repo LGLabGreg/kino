@@ -36,7 +36,11 @@ import {
   filterListValueTriggerClassName,
 } from '@/registry/lib/filter-list'
 import { useFlow } from '@/registry/lib/flow'
-import { listIndicatorClassName, menuIndicatorSlot, MenuTick } from '@/registry/lib/menu'
+import {
+  listIndicatorClassName,
+  menuIndicatorSlot,
+  MenuTick,
+} from '@/registry/lib/list-rows'
 import { POPUP_COLLISION_PADDING, usePopupPresentation } from '@/registry/lib/popup'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { useEdgeFades } from '@/registry/lib/scroll'

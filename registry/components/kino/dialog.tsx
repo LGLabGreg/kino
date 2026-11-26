@@ -17,7 +17,6 @@ import {
   panelTitleClassName,
   useScrollRegion,
 } from '@/registry/lib/panel'
-import { PopupLayerContext, useOwnPopupLayer } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import type { DialogContentState } from '@ui-sdk/react/dialog'
 import {
@@ -90,19 +89,17 @@ function DialogContent<Payload = unknown>({
   showCloseButton?: boolean
   bare?: boolean
 }) {
-  const [layer, setLayer] = useOwnPopupLayer(!inline)
-  const own = useMemo(() => mergeRefs(ref, setLayer), [ref, setLayer])
   const parts = (state: DialogContentState<Payload>) =>
     typeof children === 'function' ? children(state) : children
   if (bare) {
     return (
       <DialogContentPrimitive<Payload>
-        ref={own}
+        ref={ref}
         inline={inline}
         className={cn('focus-visible:outline-hidden', className)}
         {...props}
       >
-        {(state) => <PopupLayerContext value={layer}>{parts(state)}</PopupLayerContext>}
+        {parts}
       </DialogContentPrimitive>
     )
   }
@@ -110,34 +107,32 @@ function DialogContent<Payload = unknown>({
     <>
       <DialogBackdrop />
       <DialogContentPrimitive<Payload>
-        ref={own}
+        ref={ref}
         inline={inline}
         className={cn(panelDialogClassName, panelFooterTint, className)}
         {...props}
       >
         {(state) => (
-          <PopupLayerContext value={layer}>
-            <PanelSurface
-              closeButton={
-                showCloseButton ? (
-                  <DialogClosePrimitive
-                    render={
-                      <Button
-                        variant='ghost'
-                        size='icon-sm'
-                        className={panelCloseClassName}
-                      />
-                    }
-                    aria-label='Close'
-                  >
-                    <PanelCloseIcon />
-                  </DialogClosePrimitive>
-                ) : null
-              }
-            >
-              {parts(state)}
-            </PanelSurface>
-          </PopupLayerContext>
+          <PanelSurface
+            closeButton={
+              showCloseButton ? (
+                <DialogClosePrimitive
+                  render={
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      className={panelCloseClassName}
+                    />
+                  }
+                  aria-label='Close'
+                >
+                  <PanelCloseIcon />
+                </DialogClosePrimitive>
+              ) : null
+            }
+          >
+            {parts(state)}
+          </PanelSurface>
         )}
       </DialogContentPrimitive>
     </>

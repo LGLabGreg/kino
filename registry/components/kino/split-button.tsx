@@ -2,9 +2,8 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { ButtonGroup } from '@/registry/components/kino/button-group'
-import { DropdownMenuTrigger } from '@/registry/components/kino/dropdown-menu'
+import { MenuTrigger } from '@/registry/components/kino/menu'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import type { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import { type ComponentProps, createContext, use, useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -101,16 +100,14 @@ function SplitButtonAction({
 
 /**
  * The button that opens the menu, with a chevron unless you give it another
- * icon. Put it in a `DropdownMenu`, beside its `DropdownMenuContent`.
+ * icon. Put it in a `Menu`, beside its `MenuContent`.
  */
-function SplitButtonTrigger<Payload>({
+function SplitButtonTrigger({
   className,
   disabled,
   children,
-  onClick,
-  onKeyDown,
   ...props
-}: Omit<MenuPrimitive.Trigger.Props<Payload>, 'className' | 'render' | 'aria-label'> & {
+}: Omit<ComponentProps<typeof MenuTrigger>, 'className' | 'render' | 'aria-label'> & {
   className?: string
   /** What the menu holds, such as "Choose how to merge": the button shows only an icon. */
   'aria-label': string
@@ -120,18 +117,10 @@ function SplitButtonTrigger<Payload>({
   // the menu that starts the action hands focus back to it as the menu closes.
   const held = context.loading && !(disabled ?? context.disabled)
   return (
-    <DropdownMenuTrigger
+    <MenuTrigger
       data-split-button-trigger=''
-      disabled={disabled ?? context.disabled}
-      aria-disabled={held || undefined}
-      onClick={(event) => {
-        onClick?.(event)
-        if (held) event.preventBaseUIHandler()
-      }}
-      onKeyDown={(event) => {
-        onKeyDown?.(event)
-        if (held) event.preventBaseUIHandler()
-      }}
+      disabled={held || (disabled ?? context.disabled)}
+      focusableWhenDisabled={held}
       render={
         <Button
           data-pending={context.loading ? '' : undefined}
@@ -152,7 +141,7 @@ function SplitButtonTrigger<Payload>({
           aria-hidden
         />
       )}
-    </DropdownMenuTrigger>
+    </MenuTrigger>
   )
 }
 

@@ -560,7 +560,9 @@ export function createHighlight(layer: HTMLElement): Highlight {
 
   // Moves it at once, while a fade it is in keeps running.
   const jump = (write: () => void) =>
-    withoutTransition(layer, write, { properties: ['clip-path', 'background-color'] })
+    withoutTransition(layer, write, {
+      properties: ['clip-path', 'background-color'],
+    })
 
   // Its item moved or changed size under it, not to a new item: on its way
   // there (a glide not yet done, or the item sliding to a new place), it turns
@@ -688,8 +690,8 @@ export function createHighlight(layer: HTMLElement): Highlight {
 }
 
 /**
- * Follows the row marked `data-highlighted` in a menu (by Base UI) or a list
- * (by ui-sdk), or the row whose submenu is open. While the pointer is over `bounds` (the
+ * Follows the row ui-sdk marks `data-highlighted` in a menu or a list, or the
+ * row whose submenu is open. While the pointer is over `bounds` (the
  * popup, by default) the highlight stays where it is when no row is
  * highlighted, as when it crosses a separator or a label, or in the moment
  * between one submenu closing and the next opening, so it always slides on.
@@ -759,9 +761,16 @@ export function followRows(
   let inside = false
   let frame = 0
 
+  // A submenu renders inside the list that opened it: its rows are its own highlight's.
+  const own = (row: Element) => {
+    const nested = row.parentElement?.closest('[data-nested]')
+    return !nested || !list.contains(nested)
+  }
+  const ownRow = (selector: string) =>
+    [...list.querySelectorAll<HTMLElement>(selector)].find(own) ?? null
   const target = () =>
-    list.querySelector<HTMLElement>(':scope [data-menu-row][data-highlighted]') ??
-    list.querySelector<HTMLElement>(':scope [data-menu-row][data-popup-open]')
+    ownRow(':scope [data-menu-row][data-highlighted]') ??
+    ownRow(':scope [data-menu-row][data-open]')
 
   const fromOpener = (opener: HTMLElement) => {
     waiting = false
@@ -789,12 +798,12 @@ export function followRows(
       // Across a gap, a separator or a label the highlight holds; another
       // item in the list that took the highlight, such as a theme switcher's
       // icon, has a look of its own, so this one fades.
-      if (!inside || list.querySelector(':scope [data-highlighted]')) highlight.move(null)
+      if (!inside || ownRow(':scope [data-highlighted]')) highlight.move(null)
       return
     }
     if (first && opener) {
-      // Base UI places a submenu a frame or two after it mounts; measured
-      // before that, the item that opened it is in the wrong place.
+      // A submenu is placed a frame or two after it mounts; measured before
+      // that, the item that opened it is in the wrong place.
       first = false
       waiting = true
       frame = requestAnimationFrame(() => {
@@ -822,9 +831,9 @@ export function followRows(
     sync()
   }
 
-  // Base UI stops pointer events on the menu while a submenu opens, which
-  // fires `pointerleave` with the pointer still over it; the document still
-  // sees every move. The box is the popup's, since a list that scrolls is
+  // A menu can stop pointer events while a submenu opens, which fires
+  // `pointerleave` with the pointer still over it; the document still sees
+  // every move. The box is the popup's, since a list that scrolls is
   // taller than what shows of it.
   const moved = (event: PointerEvent) => {
     const box = bounds.getBoundingClientRect()
@@ -859,7 +868,7 @@ export function followRows(
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: ['data-highlighted', 'data-popup-open'],
+    attributeFilter: ['data-highlighted', 'data-open'],
   })
   const state = new MutationObserver(opened)
   state.observe(popup, {
@@ -933,8 +942,8 @@ export function followPointer(
   let last: 'pointer' | 'focus' = 'pointer'
   let frame = 0
   let shown: HTMLElement | null = null
-  // The item whose popup just closed with focus still inside it: Base UI hands
-  // focus back once the popup has gone, so the highlight waits on the item
+  // The item whose popup just closed with focus still inside it: the popup
+  // hands focus back once it has gone, so the highlight waits on the item
   // instead of fading and coming back.
   let held: HTMLElement | null = null
 
@@ -955,7 +964,7 @@ export function followPointer(
       move(item)
       return
     }
-    // Base UI clears one trigger before it opens the next: wait a frame.
+    // A bar clears one trigger before it opens the next: wait a frame.
     frame = requestAnimationFrame(() => {
       // Only while focus is in the popup that is still closing.
       if (!target() && shown && document.activeElement?.closest('[data-ending-style]')) {
@@ -1043,7 +1052,7 @@ export function followPointer(
     opened.observe(area, {
       attributes: true,
       subtree: true,
-      attributeFilter: ['data-popup-open'],
+      attributeFilter: ['data-open'],
     })
   }
   return () => {
@@ -1095,7 +1104,7 @@ export function followFocus(
  * Keeps the highlight on the picked item of a group that holds one choice,
  * as a segmented control's thumb: there when the page paints, sliding as
  * the pick changes and following its item at once when sizes change. It fades when
- * nothing is picked. `attributes` are the ones that change when the pick does, such as Base UI's `data-checked`.
+ * nothing is picked. `attributes` are the ones that change when the pick does, such as `data-checked`.
  */
 export function followPick(
   area: HTMLElement,

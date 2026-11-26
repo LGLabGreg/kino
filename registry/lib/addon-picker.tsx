@@ -13,7 +13,7 @@ import {
 } from '@/registry/components/kino/combobox'
 import { InputGroupAddon, InputGroupButton } from '@/registry/components/kino/input-group'
 import { FilterListChevron } from '@/registry/lib/filter-list'
-import { MenuShortcut } from '@/registry/lib/menu'
+import { RowShortcut } from '@/registry/lib/list-rows'
 import { matchRanges } from '@ui-sdk/core/text-match'
 import { Field as FieldPrimitive, useFieldControl } from '@ui-sdk/react/field'
 import { type ReactNode, type RefObject, useId, useMemo, useRef, useState } from 'react'
@@ -204,9 +204,7 @@ function AddonPicker({
                       <ComboboxItemText className='flex-1 whitespace-normal wrap-break-word'>
                         {option.label}
                       </ComboboxItemText>
-                      {option.detail ? (
-                        <MenuShortcut>{option.detail}</MenuShortcut>
-                      ) : null}
+                      {option.detail ? <RowShortcut>{option.detail}</RowShortcut> : null}
                     </ComboboxItem>
                   )
                 })
