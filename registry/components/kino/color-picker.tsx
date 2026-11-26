@@ -787,8 +787,8 @@ function ColorPickerEyeDropper({
         aria-label='Pick a colour from the screen'
         {...props}
         disabled={disabled ?? pickerDisabled}
-        onClick={(event) => {
-          onClick?.(event)
+        onClick={(event, details) => {
+          onClick?.(event, details)
           if (event.defaultPrevented) return
           const EyeDropper = (window as unknown as { EyeDropper: EyeDropperApi })
             .EyeDropper

@@ -794,7 +794,7 @@ function TableSortButton({
         <Button
           variant='ghost'
           size='xs'
-          data-slot='table-sort'
+          data-table-sort=''
           data-sorted={sorted ? '' : undefined}
           // Its sides' padding sits outside the column, so the label lines up with the cells.
           className={cn(
@@ -932,7 +932,7 @@ function TableExpand({
     return (
       <span
         aria-hidden
-        data-slot='table-expand'
+        data-table-expand=''
         style={indent}
         className={cn('inline-block size-(--control-height-xs) align-middle', className)}
       />
@@ -942,7 +942,7 @@ function TableExpand({
     <Button
       variant='ghost'
       size='icon-xs'
-      data-slot='table-expand'
+      data-table-expand=''
       aria-expanded={expanded}
       style={indent}
       className={cn('align-middle', className)}

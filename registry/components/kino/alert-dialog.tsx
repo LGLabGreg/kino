@@ -150,9 +150,8 @@ function AlertDialogContent({
       initialFocus={
         initialFocus ??
         (() =>
-          popupRef.current?.querySelector<HTMLElement>(
-            '[data-slot=alert-dialog-cancel]',
-          ) ?? true)
+          popupRef.current?.querySelector<HTMLElement>('[data-alert-dialog-cancel]') ??
+          true)
       }
       data-variant={variant}
       className={cn(
@@ -296,7 +295,7 @@ function AlertDialogCancel({
   const pending = use(AlertDialogContext)?.pending ?? false
   return (
     <AlertDialogPrimitive.Close
-      data-slot='alert-dialog-cancel'
+      data-alert-dialog-cancel=''
       disabled={disabled || pending}
       render={render}
       className={cn(
@@ -328,7 +327,7 @@ function AlertDialogAction({
   const context = use(AlertDialogContext)
   return (
     <Button
-      data-slot='alert-dialog-action'
+      data-alert-dialog-action=''
       loading={loading || context?.pending}
       onClick={(event) => {
         context?.settle(onClick?.(event))

@@ -1,6 +1,5 @@
 'use client'
 
-import { useFollowedValue } from '@/registry/lib/controllable'
 import {
   followPointer,
   highlightClassName,
@@ -15,11 +14,18 @@ import {
   pillRowClassName,
   pillTrackClassName,
 } from '@/registry/lib/pill'
-import { mergeRefs } from '@/registry/lib/refs'
+import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { inertCopy, markResizing, transitionsQuiet } from '@/registry/lib/resize'
 import { revealInRow } from '@/registry/lib/scroll'
 import { SwapIcon } from '@/registry/lib/swap'
-import { Tabs as TabsPrimitive } from '@base-ui/react/tabs'
+import {
+  TabsIndicator,
+  TabsList as TabsListPrimitive,
+  TabsPanel as TabsPanelPrimitive,
+  Tabs as TabsPrimitive,
+  TabsTab as TabsTabPrimitive,
+  TabsTabIcon as TabsTabIconPrimitive,
+} from '@ui-sdk/react/tabs'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
@@ -33,63 +39,30 @@ import {
 
 import { cn } from '@/lib/utils'
 
-/** No tab's value, so nothing reads as picked outside a `Tabs`. */
-const NO_TAB = Symbol('no tab')
-
-/**
- * The picked tab's value, followed from Base UI's own, so the pill's copy of
- * the list knows it as the list does, in the same render.
- */
-const TabsValueContext = createContext<unknown>(NO_TAB)
-
-/** Why Base UI picks a tab on its own: it keeps those picks even when cancelled. */
-const AUTOMATIC_PICKS = ['initial', 'missing', 'disabled'] as const
-
-/** Whether the panels stay in the page for the browser's find, as `Tabs`' `hiddenUntilFound` says. */
-const TabsUntilFoundContext = createContext(false)
+/** The picked tab's value, from ui-sdk's state, so the pill's copy of the list knows it. */
+const TabsValueContext = createContext<string | null>(null)
 
 /** Whether the tab around it is picked, for its icon. */
-const TabsActiveContext = createContext(false)
+const TabsSelectedContext = createContext(false)
 
-function Tabs({
+function Tabs<Value extends string>({
   className,
-  value,
-  defaultValue,
-  onValueChange,
-  hiddenUntilFound = false,
+  children,
   ...props
-}: Omit<TabsPrimitive.Root.Props, 'className'> & {
+}: Omit<ComponentProps<typeof TabsPrimitive<Value>>, 'className' | 'children'> & {
   className?: string
-  /**
-   * Keeps every panel in the page, hidden until the browser's find in page
-   * lands in one, which then picks its tab.
-   */
-  hiddenUntilFound?: boolean
+  children?: ReactNode
 }) {
-  // Base UI's own default, so the two agree until it reports a change.
-  const [picked, follow] = useFollowedValue(
-    value,
-    defaultValue === undefined ? 0 : defaultValue,
-    onValueChange,
-    // Base UI picks a tab for one that's missing or disabled, cancelled or not.
-    { automatic: AUTOMATIC_PICKS },
-  )
   return (
-    <TabsUntilFoundContext value={hiddenUntilFound}>
-      <TabsValueContext value={picked}>
-        <TabsPrimitive.Root
-          data-slot='tabs'
-          className={cn(
-            'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
-            className,
-          )}
-          value={value}
-          defaultValue={defaultValue}
-          onValueChange={follow}
-          {...props}
-        />
-      </TabsValueContext>
-    </TabsUntilFoundContext>
+    <TabsPrimitive<Value>
+      className={cn(
+        'group/tabs flex min-w-0 gap-3 data-[orientation=horizontal]:flex-col',
+        className,
+      )}
+      {...props}
+    >
+      {(state) => <TabsValueContext value={state.value}>{children}</TabsValueContext>}
+    </TabsPrimitive>
   )
 }
 
@@ -106,7 +79,11 @@ const tabsListVariants = cva('group/tabs-track max-w-full min-w-0 shrink-0', {
   },
 })
 
-/** Scrolls a horizontal list that outgrows its column, and keeps the picked or focused tab in view. */
+/**
+ * Scrolls a horizontal list that outgrows its column, fades its edges, and
+ * glides the picked or focused tab into view. ui-sdk's own scroll moves only
+ * a list that scrolls itself, at once, and never for focus.
+ */
 function TabsScroller({ className, ...props }: ComponentProps<'div'>) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -116,7 +93,7 @@ function TabsScroller({ className, ...props }: ComponentProps<'div'>) {
 
     return revealInRow(scroller, {
       item: '[role="tab"]',
-      picked: 'data-active',
+      picked: 'data-selected',
       fade: '--tabs-fade',
     })
   }, [])
@@ -142,25 +119,35 @@ const tabsListLayout = cn(
 )
 
 // The highlight is as large as the list and only its window moves, so nothing changes size.
+// ui-sdk measures the picked tab once the page runs: until then the window is
+// empty and the picked tab draws itself, and its first placement doesn't move.
+// Its end and bottom come from the tab's own size: ui-sdk's `--active-tab-right`
+// and `-bottom` count from the list's scroll size, which rounds and takes in overflow.
 // Forced colours drop backgrounds, so there the highlight takes the system's own.
 const tabsIndicatorBase =
-  'pointer-events-none absolute z-10 transition-[clip-path] duration-(--motion-morph-duration) ease-(--motion-morph-easing) group-data-resizing/tabs-list:transition-none motion-reduce:transition-none forced-colors:bg-[Highlight] forced-colors:forced-color-adjust-none'
+  'pointer-events-none absolute z-10 transition-[clip-path] duration-(--motion-morph-duration) ease-(--motion-morph-easing) data-[activation-direction=none]:transition-none group-data-resizing/tabs-list:transition-none motion-reduce:transition-none forced-colors:bg-[Highlight] forced-colors:forced-color-adjust-none'
 
-/** True inside the pill's copy of the list, where a trigger is only its label. */
+/** True inside the pill's copy of the list, where a tab is only its label. */
 const TabsCopyContext = createContext(false)
 
-/** True inside a list of rows, where each trigger draws its own content. */
+/** True inside a list of rows, where each tab draws its own content. */
 const TabsRowsContext = createContext(false)
 
 function TabsList({
+  ref,
   className,
   variant = 'default',
   children,
   ...props
-}: Omit<TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>, 'className'> & {
+}: Omit<
+  ComponentProps<typeof TabsListPrimitive> & VariantProps<typeof tabsListVariants>,
+  'className' | 'children'
+> & {
   className?: string
+  children?: ReactNode
 }) {
   const backdropRef = useRef<HTMLSpanElement>(null)
+  const listRefs = useMemo(() => mergeRefs(markMounted, ref), [ref])
 
   // Behind the tab under the pointer, or the one with visible focus.
   useEffect(() => {
@@ -183,8 +170,8 @@ function TabsList({
   if (variant === 'rows') {
     return (
       <TabsRowsContext value={true}>
-        <TabsPrimitive.List
-          data-slot='tabs-list'
+        <TabsListPrimitive
+          ref={listRefs}
           data-variant={variant}
           className={cn(
             'group/tabs-list relative isolate flex flex-col gap-1',
@@ -203,14 +190,10 @@ function TabsList({
            * The picked row's tint: as large as the list, and only its window moves. It aims
            * at where the picked row ends up and moves on `layout`, as the rows grow, so the
            * two land together. A row's height can't overshoot, so nor does the tint: it eases
-           * on the role's fade curve. Base UI places it until the list has aimed it.
+           * on the role's fade curve. ui-sdk places it until the list has aimed it.
            */}
-          <TabsPrimitive.Indicator
-            data-slot='tabs-indicator'
-            renderBeforeHydration
-            className='bg-muted dark:bg-muted/60 pointer-events-none absolute inset-0 -z-10 transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) [clip-path:inset(var(--tabs-row-top,var(--active-tab-top))_0_var(--tabs-row-bottom,var(--active-tab-bottom))_0_round_var(--surface-radius))] group-data-resizing/tabs-list:transition-none motion-reduce:transition-none forced-colors:hidden'
-          />
-        </TabsPrimitive.List>
+          <TabsIndicator className='bg-muted dark:bg-muted/60 pointer-events-none absolute inset-0 -z-10 transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-fade-easing) [clip-path:inset(var(--tabs-row-top,var(--active-tab-top,0px))_0_var(--tabs-row-bottom,calc(100%_-_var(--active-tab-top,0px)_-_var(--active-tab-height,0px)))_0_round_var(--surface-radius))] data-[activation-direction=none]:transition-none group-data-resizing/tabs-list:transition-none motion-reduce:transition-none forced-colors:hidden' />
+        </TabsListPrimitive>
       </TabsRowsContext>
     )
   }
@@ -223,8 +206,8 @@ function TabsList({
     >
       {/* Room for the underline variant's focus ring, which the scroller would cut off. */}
       <TabsScroller className='group-data-[variant=line]/tabs-track:-m-1 group-data-[variant=line]/tabs-track:p-1'>
-        <TabsPrimitive.List
-          data-slot='tabs-list'
+        <TabsListPrimitive
+          ref={listRefs}
           className={cn(
             'group/tabs-list relative isolate',
             tabsListLayout,
@@ -241,89 +224,97 @@ function TabsList({
             className={cn(highlightClassName, pillBackdropClassName)}
           />
           {variant === 'line' ? (
-            <TabsPrimitive.Indicator
-              data-slot='tabs-indicator'
-              renderBeforeHydration
+            <TabsIndicator
               className={cn(
                 tabsIndicatorBase,
-                'bg-foreground inset-x-0 bottom-0 h-0.5 [clip-path:inset(0_var(--active-tab-right)_0_var(--active-tab-left))] data-[orientation=vertical]:inset-x-auto data-[orientation=vertical]:inset-y-0 data-[orientation=vertical]:end-0 data-[orientation=vertical]:h-auto data-[orientation=vertical]:w-0.5 data-[orientation=vertical]:[clip-path:inset(var(--active-tab-top)_0_var(--active-tab-bottom)_0)]',
+                'bg-foreground inset-x-0 bottom-0 h-0.5 [clip-path:inset(0_calc(100%_-_var(--active-tab-left,0px)_-_var(--active-tab-width,0px))_0_var(--active-tab-left,0px))] data-[orientation=vertical]:inset-x-auto data-[orientation=vertical]:inset-y-0 data-[orientation=vertical]:end-0 data-[orientation=vertical]:h-auto data-[orientation=vertical]:w-0.5 data-[orientation=vertical]:[clip-path:inset(var(--active-tab-top,0px)_0_calc(100%_-_var(--active-tab-top,0px)_-_var(--active-tab-height,0px))_0)]',
               )}
             />
           ) : (
-            <TabsPrimitive.Indicator
-              data-slot='tabs-indicator'
-              renderBeforeHydration
+            <TabsIndicator
               aria-hidden
               // Whatever the list holds is copied here, so nothing in the copy may take focus.
               inert
               className={cn(
                 tabsIndicatorBase,
                 pillClassName,
-                'inset-0 [clip-path:inset(var(--active-tab-top)_var(--active-tab-right)_var(--active-tab-bottom)_var(--active-tab-left)_round_max(0px,calc(var(--list-radius)-2px)))]',
+                'inset-0 [clip-path:inset(var(--active-tab-top,0px)_calc(100%_-_var(--active-tab-left,0px)_-_var(--active-tab-width,0px))_calc(100%_-_var(--active-tab-top,0px)_-_var(--active-tab-height,100%))_var(--active-tab-left,0px)_round_max(0px,calc(var(--list-radius)-2px)))]',
               )}
             >
               <span className={cn(tabsListLayout, 'h-full')}>
                 <TabsCopyContext value={true}>{children}</TabsCopyContext>
               </span>
-            </TabsPrimitive.Indicator>
+            </TabsIndicator>
           )}
-        </TabsPrimitive.List>
+        </TabsListPrimitive>
       </TabsScroller>
     </div>
   )
 }
 
-const tabsTriggerLayout = cn(
+const tabsTabLayout = cn(
   pillItemLayout,
   'shrink-0 group-data-[orientation=vertical]/tabs:justify-start',
 )
 
-function TabsTrigger({
+// Until the page runs and ui-sdk places the indicator, the picked tab draws it itself.
+const tabsTabUnplaced =
+  'relative [[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:bg-primary [[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:text-primary-foreground group-data-[variant=line]/tabs-track:[[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:bg-transparent group-data-[variant=line]/tabs-track:[[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:text-foreground group-data-[variant=line]/tabs-track:[[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:after:bg-foreground after:absolute after:inset-x-0 after:-bottom-1.5 after:h-0.5 group-data-[orientation=vertical]/tabs:after:inset-x-auto group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-end-1.5 group-data-[orientation=vertical]/tabs:after:h-auto group-data-[orientation=vertical]/tabs:after:w-0.5'
+
+function TabsTab({
   className,
   style,
   children,
   ...props
-}: Omit<TabsPrimitive.Tab.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof TabsTabPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   const copy = use(TabsCopyContext)
   const rows = use(TabsRowsContext)
-  const active = use(TabsValueContext) === props.value
+  const picked = use(TabsValueContext) === props.value
+  const content = (state: { selected: boolean }) => (
+    <TabsSelectedContext value={state.selected}>{children}</TabsSelectedContext>
+  )
   if (rows) {
     return (
-      <TabsPrimitive.Tab
-        data-slot='tabs-trigger'
-        className={className}
+      <TabsTabPrimitive
+        className={cn(
+          '[[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:bg-muted [[data-slot=tabs-list]:not([data-mounted])>&]:data-[selected]:rounded-(--surface-radius)',
+          className,
+        )}
         style={style}
         {...props}
       >
-        <TabsActiveContext value={active}>{children}</TabsActiveContext>
-      </TabsPrimitive.Tab>
+        {content}
+      </TabsTabPrimitive>
     )
   }
   if (copy) {
     return (
       <span
-        className={cn(tabsTriggerLayout, className)}
+        className={cn(tabsTabLayout, className)}
         style={typeof style === 'function' ? undefined : style}
       >
-        <TabsActiveContext value={active}>{children}</TabsActiveContext>
+        {content({ selected: picked })}
       </span>
     )
   }
   return (
-    <TabsPrimitive.Tab
-      data-slot='tabs-trigger'
+    <TabsTabPrimitive
       // A disabled tab fades its label, not itself, so its focus ring keeps its strength.
       className={cn(
-        tabsTriggerLayout,
+        tabsTabLayout,
         pillItemClassName,
-        'group-data-[variant=line]/tabs-track:data-active:text-foreground',
+        tabsTabUnplaced,
+        'group-data-[variant=line]/tabs-track:data-[selected]:text-foreground',
         className,
       )}
       style={style}
       {...props}
     >
-      <TabsActiveContext value={active}>{children}</TabsActiveContext>
-    </TabsPrimitive.Tab>
+      {content}
+    </TabsTabPrimitive>
   )
 }
 
@@ -332,85 +323,50 @@ function TabsTrigger({
  * rolls to the other icon as a Toggle's icon does. A tab whose icon stays
  * the same takes it as a plain child: rolling to itself shows nothing change.
  */
-function TabsIcon({
+function TabsTabIcon({
   activeIcon,
   children,
-}: {
+  ...props
+}: Omit<ComponentProps<typeof TabsTabIconPrimitive>, 'children' | 'className'> & {
   activeIcon: ReactNode
   children: ReactNode
 }) {
-  return (
-    // A row holds more than its icon's line, so the roll stays in that line.
+  // A row holds more than its icon's line, so the roll stays in that line.
+  const icon = (
     <SwapIcon
-      on={use(TabsActiveContext)}
+      on={use(TabsSelectedContext)}
       onIcon={activeIcon}
-      slot='tabs-icon'
       clip={use(TabsRowsContext)}
     >
       {children}
     </SwapIcon>
   )
+  // The pill's copy is no tab, so its icon is only drawn.
+  if (use(TabsCopyContext)) return icon
+  return (
+    // ui-sdk's part hides the icon from screen readers; the roll draws it.
+    <TabsTabIconPrimitive className='contents' {...props}>
+      {icon}
+    </TabsTabIconPrimitive>
+  )
 }
 
-function TabsContent({
+function TabsPanel({
   className,
-  keepMounted,
-  ref,
   ...props
-}: Omit<TabsPrimitive.Panel.Props, 'className'> & { className?: string }) {
-  const untilFound = use(TabsUntilFoundContext)
-  const picked = use(TabsValueContext) === props.value
-  const own = useRef<HTMLDivElement>(null)
-  const panelRef = useMemo(() => mergeRefs(own, ref), [ref])
-
-  // A panel not picked stays in the page, hidden until the browser's find lands in it.
-  useEffect(() => {
-    const panel = own.current
-    if (!untilFound || picked || !panel) return
-    return hideUntilFound(panel)
-  }, [untilFound, picked])
-
+}: Omit<ComponentProps<typeof TabsPanelPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <TabsPrimitive.Panel
-      ref={panelRef}
-      data-slot='tabs-content'
-      keepMounted={keepMounted || untilFound}
-      // Base UI keeps the old panel mounted while the new one enters; hiding it at once stops the two overlapping.
+    <TabsPanelPrimitive
+      // The old panel stays mounted while the new one enters; hiding it at once stops the two overlapping.
       className={cn(
-        'focus-visible:ring-ring/50 min-w-0 rounded-(--control-radius-capped) text-sm focus-visible:ring-3 focus-visible:outline-hidden transition-[opacity,translate] duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-[orientation=vertical]/tabs:flex-1 data-ending-style:hidden data-starting-style:opacity-0 motion-safe:data-starting-style:translate-y-(--tabs-content-rise,6px)',
+        'focus-visible:ring-ring/50 min-w-0 rounded-(--control-radius-capped) text-sm focus-visible:ring-3 focus-visible:outline-hidden transition-[opacity,translate] duration-(--motion-enter-duration) ease-(--motion-enter-easing) group-data-[orientation=vertical]/tabs:flex-1 data-ending-style:hidden data-starting-style:opacity-0 motion-safe:data-starting-style:translate-y-(--tabs-panel-rise,6px)',
         className,
       )}
       {...props}
     />
   )
-}
-
-/**
- * Hides a panel until the browser's find in page lands in it, then picks its
- * tab, as a person pressing it would. React and Base UI write `hidden` as a
- * yes or no, Base UI once the panel has finished leaving, so the value is
- * put back each time they write it. Kept outside the component: it reaches
- * its tab through the page.
- */
-function hideUntilFound(panel: HTMLElement) {
-  const hide = () => {
-    if (panel.getAttribute('hidden') !== 'until-found')
-      panel.setAttribute('hidden', 'until-found')
-  }
-  hide()
-  const writes = new MutationObserver(() => {
-    if (panel.hasAttribute('hidden')) hide()
-  })
-  writes.observe(panel, { attributes: true, attributeFilter: ['hidden'] })
-  const found = () => {
-    const tab = panel.getAttribute('aria-labelledby')
-    if (tab) document.getElementById(tab)?.click()
-  }
-  panel.addEventListener('beforematch', found)
-  return () => {
-    writes.disconnect()
-    panel.removeEventListener('beforematch', found)
-  }
 }
 
 /**
@@ -462,7 +418,7 @@ function aimAtPickedRow(list: HTMLElement) {
   picks.observe(list, {
     childList: true,
     subtree: true,
-    attributeFilter: ['data-active'],
+    attributeFilter: ['data-selected'],
   })
 
   const sizes = new ResizeObserver(() => {
@@ -482,7 +438,7 @@ function aimAtPickedRow(list: HTMLElement) {
 
 /** The picked row's place now, while nothing moves. */
 function pickedInsets(list: HTMLElement) {
-  const row = list.querySelector('[role="tab"][data-active]')
+  const row = list.querySelector('[role="tab"][data-selected]')
   return row ? rowInsets(list.getBoundingClientRect(), row.getBoundingClientRect()) : null
 }
 
@@ -508,4 +464,4 @@ function rowInsets(
   return { top: row.top - list.top, bottom: list.bottom - row.bottom }
 }
 
-export { Tabs, TabsContent, TabsIcon, TabsList, TabsTrigger, rowInsets }
+export { Tabs, TabsList, TabsPanel, TabsTab, TabsTabIcon, rowInsets }

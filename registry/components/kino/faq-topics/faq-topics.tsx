@@ -6,7 +6,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/registry/components/kino/accordion'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import { useControllable } from '@/registry/lib/controllable'
 import {
   faqAnswerClassName,
@@ -145,10 +145,10 @@ function FaqTopics({
           {topics.length > 1 ? (
             <TabsList aria-labelledby={titleId} className='self-center'>
               {topics.map((each) => (
-                <TabsTrigger key={each.value} value={each.value}>
+                <TabsTab key={each.value} value={each.value}>
                   {each.icon}
                   <bdi>{each.label}</bdi>
-                </TabsTrigger>
+                </TabsTab>
               ))}
             </TabsList>
           ) : null}
@@ -159,7 +159,7 @@ function FaqTopics({
           >
             <div ref={innerRef} className='flex min-w-0 flex-col'>
               {topics.map((each) => (
-                <TabsContent
+                <TabsPanel
                   key={each.value}
                   value={each.value}
                   // Its ring inside, where the list's clip can't cut it.
@@ -193,7 +193,7 @@ function FaqTopics({
                       </AccordionItem>
                     ))}
                   </Accordion>
-                </TabsContent>
+                </TabsPanel>
               ))}
             </div>
           </div>

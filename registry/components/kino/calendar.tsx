@@ -195,7 +195,7 @@ function ChoicePicker({
             <Button
               variant='ghost'
               size='sm'
-              data-slot='calendar-heading'
+              data-calendar-heading=''
               aria-label={labels.chooseYear(title)}
               disabled={disabled}
               onClick={() => {
@@ -316,7 +316,7 @@ function MonthPopover({
               <Button
                 variant='ghost'
                 size='sm'
-                data-slot='calendar-heading'
+                data-calendar-heading=''
                 aria-label={state.labels.chooseMonth(state.label(month))}
                 className='min-w-0'
               />
@@ -791,7 +791,7 @@ function focusHeadingAfter(from: HTMLElement | null, offset: number) {
     const columns = [
       ...(calendar?.querySelectorAll<HTMLElement>('[data-slot=calendar-column]') ?? []),
     ].filter((column) => !column.closest('[inert]'))
-    columns[offset]?.querySelector<HTMLElement>('[data-slot=calendar-heading]')?.focus()
+    columns[offset]?.querySelector<HTMLElement>('[data-calendar-heading]')?.focus()
   })
 }
 

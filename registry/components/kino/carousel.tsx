@@ -172,10 +172,10 @@ function Carousel({
     if (!(event.target instanceof Element)) return
     // Only the carousel's own controls take the arrow keys: in a slide, or
     // in a field or list of the buyer's beside them, they belong to what is there.
-    // Base UI blocks every key on a button that is off but keeps focus, as
-    // Previous and Next are at the ends, so the way back works through that.
+    // Previous and Next stay focusable while off at the ends, so the way back
+    // works from the one that is off.
     const control = event.target.closest(
-      '[data-slot=carousel-previous], [data-slot=carousel-next], [data-slot=carousel-dot]',
+      '[data-carousel-previous], [data-carousel-next], [data-slot=carousel-dot]',
     )
     if (!control || control.closest('[data-slot=carousel]') !== event.currentTarget)
       return
@@ -229,14 +229,14 @@ function CarouselPrevious({
   const disabled = controlsOff(value, count, leadCount, loop).previous
   return (
     <Button
-      data-slot='carousel-previous'
+      data-carousel-previous=''
       variant={variant}
       size={size}
       aria-label={perView > 1 ? 'Show previous slides' : 'Show previous slide'}
       disabled={disabled}
       focusableWhenDisabled
-      onClick={(event) => {
-        onClick?.(event)
+      onClick={(event, details) => {
+        onClick?.(event, details)
         if (!event.defaultPrevented) go(previousLead(value, pages, loop ? leadCount : 0))
       }}
       className={cn('rtl:[&_svg]:-scale-x-100', className)}
@@ -265,14 +265,14 @@ function CarouselNext({
   const disabled = controlsOff(value, count, leadCount, loop).next
   return (
     <Button
-      data-slot='carousel-next'
+      data-carousel-next=''
       variant={variant}
       size={size}
       aria-label={perView > 1 ? 'Show next slides' : 'Show next slide'}
       disabled={disabled}
       focusableWhenDisabled
-      onClick={(event) => {
-        onClick?.(event)
+      onClick={(event, details) => {
+        onClick?.(event, details)
         if (!event.defaultPrevented) go(nextLead(value, pages, loop ? leadCount : 0))
       }}
       className={cn('rtl:[&_svg]:-scale-x-100', className)}
@@ -633,7 +633,7 @@ function DeckContent({ ref, className, children, ...props }: ComponentProps<'div
     if (all[from]?.contains(document.activeElement)) {
       const next =
         all[value]?.querySelector<HTMLElement>(FOCUSABLE) ??
-        root.querySelector<HTMLElement>('[data-slot=carousel-next]')
+        root.querySelector<HTMLElement>('[data-carousel-next]')
       next?.focus({ preventScroll: true, focusVisible: false } as FocusOptions)
     }
     const back = value === (from - 1 + count) % count && count > 2

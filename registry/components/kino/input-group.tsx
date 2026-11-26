@@ -88,9 +88,7 @@ function InputGroupButton({
   size = 'xs',
   ...props
 }: ComponentProps<typeof Button>) {
-  return (
-    <Button data-slot='input-group-button' variant={variant} size={size} {...props} />
-  )
+  return <Button data-input-group-button='' variant={variant} size={size} {...props} />
 }
 
 /**

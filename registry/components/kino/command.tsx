@@ -205,7 +205,7 @@ function CommandPageName({ page }: { page: string }) {
         <Button
           variant='secondary'
           size='xs'
-          data-slot='command-back'
+          data-command-back=''
           onClick={goBack}
           onKeyDown={(event) => {
             // As from the search: Escape goes back a page, not out of the dialog.

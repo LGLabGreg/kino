@@ -19,7 +19,7 @@ export const pillRowClassName = 'gap-0.5 p-[3px]'
  * An item: the control height less the track's inset on both sides, so the
  * track is as tall as a button. It clips what rolls in it up and down, such as
  * a tab's icon, as a Button does, so nothing it rolls adds to the row's
- * height, which a scroller would scroll and Base UI measures its indicator by. Its corner is the pill's, inside the
+ * height, which a scroller would scroll and ui-sdk measures its indicator by. Its corner is the pill's, inside the
  * track's by about the inset, so its focus ring, the backdrop (which takes
  * the item's corners) and the pill share one shape.
  */

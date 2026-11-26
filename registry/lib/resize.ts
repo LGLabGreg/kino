@@ -380,7 +380,7 @@ export function markResizing(element: HTMLElement | null) {
   const observer = new ResizeObserver(() => {
     element.dataset.resizing = ''
     cancelAnimationFrame(frame)
-    // Two frames: what places from a size measured by its own observer (Base UI's tab indicator) catches up a frame late.
+    // Two frames: what places from a size measured by its own observer (ui-sdk's tab indicator) catches up a frame late.
     frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => delete element.dataset.resizing)
     })

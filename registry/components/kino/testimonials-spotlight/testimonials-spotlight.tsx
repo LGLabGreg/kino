@@ -1,6 +1,6 @@
 'use client'
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import { useControllable } from '@/registry/lib/controllable'
 import { followHeight } from '@/registry/lib/resize'
 import { SectionHeading } from '@/registry/lib/section-heading'
@@ -92,11 +92,11 @@ function TestimonialsSpotlight({
             {/* The faces first, so Tab goes on from the one picked to its quote. */}
             <TabsList aria-label='Customers' className='self-center'>
               {testimonials.map((testimonial) => (
-                <TabsTrigger key={testimonial.value} value={testimonial.value}>
+                <TabsTab key={testimonial.value} value={testimonial.value}>
                   <TestimonialAvatar testimonial={testimonial} size='xs' />
                   <bdi>{firstName(testimonial.name)}</bdi>
                   <span className='sr-only'>{restOfName(testimonial.name)}</span>
-                </TabsTrigger>
+                </TabsTab>
               ))}
             </TabsList>
             {/* Clipped down the page only, with room above and below for a panel's focus ring. */}
@@ -106,13 +106,13 @@ function TestimonialsSpotlight({
             >
               <div ref={innerRef} className='flex min-w-0 flex-col'>
                 {testimonials.map((testimonial) => (
-                  <TabsContent
+                  <TabsPanel
                     key={testimonial.value}
                     value={testimonial.value}
                     className='focus-visible:ring-inset'
                   >
                     <SpotlightQuote testimonial={testimonial} />
-                  </TabsContent>
+                  </TabsPanel>
                 ))}
               </div>
             </div>

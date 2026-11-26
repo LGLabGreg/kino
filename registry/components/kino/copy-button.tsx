@@ -69,8 +69,8 @@ function CopyButton({
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  const copy = async (event: Parameters<NonNullable<typeof onClick>>[0]) => {
-    onClick?.(event)
+  const copy = async (...args: Parameters<NonNullable<typeof onClick>>) => {
+    onClick?.(...args)
     const result = await copyText(value, () => setWaiting(true))
     clearTimeout(timer.current)
     setWaiting(false)
@@ -125,9 +125,7 @@ function CopyButton({
   const button = useRender({
     render: render ?? <Button />,
     props: {
-      // A rendered button keeps its own slot, such as `split-button-action`;
-      // an icon size's takes the tooltip trigger's, as any button in a Tooltip does.
-      ...(render ? null : { 'data-slot': 'copy-button' }),
+      'data-copy-button': '',
       'data-copied': status === 'copied' ? '' : undefined,
       'data-failed': status === 'failed' ? '' : undefined,
       // A rendered button keeps its own look unless one is asked for, as a
@@ -136,7 +134,10 @@ function CopyButton({
       ...(size ? { size } : null),
       ...(waiting ? { loading: true } : null),
       'aria-label': iconOnly ? name : ariaLabel,
-      onClick: copy,
+      // The copy shows its own wait, so the Button never goes pending on its promise.
+      onClick: (...args: Parameters<NonNullable<typeof onClick>>) => {
+        void copy(...args)
+      },
       ...props,
       children: iconOnly ? (
         shownIcon

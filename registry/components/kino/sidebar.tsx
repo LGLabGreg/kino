@@ -267,14 +267,14 @@ function railHome(element: HTMLElement): HTMLElement | null {
       ) ?? null
     )
   }
-  if (element.matches('[data-slot=sidebar-menu-action]')) {
+  if (element.matches('[data-sidebar-menu-action]')) {
     return (
       element.parentElement?.querySelector<HTMLElement>(
         ':scope > [data-slot=sidebar-menu-button]',
       ) ?? null
     )
   }
-  if (element.matches('[data-slot=sidebar-group-action]')) {
+  if (element.matches('[data-sidebar-group-action]')) {
     return (
       element
         .closest('[data-slot=sidebar-group]')
@@ -645,7 +645,7 @@ function SidebarGroupAction({ className, ...props }: ComponentProps<typeof Butto
         className,
       )}
       {...props}
-      data-slot='sidebar-group-action'
+      data-sidebar-group-action=''
     />
   )
 }
@@ -710,7 +710,7 @@ const rowContentClassName = cn(
   // In the rail, all but the icon fade as the edge covers them, so no letter shows beside it.
   '[&>*:not(:first-child)]:transition-opacity [&>*:not(:first-child)]:duration-(--motion-enter-duration) [&>*:not(:first-child)]:ease-(--motion-enter-easing) group-data-[state=collapsed]/sidebar:[&>*:not(:first-child)]:opacity-0 group-data-[state=collapsed]/sidebar:[&>*:not(:first-child)]:duration-(--motion-exit-duration) group-data-[state=collapsed]/sidebar:[&>*:not(:first-child)]:ease-(--motion-exit-easing)',
   // Room for the row's menu, when it has one.
-  'group-has-data-[slot=sidebar-menu-action]/sidebar-item:pe-[calc(var(--control-height-xs)+--spacing(1))]',
+  'group-has-data-sidebar-menu-action/sidebar-item:pe-[calc(var(--control-height-xs)+--spacing(1))]',
 )
 
 /**
@@ -859,7 +859,7 @@ function SidebarMenuAction({ className, ...props }: ComponentProps<typeof Button
         className,
       )}
       {...props}
-      data-slot='sidebar-menu-action'
+      data-sidebar-menu-action=''
     />
   )
 }
@@ -1375,7 +1375,7 @@ function SidebarTrigger({
       <TooltipTrigger
         render={
           <Button
-            data-slot='sidebar-trigger'
+            data-sidebar-trigger=''
             variant='ghost'
             size='icon-sm'
             aria-label={label}
@@ -1388,8 +1388,8 @@ function SidebarTrigger({
               'text-muted-foreground not-data-mounted:transition-none',
               className,
             )}
-            onClick={(event) => {
-              onClick?.(event)
+            onClick={(event, details) => {
+              onClick?.(event, details)
               if (!event.defaultPrevented) toggle()
             }}
             {...props}

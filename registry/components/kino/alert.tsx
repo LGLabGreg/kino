@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils'
  */
 
 const alertVariants = cva(
-  'flex items-start gap-3 rounded-(--surface-radius) p-(--surface-padding) text-sm ring-1 ring-inset transition-[color,background-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) has-data-[slot=alert-close]:pe-[calc(var(--surface-padding)-(--spacing(2)))] forced-colors:outline forced-colors:-outline-offset-1',
+  'flex items-start gap-3 rounded-(--surface-radius) p-(--surface-padding) text-sm ring-1 ring-inset transition-[color,background-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) has-data-alert-close:pe-[calc(var(--surface-padding)-(--spacing(2)))] forced-colors:outline forced-colors:-outline-offset-1',
   {
     variants: {
       type: {
@@ -206,7 +206,7 @@ function AlertActions({ className, ...props }: ComponentProps<'div'>) {
 function AlertClose({ className, children, ...props }: ComponentProps<typeof Button>) {
   return (
     <Button
-      data-slot='alert-close'
+      data-alert-close=''
       variant='ghost'
       size='icon-xs'
       aria-label='Close'

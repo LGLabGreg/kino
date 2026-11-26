@@ -1219,11 +1219,11 @@ function FileInputItem({
     focused.current = null
     const active = document.activeElement
     if (active === null || active === document.body) {
-      row.querySelector<HTMLElement>('[data-slot=file-input-item-remove]')?.focus()
+      row.querySelector<HTMLElement>('[data-file-input-item-remove]')?.focus()
     }
   }, [state])
 
-  const onRemove = (event: MouseEvent<HTMLButtonElement>) => {
+  const onRemove = (event: MouseEvent<HTMLElement>) => {
     const row = event.currentTarget.closest('li')
     const rows = [
       ...(row?.parentElement?.querySelectorAll<HTMLElement>(
@@ -1233,7 +1233,7 @@ function FileInputItem({
     const at = row ? rows.indexOf(row) : -1
     const next = rows[at + 1] ?? rows[at - 1]
     flushSync(() => remove(file))
-    const button = next?.querySelector<HTMLElement>('[data-slot=file-input-item-remove]')
+    const button = next?.querySelector<HTMLElement>('[data-file-input-item-remove]')
     ;(button ?? inputRef.current)?.focus()
   }
 
@@ -1359,7 +1359,7 @@ function FileInputItem({
         <Button
           variant='ghost'
           size='icon-sm'
-          data-slot='file-input-item-retry'
+          data-file-input-item-retry=''
           aria-label={`Retry ${file.name}`}
           disabled={disabled}
           onClick={() => retry(file)}
@@ -1378,7 +1378,7 @@ function FileInputItem({
       <Button
         variant='ghost'
         size='icon-sm'
-        data-slot='file-input-item-remove'
+        data-file-input-item-remove=''
         aria-label={removeLabel(file.name, state)}
         disabled={disabled}
         onClick={onRemove}
@@ -1565,7 +1565,7 @@ function FileInputStatus({
   const focusAfterAction = () => {
     const list = rootRef.current?.closest('[data-slot=file-input]')
     const row = list?.querySelector<HTMLElement>(
-      '[data-slot=file-input-item]:is([data-state=complete],[data-state=failed],[data-state=idle]) [data-slot=file-input-item-remove]',
+      '[data-slot=file-input-item]:is([data-state=complete],[data-state=failed],[data-state=idle]) [data-file-input-item-remove]',
     )
     ;(row ?? inputRef.current)?.focus()
   }
@@ -1584,7 +1584,7 @@ function FileInputStatus({
     rootRef.current
       ?.closest('[data-slot=file-input]')
       ?.querySelector<HTMLElement>(
-        '[data-slot=file-input-item][data-state=failed] [data-slot=file-input-item-remove]',
+        '[data-slot=file-input-item][data-state=failed] [data-file-input-item-remove]',
       )
       ?.focus()
     retryFailed()

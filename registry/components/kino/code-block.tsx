@@ -2,7 +2,7 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { CopyButton } from '@/registry/components/kino/copy-button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import type { TooltipContentProps } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
@@ -120,9 +120,9 @@ function FilePanel({
 }) {
   if (!tabbed) return children
   return (
-    <TabsContent value={value} tabIndex={-1} className={className}>
+    <TabsPanel value={value} tabIndex={-1} className={className}>
       {children}
-    </TabsContent>
+    </TabsPanel>
   )
 }
 
@@ -214,13 +214,13 @@ function CodeBlock({
               className='min-w-0 flex-1 self-end'
             >
               {files.map((file) => (
-                <TabsTrigger
+                <TabsTab
                   key={fileValue(file)}
                   value={fileValue(file)}
                   className={cn('text-xs', file.title !== undefined && 'font-mono')}
                 >
                   {file.title ?? languageName(file.language)}
-                </TabsTrigger>
+                </TabsTab>
               ))}
             </TabsList>
           ) : (

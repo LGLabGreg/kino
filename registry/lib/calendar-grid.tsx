@@ -462,7 +462,7 @@ function CalendarTurn({
     <Button
       variant='ghost'
       size='icon-sm'
-      data-slot={`calendar-${direction}`}
+      {...{ [`data-calendar-${direction}`]: '' }}
       className={className}
       {...props}
     >

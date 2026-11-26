@@ -28,7 +28,7 @@ import {
   SettingsPhoto,
   type SettingsPhotoValue,
 } from '@/registry/components/kino/settings-page/settings-photo'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import { useControllable } from '@/registry/lib/controllable'
 import { revealBehavior, scrollerOf } from '@/registry/lib/scroll'
 import {
@@ -181,7 +181,7 @@ function bringIntoView(element: HTMLElement, release: () => void) {
 function firstInvalid(form: HTMLFormElement) {
   // A Field's root comes before its control, so the first match is the field.
   const field = form.querySelector<HTMLElement>('[data-invalid]')
-  const section = field?.closest<HTMLElement>('[data-slot=settings-section]')
+  const section = field?.closest<HTMLElement>('[data-settings-section]')
   return field && section?.dataset.value
     ? { field, section: section.dataset.value }
     : null
@@ -264,7 +264,7 @@ function SettingsPage({
     const form = formRef.current
     const invalid = form ? firstInvalid(form) : null
     if (!invalid) return
-    const panel = invalid.field.closest<HTMLElement>('[data-slot=settings-section]')
+    const panel = invalid.field.closest<HTMLElement>('[data-settings-section]')
     if (!panel?.hidden) return
     pending.current = invalid.field
     setCurrentRef.current(invalid.section)
@@ -373,7 +373,7 @@ function SettingsNav({
   const { beside, measured } = useSettingsPage('SettingsNav')
   return (
     <TabsList
-      data-slot='settings-nav'
+      data-settings-nav=''
       aria-label={label}
       {...props}
       className={cn(
@@ -394,17 +394,17 @@ function SettingsNavItem({
   icon,
   children,
   ...props
-}: Omit<ComponentProps<typeof TabsTrigger>, 'value'> & {
+}: Omit<ComponentProps<typeof TabsTab>, 'value'> & {
   /** The section's `value`. */
   value: string
   /** Before the label, sized by the item. */
   icon?: ReactNode
 }) {
   return (
-    <TabsTrigger value={value} {...props}>
+    <TabsTab value={value} {...props}>
       {icon}
       {children}
-    </TabsTrigger>
+    </TabsTab>
   )
 }
 
@@ -416,7 +416,11 @@ function SettingsSection({
   className,
   children,
   ...props
-}: Omit<ComponentProps<typeof TabsContent>, 'value' | 'title' | 'keepMounted'> & {
+}: Omit<
+  ComponentProps<typeof TabsPanel>,
+  'value' | 'title' | 'keepMounted' | 'children'
+> & {
+  children?: ReactNode
   /** Names the section for its SettingsNavItem, `section` and `onSectionChange`. */
   value: string
   title: string
@@ -425,11 +429,11 @@ function SettingsSection({
   const { level } = useSettingsPage('SettingsSection')
   const Heading = level === 1 ? 'h2' : 'h3'
   return (
-    <TabsContent
+    <TabsPanel
       value={value}
       // Every section stays in the form while another shows, so its changes wait for Save.
       keepMounted
-      data-slot='settings-section'
+      data-settings-section=''
       data-value={value}
       {...props}
       className={cn(
@@ -444,7 +448,7 @@ function SettingsSection({
         ) : null}
       </div>
       {children}
-    </TabsContent>
+    </TabsPanel>
   )
 }
 

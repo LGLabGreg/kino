@@ -596,7 +596,7 @@ export function useCalendarState(props: CalendarStateProps) {
     tabIndex: cell.tabStop ? 0 : -1,
     'aria-current': cell.today ? ('date' as const) : undefined,
     'aria-disabled': cell.disabled ? true : undefined,
-    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+    onClick: (event: MouseEvent<HTMLElement>) => {
       press(cell.date, event)
       // A day of the month beside turns to that month.
       const turn = cell.outside ? revealing(cell.date) : null
@@ -691,7 +691,7 @@ export function useCalendarState(props: CalendarStateProps) {
       type: 'button' as const,
       disabled: previousMonth === null,
       'aria-label': labels.previousMonth,
-      onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      onClick: (event: MouseEvent<HTMLElement>) => {
         if (
           previousMonth &&
           changeMonth(previousMonth, detailsOf('trigger-press', event))
@@ -703,7 +703,7 @@ export function useCalendarState(props: CalendarStateProps) {
       type: 'button' as const,
       disabled: nextMonth === null,
       'aria-label': labels.nextMonth,
-      onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      onClick: (event: MouseEvent<HTMLElement>) => {
         if (nextMonth && changeMonth(nextMonth, detailsOf('trigger-press', event)))
           handOffAtEdge(nextMonth, step)
       },

@@ -646,8 +646,8 @@ function DatePickerClear({
         size='icon-xs'
         aria-label={picker.labels.clear}
         className={cn('text-muted-foreground', className)}
-        onClick={(event) => {
-          onClick?.(event)
+        onClick={(event, details) => {
+          onClick?.(event, details)
           if (event.defaultPrevented) return
           picker.pick(null)
           // The button leaves with the date: focus goes back to the field's first segment.
@@ -861,13 +861,13 @@ function DatePickerPresets({
   'aria-label': ariaLabel = 'Presets',
   ...props
 }: Omit<
-  ComponentProps<typeof SegmentedControl<string | null>>,
+  ComponentProps<typeof SegmentedControl<string>>,
   'value' | 'defaultValue' | 'onValueChange' | 'orientation'
 >) {
   const picker = useDatePicker('DatePickerPresets')
   return (
-    <SegmentedControl<string | null>
-      data-slot='date-picker-presets'
+    <SegmentedControl<string>
+      data-date-picker-presets=''
       aria-label={ariaLabel}
       orientation='vertical'
       disabled={picker.disabled || picker.readOnly}
@@ -892,7 +892,7 @@ function DatePickerPreset({
   const key = valueKey(value)
   return (
     <SegmentedControlItem
-      data-slot='date-picker-preset'
+      data-date-picker-preset=''
       value={key}
       // Pressed again, it still sets the date and closes the calendar.
       onClick={(event) => {

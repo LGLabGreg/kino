@@ -38,7 +38,6 @@ import {
 } from '@/registry/lib/pill'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
-import type { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
 import {
   type ComponentProps,
   type KeyboardEvent,
@@ -453,12 +452,12 @@ function ThemeToggle({
       <TooltipTrigger
         render={
           <Button
-            data-slot='theme-toggle'
+            data-theme-toggle=''
             variant={variant}
             size={size}
             aria-label={label}
-            onClick={(event) => {
-              onClick?.(event)
+            onClick={(event, details) => {
+              onClick?.(event, details)
               if (!event.defaultPrevented) {
                 changeTheme(dark ? 'light' : 'dark', crossover, event.nativeEvent)
               }
@@ -486,7 +485,7 @@ function ThemeSegmentedControl({
   crossover = 'fade',
   ...props
 }: Omit<
-  RadioGroupPrimitive.Props<Theme>,
+  ComponentProps<typeof SegmentedControl<Theme>>,
   'className' | 'value' | 'defaultValue' | 'onValueChange' | 'children'
 > & {
   className?: string
@@ -498,10 +497,12 @@ function ThemeSegmentedControl({
   const { value } = useTheme()
   return (
     <SegmentedControl<Theme>
-      data-slot='theme-segmented-control'
+      data-theme-segmented-control=''
       aria-label='Theme'
       value={value}
-      onValueChange={(next, details) => changeTheme(next, crossover, details.event)}
+      onValueChange={(next, details) => {
+        if (next) changeTheme(next, crossover, details.event)
+      }}
       {...props}
     >
       {THEMES.map((theme) => (

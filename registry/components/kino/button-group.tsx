@@ -5,17 +5,17 @@ import {
   type HighlightTarget,
   highlightClassName,
 } from '@/registry/lib/highlight'
-import { mergeRefs } from '@/registry/lib/refs'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { useRender } from '@base-ui/react/use-render'
+import { mergeProps, type PartProps, renderElement } from '@ui-sdk/react/primitive'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { type ComponentProps, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
 const buttonGroupVariants = cva(
   [
-    'group/button-group relative isolate flex w-fit items-stretch has-[>[data-slot=button-group]]:gap-2 [&>*]:focus-visible:z-10',
+    'group/button-group relative isolate flex w-fit items-stretch has-[>[role=group]]:gap-2 [&>*]:focus-visible:z-10',
+    // A segment takes the group's corner at every size, whatever the group renders as.
+    '[--control-radius-sm:var(--control-radius)] [--control-radius-xs:var(--control-radius)]',
     // A segment never shrinks on a press: the row's edges stay put.
     '[&>*]:active:scale-100!',
     // A filled segment paints under its clear border, so its border can be the divider.
@@ -66,46 +66,56 @@ function segmentOf(group: HTMLElement, node: EventTarget | null): HighlightTarge
 }
 
 function ButtonGroup({
-  ref,
   className,
   orientation,
   children,
+  render,
   ...props
-}: Omit<ComponentProps<'div'> & VariantProps<typeof buttonGroupVariants>, 'className'> & {
-  className?: string
-}) {
-  const groupRef = useRef<HTMLDivElement>(null)
+}: Omit<PartProps<'div'>, 'className' | 'children'> &
+  VariantProps<typeof buttonGroupVariants> & {
+    className?: string
+    children?: ReactNode
+  }) {
+  const [group, setGroup] = useState<HTMLDivElement | null>(null)
   const layerRef = useRef<HTMLSpanElement>(null)
 
   // One highlight for the whole row, so it glides from segment to segment.
   useEffect(() => {
-    const group = groupRef.current
     if (!group || !layerRef.current) return
     return followPointer(group, layerRef.current, {
       itemOf: (node) => segmentOf(group, node),
     })
-  }, [])
+  }, [group])
 
-  return (
-    <div
-      ref={mergeRefs(groupRef, ref)}
-      role='group'
-      data-slot='button-group'
-      data-orientation={orientation ?? 'horizontal'}
-      className={cn(buttonGroupVariants({ orientation }), className)}
-      {...props}
-    >
-      {children}
-      <span
-        ref={layerRef}
-        aria-hidden
-        data-slot='button-group-highlight'
-        className={cn(
-          highlightClassName,
-          'bg-foreground/7 z-20 group-has-[>:active]/button-group:bg-foreground/12 group-has-[>.bg-primary:hover]/button-group:bg-primary-foreground/15 group-has-[>.bg-primary:active]/button-group:bg-primary-foreground/22 group-has-[>[data-variant=destructive]:hover]/button-group:bg-destructive/10',
-        )}
-      />
-    </div>
+  // What the caller passes wins, so a ui-sdk group rendered as this one keeps
+  // its own slot; its ref joins ours, the same function each render.
+  return renderElement(
+    'div',
+    mergeProps(
+      {
+        ref: setGroup,
+        role: 'group',
+        'data-slot': 'button-group',
+        'data-orientation': orientation ?? 'horizontal',
+        className: cn(buttonGroupVariants({ orientation }), className),
+        children: (
+          <>
+            {children}
+            <span
+              ref={layerRef}
+              aria-hidden
+              data-slot='button-group-highlight'
+              className={cn(
+                highlightClassName,
+                'bg-foreground/7 z-20 group-has-[>:active]/button-group:bg-foreground/12 group-has-[>.bg-primary:hover]/button-group:bg-primary-foreground/15 group-has-[>.bg-primary:active]/button-group:bg-primary-foreground/22 group-has-[>[data-variant=destructive]:hover]/button-group:bg-destructive/10',
+              )}
+            />
+          </>
+        ),
+      },
+      props,
+    ),
+    render,
   )
 }
 
@@ -113,11 +123,12 @@ function ButtonGroupText({
   className,
   render,
   ...props
-}: useRender.ComponentProps<'div'>) {
-  return useRender({
-    defaultTagName: 'div',
-    props: mergeProps<'div'>(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  return renderElement(
+    'div',
+    mergeProps(
       {
+        'data-slot': 'button-group-text',
         className: cn(
           "flex items-center gap-1.5 rounded-(--control-radius) border bg-muted/60 px-(--control-padding) text-sm whitespace-nowrap text-muted-foreground tabular-nums [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
           className,
@@ -126,10 +137,7 @@ function ButtonGroupText({
       props,
     ),
     render,
-    state: {
-      slot: 'button-group-text',
-    },
-  })
+  )
 }
 
 export { ButtonGroup, ButtonGroupText, buttonGroupVariants }

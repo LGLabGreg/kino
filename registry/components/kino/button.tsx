@@ -2,9 +2,9 @@
 
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import { Swap, SwapText, flattenChildren, swapIconClassName } from '@/registry/lib/swap'
-import { Button as ButtonPrimitive } from '@base-ui/react/button'
+import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { isValidElement, type ReactNode } from 'react'
+import { type ComponentProps, isValidElement, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -12,7 +12,7 @@ const buttonVariants = cva(
   // The press is quicker on the way down than on the way back, so a short tap
   // still shows. A button that opens a popup stays still, so the popup doesn't
   // open from a moving anchor.
-  "group/button relative inline-flex max-w-full shrink-0 touch-manipulation items-center justify-center gap-(--button-gap) overflow-clip rounded-(--control-radius) border bg-clip-padding text-sm font-medium whitespace-nowrap select-none transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-easing)] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden active:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:active:not-aria-[haspopup]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--button-press-depth,1))] data-disabled:pointer-events-none data-disabled:not-data-loading:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-offset-1 forced-colors:aria-invalid:outline-dashed dark:aria-invalid:border-destructive/70 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button relative inline-flex max-w-full shrink-0 touch-manipulation items-center justify-center gap-(--button-gap) overflow-clip rounded-(--control-radius) border bg-clip-padding text-sm font-medium whitespace-nowrap select-none transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-(--motion-press-duration) ease-[var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-fade-easing),var(--motion-press-easing)] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden active:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:active:not-aria-[haspopup]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--button-press-depth,1))] data-disabled:pointer-events-none data-disabled:not-data-pending:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-offset-1 forced-colors:aria-invalid:outline-dashed dark:aria-invalid:border-destructive/70 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // Each variant names its own border colour, so the classes also work on a
@@ -37,16 +37,16 @@ const buttonVariants = cva(
       // target shrinks further when pressed, or the press can't be seen.
       size: {
         default:
-          'h-(--button-height) [--button-height:var(--control-height)] px-(--control-padding) [--button-gap:--spacing(1.5)] in-data-[slot=button-group]:rounded-(--control-radius)',
+          'h-(--button-height) [--button-height:var(--control-height)] px-(--control-padding) [--button-gap:--spacing(1.5)]',
         // An xs button's sides are four fifths of a control's: 8px at Balanced.
-        xs: "h-(--button-height) [--button-height:var(--control-height-xs)] rounded-(--control-radius-xs) px-[calc(var(--control-padding)*0.8)] text-xs [--button-gap:--spacing(1)] in-data-[slot=button-group]:rounded-(--control-radius) [&_svg:not([class*='size-'])]:size-3.5",
-        sm: 'h-(--button-height) [--button-height:var(--control-height-sm)] rounded-(--control-radius-sm) px-(--control-padding) [--button-gap:--spacing(1)] in-data-[slot=button-group]:rounded-(--control-radius)',
+        xs: "h-(--button-height) [--button-height:var(--control-height-xs)] rounded-(--control-radius-xs) px-[calc(var(--control-padding)*0.8)] text-xs [--button-gap:--spacing(1)] [&_svg:not([class*='size-'])]:size-3.5",
+        sm: 'h-(--button-height) [--button-height:var(--control-height-sm)] rounded-(--control-radius-sm) px-(--control-padding) [--button-gap:--spacing(1)]',
         lg: 'h-(--button-height) [--button-height:var(--control-height-lg)] px-(--control-padding) [--button-gap:--spacing(1.5)]',
         icon: 'size-(--button-height) [--button-height:var(--control-height)] [--button-press-depth:2.5]',
         'icon-xs':
-          "size-(--button-height) [--button-height:var(--control-height-xs)] rounded-(--control-radius-xs) [--button-press-depth:2.5] in-data-[slot=button-group]:rounded-(--control-radius) [&_svg:not([class*='size-'])]:size-3.5",
+          "size-(--button-height) [--button-height:var(--control-height-xs)] rounded-(--control-radius-xs) [--button-press-depth:2.5] [&_svg:not([class*='size-'])]:size-3.5",
         'icon-sm':
-          'size-(--button-height) [--button-height:var(--control-height-sm)] rounded-(--control-radius-sm) [--button-press-depth:2.5] in-data-[slot=button-group]:rounded-(--control-radius)',
+          'size-(--button-height) [--button-height:var(--control-height-sm)] rounded-(--control-radius-sm) [--button-press-depth:2.5]',
         'icon-lg':
           'size-(--button-height) [--button-height:var(--control-height-lg)] [--button-press-depth:2.5]',
       },
@@ -84,13 +84,14 @@ function isIcon(node: ReactNode, place: 'inline-start' | 'inline-end'): boolean 
 
 function ButtonContent({
   iconOnly,
-  spinning,
+  busy,
   children,
 }: {
   iconOnly: boolean
-  spinning: boolean
+  busy: boolean
   children: ReactNode
 }) {
+  const spinning = useSpinner(busy)
   // An icon button has nowhere to make room: its icon gives way to the spinner.
   if (iconOnly) {
     return (
@@ -119,6 +120,11 @@ function ButtonContent({
   )
 }
 
+/**
+ * ui-sdk's Button: a promise returned from `onClick` keeps it pending, and
+ * `loading` shows the same state when the caller owns it. Either way the
+ * spinner shows only once it lasts 200ms, and then for at least 300ms.
+ */
 function Button({
   className,
   variant = 'default',
@@ -128,21 +134,18 @@ function Button({
   focusableWhenDisabled,
   children,
   ...props
-}: Omit<ButtonPrimitive.Props, 'className'> & { className?: string } & VariantProps<
-    typeof buttonVariants
-  > & {
-    /**
-     * Blocks presses at once and keeps focus. The spinner shows only when
-     * loading lasts 200ms, and then for at least 300ms.
-     */
+}: Omit<ComponentProps<typeof ButtonPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+} & VariantProps<typeof buttonVariants> & {
+    /** Blocks presses at once and keeps focus, as a pending press does. */
     loading?: boolean
   }) {
-  const spinning = useSpinner(loading)
   return (
     <ButtonPrimitive
-      data-slot='button'
       data-variant={variant}
-      data-loading={loading ? '' : undefined}
+      // ui-sdk has no prop for a pending state the caller owns, so `loading` writes its attributes.
+      data-pending={loading ? '' : undefined}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
       focusableWhenDisabled={focusableWhenDisabled || loading}
@@ -150,9 +153,14 @@ function Button({
       className={cn(buttonVariants({ variant, size }), 'gap-0', className)}
       {...props}
     >
-      <ButtonContent iconOnly={size?.startsWith('icon') ?? false} spinning={spinning}>
-        {children}
-      </ButtonContent>
+      {(state) => (
+        <ButtonContent
+          iconOnly={size?.startsWith('icon') ?? false}
+          busy={loading || state.pending}
+        >
+          {children}
+        </ButtonContent>
+      )}
     </ButtonPrimitive>
   )
 }

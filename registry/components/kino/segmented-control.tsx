@@ -1,13 +1,6 @@
 'use client'
 
-import { useFollowedValue } from '@/registry/lib/controllable'
-import {
-  followPick,
-  followPointer,
-  highlightClassName,
-  itemMatching,
-  pickClassName,
-} from '@/registry/lib/highlight'
+import { followPointer, highlightClassName, itemMatching } from '@/registry/lib/highlight'
 import {
   pillBackdropClassName,
   pillClassName,
@@ -19,17 +12,29 @@ import {
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { revealInRow } from '@/registry/lib/scroll'
 import { SwapIcon } from '@/registry/lib/swap'
-import { Radio as RadioPrimitive } from '@base-ui/react/radio'
-import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
-import { createContext, type ReactNode, use, useEffect, useMemo, useRef } from 'react'
+import {
+  SegmentedControlIndicator,
+  SegmentedControlItem as SegmentedControlItemPrimitive,
+  SegmentedControl as SegmentedControlPrimitive,
+} from '@ui-sdk/react/segmented-control'
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * One of a few options, picked from a row: a radio group a form submits,
- * drawn as the Tabs are, with the pill sliding to the pick. A row wider
- * than its column scrolls, as the Tabs' list does. `vertical` stacks the
- * options in a column, as the vertical Tabs do, labels read from the start.
+ * One of a few options, picked from a row: ui-sdk's Segmented control, which
+ * a form submits, drawn as the Tabs are, with the pill sliding to the pick.
+ * A row wider than its column scrolls, as the Tabs' list does. `vertical`
+ * stacks the options in a column, as the vertical Tabs do, labels read from
+ * the start.
  */
 
 const SEGMENT = '[data-slot=segmented-control-item]'
@@ -44,47 +49,35 @@ const segmentedControlRow = cn(
 /** True inside the pill's copy of the row, where a segment is only its label. */
 const SegmentedControlCopyContext = createContext(false)
 
-/** No segment's value, so nothing reads as picked outside a `SegmentedControl`. */
-const NO_SEGMENT = Symbol('no segment')
-
-/**
- * The picked value, followed from Base UI's own, so the pill's copy of the
- * row knows it as the row does, in the same render.
- */
-const SegmentedControlValueContext = createContext<unknown>(NO_SEGMENT)
+/** The checked value, from ui-sdk's state, so the pill's copy of the row knows it. */
+const SegmentedControlValueContext = createContext<string | null>(null)
 
 /** Whether the segment around it is picked, for its icon. */
 const SegmentedControlCheckedContext = createContext(false)
 
-function SegmentedControl<Value>({
+function SegmentedControl<Value extends string>({
   ref,
   className,
   children,
   orientation = 'horizontal',
-  value,
-  defaultValue,
-  onValueChange,
   ...props
-}: Omit<RadioGroupPrimitive.Props<Value>, 'className'> & {
+}: Omit<
+  ComponentProps<typeof SegmentedControlPrimitive<Value>>,
+  'className' | 'children' | 'orientation'
+> & {
   className?: string
+  children?: ReactNode
   /** A row, or a column read down its start edge. */
   orientation?: 'horizontal' | 'vertical'
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null)
-  const groupRef = useRef<HTMLDivElement>(null)
-  const groupRefs = useMemo(() => mergeRefs(groupRef, markMounted, ref), [ref])
-  const pillRef = useRef<HTMLSpanElement>(null)
+  const groupRefs = useMemo(() => mergeRefs(markMounted, ref), [ref])
   const backdropRef = useRef<HTMLSpanElement>(null)
-  const [picked, follow] = useFollowedValue(value, defaultValue, onValueChange)
 
   useEffect(() => {
     const scroller = scrollerRef.current
-    const group = groupRef.current
-    if (!scroller || !group || !pillRef.current || !backdropRef.current) return
-    const stopPick = followPick(group, pillRef.current, {
-      picked: () => group.querySelector<HTMLElement>(`:scope > ${SEGMENT}[data-checked]`),
-      attributes: ['data-checked'],
-    })
+    const group = backdropRef.current?.parentElement
+    if (!scroller || !group || !backdropRef.current) return
     // Behind the segment under the pointer, or the one with visible focus.
     const stopHover = followPointer(group, backdropRef.current, {
       itemOf: itemMatching(group, SEGMENT),
@@ -96,74 +89,71 @@ function SegmentedControl<Value>({
       fade: '--segmented-control-fade',
     })
     return () => {
-      stopPick()
       stopHover()
       stopRow()
     }
   }, [])
 
   return (
-    <SegmentedControlValueContext value={picked}>
+    <div
+      data-slot='segmented-control-track'
+      className={cn(
+        pillTrackClassName,
+        // An invalid Field around it rings it, and adds a dashed outline in forced colours.
+        'w-fit max-w-full group-data-invalid/field:ring-1 group-data-invalid/field:ring-destructive forced-colors:group-data-invalid/field:outline-2 forced-colors:group-data-invalid/field:outline-dashed',
+        className,
+      )}
+    >
       <div
-        data-slot='segmented-control-track'
+        ref={scrollerRef}
+        data-slot='segmented-control-scroller'
         className={cn(
-          pillTrackClassName,
-          'w-fit max-w-full has-data-invalid:ring-1 has-data-invalid:ring-destructive forced-colors:has-data-invalid:outline-2 forced-colors:has-data-invalid:outline-dashed',
-          className,
+          'min-w-0',
+          // A row wider than its column scrolls; a column grows down the page.
+          orientation === 'horizontal' &&
+            'scrollbar-none overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_var(--segmented-control-fade-left,0px),black_calc(100%-var(--segmented-control-fade-right,0px)),transparent)]',
         )}
       >
-        <div
-          ref={scrollerRef}
-          data-slot='segmented-control-scroller'
-          className={cn(
-            'min-w-0',
-            // A row wider than its column scrolls; a column grows down the page.
-            orientation === 'horizontal' &&
-              'scrollbar-none overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_var(--segmented-control-fade-left,0px),black_calc(100%-var(--segmented-control-fade-right,0px)),transparent)]',
-          )}
+        <SegmentedControlPrimitive<Value>
+          ref={groupRefs}
+          orientation={orientation}
+          className={cn(segmentedControlRow, 'group/segmented-control relative isolate')}
+          {...props}
         >
-          <RadioGroupPrimitive
-            ref={groupRefs}
-            data-slot='segmented-control'
-            data-orientation={orientation}
-            className={cn(
-              segmentedControlRow,
-              'group/segmented-control relative isolate',
-            )}
-            value={value}
-            defaultValue={defaultValue}
-            onValueChange={follow}
-            {...props}
-          >
-            {children}
-            <span
-              ref={backdropRef}
-              aria-hidden
-              data-slot='segmented-control-backdrop'
-              className={cn(highlightClassName, pillBackdropClassName)}
-            />
-            <span
-              ref={pillRef}
-              aria-hidden
-              // Whatever the row holds is copied here, so nothing in the copy may take focus.
-              inert
-              data-slot='segmented-control-pill'
-              className={cn(
-                pickClassName,
-                pillClassName,
-                'z-10 group-data-disabled/segmented-control:data-[highlight=shown]:opacity-50',
-              )}
-            >
-              <span className={cn(segmentedControlRow, 'h-full')}>
-                <SegmentedControlCopyContext value={true}>
-                  {children}
-                </SegmentedControlCopyContext>
-              </span>
-            </span>
-          </RadioGroupPrimitive>
-        </div>
+          {(state) => (
+            <SegmentedControlValueContext value={state.value}>
+              {children}
+              <span
+                ref={backdropRef}
+                aria-hidden
+                data-slot='segmented-control-backdrop'
+                className={cn(highlightClassName, pillBackdropClassName)}
+              />
+              {/*
+               * The pill: as large as the row, and only its window moves, on `morph`. ui-sdk
+               * measures the checked segment once the page runs: until then the window is
+               * empty and the checked segment draws itself, and the first placement doesn't move.
+               * Its end and bottom come from the segment's own size, as the Tabs' pill's do.
+               */}
+              <SegmentedControlIndicator
+                // Whatever the row holds is copied here, so nothing in the copy may take focus.
+                inert
+                className={cn(
+                  pillClassName,
+                  'pointer-events-none absolute inset-0 z-10 [clip-path:inset(var(--segmented-control-indicator-top,0px)_calc(100%_-_var(--segmented-control-indicator-left,0px)_-_var(--segmented-control-indicator-width,0px))_calc(100%_-_var(--segmented-control-indicator-top,0px)_-_var(--segmented-control-indicator-height,100%))_var(--segmented-control-indicator-left,0px)_round_max(0px,calc(var(--list-radius)-2px)))] transition-[clip-path] duration-(--motion-morph-duration) ease-(--motion-morph-easing) data-[activation-direction=none]:transition-none motion-reduce:transition-none group-data-disabled/segmented-control:opacity-50',
+                )}
+              >
+                <span className={cn(segmentedControlRow, 'h-full')}>
+                  <SegmentedControlCopyContext value={true}>
+                    {children}
+                  </SegmentedControlCopyContext>
+                </span>
+              </SegmentedControlIndicator>
+            </SegmentedControlValueContext>
+          )}
+        </SegmentedControlPrimitive>
       </div>
-    </SegmentedControlValueContext>
+    </div>
   )
 }
 
@@ -174,12 +164,16 @@ const segmentLayout = cn(
   'group-data-[orientation=vertical]/segmented-control:h-auto group-data-[orientation=vertical]/segmented-control:min-h-[calc(var(--control-height)_-_6px)] group-data-[orientation=vertical]/segmented-control:justify-start group-data-[orientation=vertical]/segmented-control:py-1.5 group-data-[orientation=vertical]/segmented-control:text-start group-data-[orientation=vertical]/segmented-control:whitespace-normal',
 )
 
-function SegmentedControlItem<Value>({
+function SegmentedControlItem({
   className,
   children,
   ...props
-}: Omit<RadioPrimitive.Root.Props<Value>, 'className' | 'nativeButton' | 'render'> & {
+}: Omit<
+  ComponentProps<typeof SegmentedControlItemPrimitive>,
+  'className' | 'children' | 'render'
+> & {
   className?: string
+  children?: ReactNode
 }) {
   const checked = use(SegmentedControlValueContext) === props.value
   const content = (
@@ -191,22 +185,18 @@ function SegmentedControlItem<Value>({
     return <span className={cn(segmentLayout, className)}>{content}</span>
   }
   return (
-    <RadioPrimitive.Root
-      data-slot='segmented-control-item'
-      nativeButton
-      // The label is the segment's content, passed in with Base UI's props.
-      render={(buttonProps) => <button type='button' {...buttonProps} />}
+    <SegmentedControlItemPrimitive
       className={cn(
         segmentLayout,
         pillItemClassName,
-        // Until the page hydrates and the pill is placed, the pick draws itself.
+        // Until the page runs and the pill is placed, the pick draws itself.
         '[[data-slot=segmented-control]:not([data-mounted])>&]:data-checked:bg-primary [[data-slot=segmented-control]:not([data-mounted])>&]:data-checked:text-primary-foreground',
         className,
       )}
       {...props}
     >
       {content}
-    </RadioPrimitive.Root>
+    </SegmentedControlItemPrimitive>
   )
 }
 

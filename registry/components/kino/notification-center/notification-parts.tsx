@@ -24,7 +24,7 @@ import {
   visibleItems,
   withoutItems,
 } from '@/registry/components/kino/notification-center/notification-list'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -409,10 +409,10 @@ function NotificationShell({
                 <Header unread={unread} markAllRead={markAllRead} />
               </div>
               <TabsList ref={tabsRef} className='self-stretch *:w-full'>
-                <TabsTrigger value='all' className='flex-1'>
+                <TabsTab value='all' className='flex-1'>
                   All
-                </TabsTrigger>
-                <TabsTrigger value='unread' className='flex-1'>
+                </TabsTab>
+                <TabsTab value='unread' className='flex-1'>
                   Unread
                   {/* The count fades away at none as the label glides back to the middle, and back. */}
                   <Swap id={unread > 0 ? 'count' : 'none'} className='-ms-(--button-gap)'>
@@ -424,13 +424,13 @@ function NotificationShell({
                       </span>
                     ) : null}
                   </Swap>
-                </TabsTrigger>
+                </TabsTab>
               </TabsList>
             </PopoverSheetHeader>
             {/* Rows sit `--notification-inset` in from the body's sides, so their content lines up with the title. */}
             <PopoverSheetBody className='min-h-full px-[calc(var(--popover-sheet-edge)-var(--notification-inset))] pb-1.5 [--notification-inset:calc(var(--control-padding)*0.8)]'>
               {(['all', 'unread'] as const).map((value) => (
-                <TabsContent
+                <TabsPanel
                   key={value}
                   value={value}
                   // Its rows take focus, and the body scrolls by keyboard: the panel needn't, except empty.
@@ -444,7 +444,7 @@ function NotificationShell({
                     focusNext={focusNext}
                     onFocused={() => setFocusNext(null)}
                   />
-                </TabsContent>
+                </TabsPanel>
               ))}
             </PopoverSheetBody>
           </Tabs>

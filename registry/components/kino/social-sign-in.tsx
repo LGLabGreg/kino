@@ -171,7 +171,7 @@ function SocialSignInButton({
   provider: SocialProvider
   /** The label. Defaults to "Continue with" and the provider's name. */
   children?: string
-  onClick?: (event: MouseEvent<HTMLButtonElement>) => void
+  onClick?: (event: MouseEvent<HTMLElement>) => void
 }) {
   const group = use(SocialSignInContext)
   const badgeId = useId()
@@ -180,12 +180,12 @@ function SocialSignInButton({
   const label = children ?? `Continue with ${name}`
   const pending = group?.pending ?? null
   const busy = pending === provider
-  const press = (event: MouseEvent<HTMLButtonElement>) => {
+  const press = (event: MouseEvent<HTMLElement>) => {
     onClick?.(event)
     if (!event.defaultPrevented) group?.start(provider)
   }
   const shared = {
-    'data-slot': 'social-sign-in-button',
+    'data-social-sign-in-button': '',
     'data-provider': provider,
     variant: 'outline',
     loading: busy,
@@ -212,7 +212,7 @@ function SocialSignInButton({
   // fades out: the hint means nothing then, and faded text would read as
   // too faint. `className` lays the pair out in the group.
   const item = cn(
-    'relative flex transition-[scale] duration-(--motion-press-duration) ease-(--motion-press-easing) has-[[data-slot=social-sign-in-button]:active]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:has-[[data-slot=social-sign-in-button]:active]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--social-sign-in-press-depth,1))] has-[[data-slot=social-sign-in-button][data-disabled]:not([data-loading])]:[&>[data-slot=badge]]:opacity-0',
+    'relative flex transition-[scale] duration-(--motion-press-duration) ease-(--motion-press-easing) has-[[data-social-sign-in-button]:active]:duration-[calc(var(--motion-press-duration)*0.4)] motion-safe:has-[[data-social-sign-in-button]:active]:scale-[calc(1_-_(1_-_var(--motion-press-scale))_*_var(--social-sign-in-press-depth,1))] has-[[data-social-sign-in-button][data-disabled]:not([data-pending])]:[&>[data-slot=badge]]:opacity-0',
     group?.layout === 'row'
       ? 'min-w-(--button-height) flex-1 [--social-sign-in-press-depth:2.5]'
       : 'w-full',

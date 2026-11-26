@@ -1,19 +1,16 @@
 'use client'
 
 import { buttonVariants } from '@/registry/components/kino/button'
-import { mergeRefs } from '@/registry/lib/refs'
+import { ButtonGroup } from '@/registry/components/kino/button-group'
 import { SwapIcon } from '@/registry/lib/swap'
-import { mergeProps } from '@base-ui/react/merge-props'
-import { Toggle as TogglePrimitive } from '@base-ui/react/toggle'
-import type { VariantProps } from 'class-variance-authority'
 import {
-  cloneElement,
-  createContext,
-  isValidElement,
-  type ReactNode,
-  type Ref,
-  use,
-} from 'react'
+  Toggle as TogglePrimitive,
+  ToggleGroup as ToggleGroupPrimitive,
+  ToggleIcon as ToggleIconPrimitive,
+  type ToggleState,
+} from '@ui-sdk/react/toggle'
+import type { VariantProps } from 'class-variance-authority'
+import { type ComponentProps, createContext, type ReactNode, use } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -57,55 +54,53 @@ function toggleVariants({
   )
 }
 
+/** Whether the toggle around it is pressed, for its icon. */
 const PressedContext = createContext(false)
 
-/** The element Base UI renders, inside a context that tells a `ToggleIcon` whether it's pressed. */
-function renderWithPressed(
-  render: TogglePrimitive.Props['render'],
-): NonNullable<TogglePrimitive.Props['render']> {
-  return (props, state) => (
-    <PressedContext value={state.pressed}>
-      {typeof render === 'function' ? (
-        render(props, state)
-      ) : isValidElement<Record<string, unknown>>(render) ? (
-        cloneElement(render, {
-          ...mergeProps<'button'>(props, render.props),
-          // mergeProps keeps one ref; Base UI's and the element's both need it.
-          ref: mergeRefs(
-            props.ref,
-            render.props.ref as Ref<HTMLButtonElement> | undefined,
-          ),
-        })
-      ) : (
-        // oxlint-disable-next-line react/button-has-type -- Base UI's props carry the type
-        <button {...props} />
-      )}
-    </PressedContext>
-  )
-}
+/** The size a group gives the toggles in it, or null outside one. */
+const ToggleGroupSizeContext = createContext<ToggleSize | null>(null)
+
+/** The variant a toggle takes unless given one: outline in a group or a Toolbar, beside their outline buttons. */
+const ToggleVariantContext = createContext<ToggleVariant>('default')
+
+type TogglePrimitiveProps = ComponentProps<typeof TogglePrimitive>
 
 function Toggle({
   className,
-  variant = 'default',
-  size = 'default',
-  render,
+  variant,
+  size,
+  children,
   ...props
-}: TogglePrimitive.Props & {
+}: Omit<TogglePrimitiveProps, 'children'> & {
+  /** Outline in a group or a Toolbar, beside the controls around it. */
   variant?: ToggleVariant
+  /** The group's size in a group. */
   size?: ToggleSize
+  children?: ReactNode
 }) {
+  const groupSize = use(ToggleGroupSizeContext)
+  const inGroup = groupSize !== null
+  const ownSize = size ?? groupSize ?? 'default'
+  const ownVariant = variant ?? use(ToggleVariantContext)
   return (
     <TogglePrimitive
-      data-slot='toggle'
-      className={(state) =>
+      // ui-sdk takes `className` as a function of state too, so this one keeps that type.
+      className={(state: ToggleState) =>
         cn(
-          toggleVariants({ pressed: state.pressed, variant, size }),
+          toggleVariants({ pressed: state.pressed, variant: ownVariant, size: ownSize }),
+          // A column of labels reads down its start edge; an icon stays centred.
+          inGroup &&
+            !ownSize.startsWith('icon') &&
+            'in-data-[orientation=vertical]:justify-start',
           typeof className === 'function' ? className(state) : className,
         )
       }
-      render={renderWithPressed(render)}
       {...props}
-    />
+    >
+      {(state: ToggleState) => (
+        <PressedContext value={state.pressed}>{children}</PressedContext>
+      )}
+    </TogglePrimitive>
   )
 }
 
@@ -117,16 +112,45 @@ function Toggle({
 function ToggleIcon({
   pressedIcon,
   children,
-}: {
+  ...props
+}: Omit<ComponentProps<typeof ToggleIconPrimitive>, 'children' | 'className'> & {
   pressedIcon: ReactNode
   children: ReactNode
 }) {
   return (
-    <SwapIcon on={use(PressedContext)} onIcon={pressedIcon} slot='toggle-icon'>
-      {children}
-    </SwapIcon>
+    // ui-sdk's part hides the icon from screen readers; the roll draws it.
+    <ToggleIconPrimitive className='contents' {...props}>
+      <SwapIcon on={use(PressedContext)} onIcon={pressedIcon}>
+        {children}
+      </SwapIcon>
+    </ToggleIconPrimitive>
   )
 }
 
-export { Toggle, ToggleIcon, toggleVariants }
+/**
+ * Toggles joined as a Button group, pressed one at a time or several at once:
+ * one highlight glides between them under the pointer, and the pressed ones
+ * are filled. `size` sets every toggle's.
+ */
+function ToggleGroup<Value extends string>({
+  size = 'default',
+  orientation = 'horizontal',
+  ...props
+}: ComponentProps<typeof ToggleGroupPrimitive<Value>> & { size?: ToggleSize }) {
+  return (
+    <ToggleGroupSizeContext value={size}>
+      <ToggleVariantContext value='outline'>
+        <ToggleGroupPrimitive<Value>
+          orientation={orientation}
+          render={(groupProps) => (
+            <ButtonGroup {...groupProps} orientation={orientation} />
+          )}
+          {...props}
+        />
+      </ToggleVariantContext>
+    </ToggleGroupSizeContext>
+  )
+}
+
+export { Toggle, ToggleGroup, ToggleIcon, ToggleVariantContext, toggleVariants }
 export type { ToggleSize, ToggleVariant }

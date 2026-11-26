@@ -2262,7 +2262,7 @@ function ImageCropperRotate({
   const { rotate, disabled, status } = useImageCropper()
   return (
     <Button
-      data-slot='image-cropper-rotate'
+      data-image-cropper-rotate=''
       variant='ghost'
       size='icon-sm'
       aria-label='Rotate clockwise'

@@ -1,6 +1,6 @@
 'use client'
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/registry/components/kino/tabs'
+import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
 import { useControllable } from '@/registry/lib/controllable'
 import {
   type Feature,
@@ -92,13 +92,7 @@ function FeaturesTour({
           orientation='vertical'
           className='grid min-w-0 gap-6 @3xl/features:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] @3xl/features:items-start @3xl/features:gap-10'
         >
-          <TabsList
-            variant='rows'
-            aria-labelledby={titleId}
-            // A picture shows at once, so the arrow keys pick as they go, as the APG pattern suggests.
-            activateOnFocus
-            className='min-w-0'
-          >
+          <TabsList variant='rows' aria-labelledby={titleId} className='min-w-0'>
             {features.map((feature) => (
               <TourTab key={feature.value} feature={feature} />
             ))}
@@ -111,7 +105,7 @@ function FeaturesTour({
                 <FeatureStage className='aspect-[4/3]' />
               </HeroShot>
               {features.map((feature) => (
-                <TabsContent
+                <TabsPanel
                   key={feature.value}
                   value={feature.value}
                   // Over the frame's window, inside its bezel, with its ring inside it.
@@ -125,7 +119,7 @@ function FeaturesTour({
                   >
                     {feature.picture}
                   </div>
-                </TabsContent>
+                </TabsPanel>
               ))}
             </div>
             {features.some((feature) => feature.action) ? (
@@ -147,7 +141,7 @@ function FeaturesTour({
  */
 function TourTab({ feature }: { feature: Feature }) {
   return (
-    <TabsTrigger
+    <TabsTab
       value={feature.value}
       className={cn(
         'group/tab flex w-full min-w-0 flex-col items-stretch rounded-(--surface-radius) px-(--surface-padding) py-3 text-start',
@@ -156,37 +150,37 @@ function TourTab({ feature }: { feature: Feature }) {
         // Its muted words keep 4.5:1 on the picked row's tint.
         tintedRowTextClassName,
         // Forced colours drop the tint: the picked row takes the system's highlight as an outline.
-        'forced-colors:data-active:outline-2 forced-colors:data-active:outline-[Highlight]',
+        'forced-colors:data-[selected]:outline-2 forced-colors:data-[selected]:outline-[Highlight]',
       )}
     >
       <span className='flex min-w-0 items-center gap-3'>
         {feature.icon ? (
-          <FeatureIcon className='group-data-active/tab:bg-background transition-[background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)'>
+          <FeatureIcon className='group-data-[selected]/tab:bg-background transition-[background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing)'>
             {feature.icon}
           </FeatureIcon>
         ) : null}
-        <span className='text-muted-foreground group-hover/tab:text-foreground group-data-active/tab:text-foreground min-w-0 flex-1 text-sm font-medium text-balance transition-colors duration-(--motion-press-duration) ease-(--motion-press-fade-easing)'>
+        <span className='text-muted-foreground group-hover/tab:text-foreground group-data-[selected]/tab:text-foreground min-w-0 flex-1 text-sm font-medium text-balance transition-colors duration-(--motion-press-duration) ease-(--motion-press-fade-easing)'>
           <bdi>{feature.title}</bdi>
         </span>
       </span>
       {/* The tab's name is its title: the panel says the description to a screen reader. */}
       <span
         aria-hidden
-        className='grid grid-rows-[0fr] transition-[grid-template-rows] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-active/tab:grid-rows-[1fr] motion-reduce:transition-none'
+        className='grid grid-rows-[0fr] transition-[grid-template-rows] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-[selected]/tab:grid-rows-[1fr] motion-reduce:transition-none'
       >
         <span className='min-h-0 overflow-hidden'>
           <span
             className={cn(
               'text-muted-foreground block pt-1.5 text-sm text-pretty',
               feature.icon && 'ps-11',
-              'opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-fade-easing) group-data-active/tab:opacity-100 group-data-active/tab:duration-(--motion-enter-duration) group-data-active/tab:ease-(--motion-enter-fade-easing)',
+              'opacity-0 transition-opacity duration-(--motion-exit-duration) ease-(--motion-exit-fade-easing) group-data-[selected]/tab:opacity-100 group-data-[selected]/tab:duration-(--motion-enter-duration) group-data-[selected]/tab:ease-(--motion-enter-fade-easing)',
             )}
           >
             <bdi>{feature.description}</bdi>
           </span>
         </span>
       </span>
-    </TabsTrigger>
+    </TabsTab>
   )
 }
 

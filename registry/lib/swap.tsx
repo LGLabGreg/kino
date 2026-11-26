@@ -813,8 +813,11 @@ function SwapIcon({
 }: {
   on: boolean
   onIcon: ReactNode
-  /** The `data-slot` of the icon's box, such as `toggle-icon`. */
-  slot: string
+  /**
+   * The `data-slot` of the icon's box, such as `segmented-control-icon`, when
+   * no part around it, such as ui-sdk's `ToggleIcon`, carries one.
+   */
+  slot?: string
   /**
    * Clips the roll at the icon's own box, for an icon with more beside it
    * than a control's edge, such as a line of text below in a taller row.

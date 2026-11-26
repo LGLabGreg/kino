@@ -89,7 +89,7 @@ function SplitButtonAction({
   }, [loading, setActionLoading])
   return (
     <Button
-      data-slot='split-button-action'
+      data-split-button-action=''
       variant={context.variant}
       size={context.size}
       loading={loading || context.loading}
@@ -121,7 +121,7 @@ function SplitButtonTrigger<Payload>({
   const held = context.loading && !(disabled ?? context.disabled)
   return (
     <DropdownMenuTrigger
-      data-slot='split-button-trigger'
+      data-split-button-trigger=''
       disabled={disabled ?? context.disabled}
       aria-disabled={held || undefined}
       onClick={(event) => {
@@ -134,7 +134,7 @@ function SplitButtonTrigger<Payload>({
       }}
       render={
         <Button
-          data-loading={context.loading ? '' : undefined}
+          data-pending={context.loading ? '' : undefined}
           variant={context.variant}
           size={triggerSize[context.size]}
           className={cn('aria-disabled:pointer-events-none', className)}
