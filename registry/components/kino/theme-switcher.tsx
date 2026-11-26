@@ -6,10 +6,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/registry/components/kino/dropdown-menu'
-import {
-  colorSchemePreference,
-  usePreference,
-} from '@/registry/components/kino/preferences'
+import { colorSchemePreference } from '@/registry/components/kino/preferences'
 import {
   SegmentedControl,
   SegmentedControlItem,
@@ -38,6 +35,9 @@ import {
 } from '@/registry/lib/pill'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
+import type { ChangeReason, ChangeSource } from '@ui-sdk/core'
+import { withSource } from '@ui-sdk/core/observe'
+import { usePreference } from '@ui-sdk/react/preferences'
 import {
   type ComponentProps,
   type KeyboardEvent,
@@ -67,6 +67,15 @@ import { cn } from '@/lib/utils'
  */
 
 type Theme = 'system' | 'light' | 'dark'
+
+/** What a choice shows: `system` is the device's scheme, light while it isn't known. */
+function resolveTheme(
+  value: Theme,
+  system: 'light' | 'dark' | 'unknown',
+): 'light' | 'dark' {
+  const resolved = value === 'system' ? system : value
+  return resolved === 'dark' ? 'dark' : 'light'
+}
 
 const THEMES: readonly { value: Theme; label: string; icon: ReactNode }[] = [
   {
@@ -181,8 +190,25 @@ function crossoverCss(
   return `${CLIPPED}::view-transition-new(root){animation-name:kino-theme-crossover;${timing('draw')}}@keyframes kino-theme-crossover{from{clip-path:${from}}to{clip-path:${to}}}`
 }
 
-/** The crossover running now: the theme it leaves, whether it is turning back to it, and the value asked for last. */
-let crossing: { from: 'light' | 'dark'; back: boolean; value: Theme } | null = null
+/** What a switcher hands on with a change: its `onValueChange` reads them all. */
+type ThemeChange = { reason?: ChangeReason; event?: Event; source?: ChangeSource }
+
+/** The crossover running now: the theme it leaves, whether it is turning back to it, and the change asked for last. */
+let crossing: {
+  from: 'light' | 'dark'
+  back: boolean
+  value: Theme
+  change: ThemeChange
+} | null = null
+
+/**
+ * Sets the preference with the change's reason and event, as the person or
+ * agent who asked: a crossover sets it after the press is over, when ui-sdk
+ * would read the source as `programmatic`.
+ */
+function setTheme(value: Theme, { reason, event, source }: ThemeChange) {
+  withSource(source, () => colorSchemePreference.set(value, { reason, event }))
+}
 
 // The value asked for last while a crossover runs. A turned-back crossover
 // sets the preference only once it closes, so the switchers show this instead.
@@ -214,9 +240,8 @@ function useTheme() {
     () => asked,
     () => null,
   )
-  return value === null
-    ? { value: preference.value, resolved: preference.resolved }
-    : { value, resolved: colorSchemePreference.resolve(value) }
+  const shown = value ?? preference.value
+  return { value: shown, resolved: resolveTheme(shown, preference.system) }
 }
 
 function crossoverAnimations() {
@@ -233,11 +258,12 @@ function crossoverAnimations() {
  * Sets the theme, crossing the page over to it where the browser can. A
  * change while it crosses over turns the crossover round from where it is.
  */
-function changeTheme(value: Theme, crossover: ThemeCrossover, event?: Event) {
-  const resolved = colorSchemePreference.resolve(value)
-  const apply = (next: Theme) => colorSchemePreference.set(next)
+function changeTheme(value: Theme, crossover: ThemeCrossover, change: ThemeChange = {}) {
+  const { system } = colorSchemePreference.get()
+  const resolved = resolveTheme(value, system)
   if (crossing) {
     crossing.value = value
+    crossing.change = change
     setAsked(value)
     const back = resolved === crossing.from
     if (back !== crossing.back) {
@@ -245,35 +271,39 @@ function changeTheme(value: Theme, crossover: ThemeCrossover, event?: Event) {
       for (const animation of crossoverAnimations()) animation.reverse()
     }
     // Going on to the same look, such as from dark to a system that is dark, changes nothing on screen.
-    if (!back) apply(value)
+    if (!back) setTheme(value, change)
     return
   }
-  const from = colorSchemePreference.get().resolved
+  const from = resolveTheme(colorSchemePreference.get().value, system)
   if (resolved === from || !('startViewTransition' in document) || reducesMotion()) {
-    apply(value)
+    setTheme(value, change)
     return
   }
   const style = document.createElement('style')
   style.textContent = crossoverCss(crossover, {
-    origin: originOf(event),
+    origin: originOf(change.event),
     toDark: resolved === 'dark',
     width: window.innerWidth,
     height: window.innerHeight,
   })
   document.head.append(style)
-  const current = { from, back: false, value }
+  const current = { from, back: false, value, change }
   crossing = current
   setAsked(value)
   // The page is captured as the callback leaves it, so React renders the new theme at once.
-  const transition = document.startViewTransition(() => flushSync(() => apply(value)))
+  const transition = document.startViewTransition(() =>
+    flushSync(() => setTheme(value, change)),
+  )
   void transition.ready.then(async () => {
     await Promise.allSettled(crossoverAnimations().map((animation) => animation.finished))
     // Turned back: the old theme returns under the closed crossover, before the page shows again.
-    if (current.back) flushSync(() => apply(current.value))
+    if (current.back) flushSync(() => setTheme(current.value, current.change))
   })
   void transition.finished.finally(() => {
     style.remove()
     if (crossing === current) {
+      // Turned back after the crossover closed, before the transition ended: nothing above has set it.
+      if (current.back) flushSync(() => setTheme(current.value, current.change))
       crossing = null
       setAsked(null)
     }
@@ -459,7 +489,10 @@ function ThemeToggle({
             onClick={(event, details) => {
               onClick?.(event, details)
               if (!event.defaultPrevented) {
-                changeTheme(dark ? 'light' : 'dark', crossover, event.nativeEvent)
+                changeTheme(dark ? 'light' : 'dark', crossover, {
+                  event: event.nativeEvent,
+                  source: details.source,
+                })
               }
             }}
             {...props}
@@ -501,7 +534,7 @@ function ThemeSegmentedControl({
       aria-label='Theme'
       value={value}
       onValueChange={(next, details) => {
-        if (next) changeTheme(next, crossover, details.event)
+        if (next) changeTheme(next, crossover, details)
       }}
       {...props}
     >
@@ -549,7 +582,7 @@ function ThemeMenuRadioGroup({
       data-slot='theme-menu-radio-group'
       value={value}
       onValueChange={(next: Theme, details) =>
-        changeTheme(next, crossover, details.event)
+        changeTheme(next, crossover, { event: details.event })
       }
       className={cn(
         inline && 'flex items-center gap-3 py-0.5 ps-(--control-padding) pe-0.5',
@@ -673,6 +706,6 @@ function ThemeMenuSegments() {
 
 export { ThemeMenuRadioGroup, ThemeSegmentedControl, ThemeToggle }
 
-export { crossoverCss, THEMES as themeOptions, useTheme }
+export { crossoverCss, resolveTheme, THEMES as themeOptions, useTheme }
 
 export type { Theme, ThemeCrossover, ThemeIcon }

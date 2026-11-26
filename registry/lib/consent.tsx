@@ -378,7 +378,7 @@ function ConsentScript({
 }) {
   return (
     <script
-      // It runs once, from the server's HTML, as the Preferences script does.
+      // It runs once, from the server's HTML, as the Preferences item's colour scheme script does.
       type={typeof window === 'undefined' ? undefined : 'text/plain'}
       nonce={nonce}
       suppressHydrationWarning
