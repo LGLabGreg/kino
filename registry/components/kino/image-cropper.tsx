@@ -2227,7 +2227,7 @@ function ImageCropperZoom({ className, ...props }: ComponentProps<'div'>) {
           store.setFollowing(details.reason === 'drag')
           zoomTo(value)
         }}
-        onValueCommitted={() => {
+        onValueCommit={() => {
           store.setFollowing(false)
           commit()
         }}

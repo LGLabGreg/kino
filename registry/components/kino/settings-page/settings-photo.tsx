@@ -23,7 +23,7 @@ import {
   ImageCropperRotate,
   ImageCropperZoom,
 } from '@/registry/components/kino/image-cropper'
-import { FieldCheck, OutsideField, useFieldProps } from '@/registry/lib/field-control'
+import { FieldCheck } from '@/registry/lib/field-control'
 import {
   type ReactNode,
   useEffect,
@@ -116,8 +116,8 @@ function PhotoControl({
   // Remounted by Discard, as every Field is, so it starts again from what was saved.
   const [value, setValue] = useState<SettingsPhotoValue>(defaultValue)
   const shown = usePreview(value)
-  // The upload's own file input: where the label and a failed check send focus.
-  const [upload, setUpload] = useState<HTMLInputElement | null>(null)
+  // The upload: the Field's control, which its label names, and where a failed check sends focus.
+  const [upload, setUpload] = useState<HTMLButtonElement | null>(null)
 
   // The image picked and waiting to be cropped, with its address.
   const [picked, setPicked] = useState<{ file: File; url: string } | null>(null)
@@ -126,7 +126,6 @@ function PhotoControl({
   const [crop, setCrop] = useState<Crop | null>(null)
   const [cropping, setCropping] = useState(false)
   const [failed, setFailed] = useState(false)
-  const { props: control } = useFieldProps({})
   // The new image, in a file input, so the form sends it as a File.
   const fileRef = useRef<HTMLInputElement>(null)
   useLayoutEffect(() => {
@@ -167,9 +166,8 @@ function PhotoControl({
       {description ? (
         <FieldDescription className='self-start pt-0.5'>{description}</FieldDescription>
       ) : null}
-      {/* What the label points at: focus that reaches it goes on to the upload. */}
+      {/* What the Field checks: focus that reaches it goes on to the upload. */}
       <FieldCheck
-        control={control}
         value={typeof value === 'string' ? value : value ? value.name : ''}
         onFocus={() => upload?.focus()}
       />
@@ -179,30 +177,24 @@ function PhotoControl({
         <input type='hidden' name={name} value={value ?? ''} />
       )}
       <div className='flex flex-wrap items-center gap-2 pt-3 [grid-area:control] @md:justify-end @md:pt-0'>
-        <OutsideField>
-          <FileInput
-            accept='image/*'
-            multiple={false}
-            value={[]}
-            onValueChange={(files) => {
-              const file = files[0]
-              if (!file) return
-              setPicked({ file, url: URL.createObjectURL(file) })
-              setCrop(null)
-              setFailed(false)
-              setOpen(true)
-            }}
-          >
-            <FileInputTrigger
-              ref={setUpload}
-              size='sm'
-              // The Field's description and error, which the upload takes in its place.
-              aria-describedby={control['aria-describedby']}
-            >
-              {value === null ? 'Upload photo' : 'Change photo'}
-            </FileInputTrigger>
-          </FileInput>
-        </OutsideField>
+        <FileInput
+          accept='image/*'
+          value={[]}
+          // The photo goes with the form from the input above, so the upload sends nothing.
+          name=''
+          onValueChange={(files) => {
+            const file = files[0]
+            if (!file) return
+            setPicked({ file, url: URL.createObjectURL(file) })
+            setCrop(null)
+            setFailed(false)
+            setOpen(true)
+          }}
+        >
+          <FileInputTrigger ref={setUpload} size='sm'>
+            {value === null ? 'Upload photo' : 'Change photo'}
+          </FileInputTrigger>
+        </FileInput>
         <Button
           type='button'
           variant='ghost'

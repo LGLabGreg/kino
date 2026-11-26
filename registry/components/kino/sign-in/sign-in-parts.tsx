@@ -8,10 +8,11 @@ import {
   FieldLabel,
 } from '@/registry/components/kino/field'
 import {
-  InputOTP,
-  InputOTPSeparator,
-  InputOTPSlot,
-} from '@/registry/components/kino/input-otp'
+  OTPInput,
+  OTPInputGroup,
+  OTPInputSeparator,
+  OTPInputSlot,
+} from '@/registry/components/kino/otp-input'
 import { PasswordInput } from '@/registry/components/kino/password-input'
 import {
   type SignInError,
@@ -162,7 +163,7 @@ function PasswordField({ flow, className }: { flow: SignInFlow; className?: stri
       <FieldLabel>Password</FieldLabel>
       <PasswordInput
         data-autofocus=''
-        onChange={() => {
+        onValueChange={() => {
           if (error) flow.clearError()
         }}
       />
@@ -301,10 +302,10 @@ function CodeField({
       className={className}
     >
       <FieldLabel>{label}</FieldLabel>
-      <InputOTP
+      <OTPInput
         ref={root}
         aria-describedby={describedBy}
-        length={CODE_LENGTH}
+        maxLength={CODE_LENGTH}
         value={code}
         readOnly={flow.busy === 'code'}
         data-autofocus=''
@@ -312,18 +313,12 @@ function CodeField({
           setCode(value)
           if (error) flow.clearError()
         }}
-        onValueComplete={(value) => void check(value)}
+        onValueCommit={(value) => void check(value)}
       >
-        {Array.from({ length: CODE_LENGTH }, (_, index) =>
-          index === CODE_LENGTH / 2 ? (
-            // oxlint-disable-next-line react/no-array-index-key -- a slot's place in the code is what it is.
-            <CodeSlotAfterBreak key={index} />
-          ) : (
-            // oxlint-disable-next-line react/no-array-index-key -- a slot's place in the code is what it is.
-            <InputOTPSlot key={index} />
-          ),
-        )}
-      </InputOTP>
+        <CodeSlots from={0} to={CODE_LENGTH / 2} />
+        <OTPInputSeparator />
+        <CodeSlots from={CODE_LENGTH / 2} to={CODE_LENGTH} />
+      </OTPInput>
       {description ? <FieldDescription>{description}</FieldDescription> : null}
       <FieldError match={Boolean(error)}>
         {error ? signInMessages[error] : null}
@@ -332,12 +327,14 @@ function CodeField({
   )
 }
 
-function CodeSlotAfterBreak() {
+/** The boxes from `from` up to `to`, one group. */
+function CodeSlots({ from, to }: { from: number; to: number }) {
   return (
-    <>
-      <InputOTPSeparator />
-      <InputOTPSlot />
-    </>
+    <OTPInputGroup>
+      {Array.from({ length: to - from }, (_, at) => (
+        <OTPInputSlot key={from + at} index={from + at} />
+      ))}
+    </OTPInputGroup>
   )
 }
 
@@ -356,7 +353,7 @@ function useCodeSubmit(flow: SignInFlow) {
     } else {
       flow.refuseCode()
       event.currentTarget
-        .querySelector<HTMLInputElement>('[data-slot=input-otp] input')
+        .querySelector<HTMLInputElement>('[data-slot=otp-input-control]')
         ?.focus()
     }
   }

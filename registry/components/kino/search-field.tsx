@@ -16,11 +16,12 @@ import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
 import { Swap, swapIconClassName } from '@/registry/lib/swap'
+import { createInputController } from '@ui-sdk/react/input'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
+  type MouseEvent,
   type PointerEvent,
-  useEffect,
   useMemo,
   useState,
 } from 'react'
@@ -69,7 +70,7 @@ type SearchFieldProps = Omit<ComponentProps<typeof InputControl>, 'type'> &
     countLabel?: (count: number) => string
   }
 
-/** The event a handler of Base UI's Input gets. */
+/** The event a handler of ui-sdk's Input gets. */
 type InputEvent<Handler extends 'onFocus' | 'onBlur' | 'onKeyDown'> = Parameters<
   NonNullable<SearchFieldProps[Handler]>
 >[0]
@@ -90,9 +91,12 @@ function SearchField({
   onBlur,
   disabled,
   readOnly,
+  controller: controllerProp,
   ref,
   ...props
 }: SearchFieldProps) {
+  const [ownController] = useState(createInputController)
+  const controller = controllerProp ?? ownController
   const [input, setInput] = useState<HTMLInputElement | null>(null)
   // One callback for the field's life, so React doesn't hand it the element again each render.
   const inputRef = useMemo(() => mergeRefs(setInput, ref), [ref])
@@ -122,33 +126,9 @@ function SearchField({
     input,
   )
 
-  // A form's reset empties the field without an input event, after its own event.
-  useEffect(() => {
-    if (!input) return
-    const field = input
-    let timer: ReturnType<typeof setTimeout> | undefined
-    function onReset(event: Event) {
-      if (event.target !== field.form) return
-      timer = setTimeout(() => setTyped(field.value !== ''))
-    }
-    document.addEventListener('reset', onReset, true)
-    return () => {
-      document.removeEventListener('reset', onReset, true)
-      clearTimeout(timer)
-    }
-  }, [input])
-
-  function clear() {
-    if (!input) return
-    emptyInput(input)
-    input.focus()
-    onClear?.()
-  }
-
   return (
     <InputGroup
       data-search-field=''
-      data-filled={filled ? '' : undefined}
       data-wide={variant === 'widen' && (focused || filled) ? '' : undefined}
       className={cn(searchFieldVariants({ variant }), className)}
     >
@@ -178,11 +158,13 @@ function SearchField({
         aria-keyshortcuts={shortcut ? ariaShortcut(shortcut, apple) : undefined}
         value={value}
         defaultValue={defaultValue}
+        controller={controller}
         disabled={disabled}
         readOnly={readOnly}
         onValueChange={(next, details) => {
           setTyped(next !== '')
           onValueChange?.(next, details)
+          if (next === '' && details.reason === 'clear-press') onClear?.()
         }}
         onFocus={(event: InputEvent<'onFocus'>) => {
           setFocused(true)
@@ -208,7 +190,7 @@ function SearchField({
             return
           event.preventDefault()
           event.stopPropagation()
-          clear()
+          controller.clear({ reason: 'clear-press', event: event.nativeEvent })
         }}
       />
       <InputGroupAddon align='inline-end' className='gap-1.5'>
@@ -259,7 +241,7 @@ function SearchField({
               ))}
             </KbdGroup>
           ) : null}
-          {/* The wrapper shows and hides it, so the button keeps its own hover and press. */}
+          {/* The wrapper shows and hides it, so the button keeps its own hover and press, and its room. */}
           <span
             data-slot='search-field-clear'
             data-shown={filled && editable ? '' : undefined}
@@ -272,7 +254,10 @@ function SearchField({
               tabIndex={-1}
               // Pressing it leaves focus in the field, so a phone's keyboard stays up.
               onPointerDown={(event: PointerEvent) => event.preventDefault()}
-              onClick={clear}
+              // ui-sdk's clear, so the change reaches `onValueChange` as a `clear-press`.
+              onClick={(event: MouseEvent) =>
+                controller.clear({ reason: 'clear-press', event: event.nativeEvent })
+              }
               className='text-muted-foreground'
             >
               <IconPlaceholder
@@ -289,19 +274,6 @@ function SearchField({
       </InputGroupAddon>
     </InputGroup>
   )
-}
-
-/**
- * Empties the field as the person would, so Base UI's `onValueChange`, a
- * Field's validation and a form all hear it.
- */
-function emptyInput(input: HTMLInputElement) {
-  input.select()
-  // A delete the browser runs itself goes on its undo stack, so ⌘Z brings the text back.
-  if (document.execCommand('delete')) return
-  // The browser's own value setter, past the one React puts on the element.
-  Reflect.set(HTMLInputElement.prototype, 'value', '', input)
-  input.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
 const plural = new Intl.PluralRules('en-US')

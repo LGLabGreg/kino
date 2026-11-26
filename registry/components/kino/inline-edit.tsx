@@ -15,17 +15,19 @@ import { useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useAnnouncer } from '@/registry/lib/announce'
 import { useControllable } from '@/registry/lib/controllable'
+import { editInPlace, type EditInPlaceReason } from '@/registry/lib/edit-in-place'
 import { useFieldProps } from '@/registry/lib/field-control'
 import { isComposing } from '@/registry/lib/keys'
 import { noticeIcon } from '@/registry/lib/notice'
 import { mergeRefs } from '@/registry/lib/refs'
 import { settle } from '@/registry/lib/settle'
 import { Swap, SwapText } from '@/registry/lib/swap'
-import { Input as InputPrimitive } from '@base-ui/react/input'
+import type { ChangeDetails } from '@ui-sdk/core'
+import { type PartProps, usePart, usePrimitive } from '@ui-sdk/react/primitive'
 import { cva } from 'class-variance-authority'
 import {
-  type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
   useEffect,
   useId,
   useLayoutEffect,
@@ -148,28 +150,30 @@ function InlineEdit({
     ? 'Couldn’t save. Edit it to try again.'
     : 'Couldn’t save. Try again.',
   className,
-  onKeyDown,
   readOnly = false,
   ref,
   ...props
 }: Omit<
-  InputPrimitive.Props,
+  PartProps<'input'>,
   | 'value'
   | 'defaultValue'
-  | 'onValueChange'
+  | 'onChange'
   | 'className'
   | 'placeholder'
   | 'disabled'
   | 'aria-label'
+  | 'render'
+  | 'children'
 > & {
   variant?: InlineEditVariant
   value?: string
   defaultValue?: string
   /**
-   * Saves a new value, trimmed. A promise shows the save running until it
-   * settles; a rejection or a throw shows `failedLabel` and keeps the old value.
+   * Saves a new value, trimmed, with who asked for it in `details.source`. A
+   * promise shows the save running until it settles; a rejection or a throw
+   * shows `failedLabel` and keeps the old value.
    */
-  onValueChange?: (value: string) => unknown
+  onValueChange?: (value: string, details: ChangeDetails<EditInPlaceReason>) => unknown
   /** The message to show for a value that can't be saved, or nothing for one that can. */
   validate?: (value: string) => string | null | undefined
   /** Whether the field shows, for a Rename item elsewhere that opens it. */
@@ -201,7 +205,6 @@ function InlineEdit({
     defaultEditing,
     onEditingChange,
   )
-  const [draft, setDraft] = useState(value)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<InlineEditStatus>('idle')
   // Quiet: the value being saved, shown in place of the old one until the save ends.
@@ -214,36 +217,22 @@ function InlineEdit({
   const shown = pending ?? value
   const { announce, region } = useAnnouncer()
   const rootRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  // The buyer's ref gets the field too, memoised so it isn't set again on every render.
   const buttonRef = useRef<HTMLButtonElement>(null)
   const hintId = useId()
   // Focus goes back to the text after Enter or Escape; after a press elsewhere it stays there.
   const returnFocus = useRef(false)
   const run = useRef(0)
-
-  // The field opens with the text it should hold, however it was opened.
-  const [opened, setOpened] = useState(editing)
-  if (editing !== opened) {
-    setOpened(editing)
-    if (editing) setDraft(quiet ? openingText(failed, pending, value) : value)
-  }
+  // The save that is running and had to wait, for an agent's rename to wait on too.
+  const saving = useRef<Promise<void> | undefined>(undefined)
 
   const wasEditing = useRef(editing)
+  // A field open from the first paint doesn't take focus, as nothing moves then; one that opens later does.
+  const openSinceMount = useRef(editing)
   useLayoutEffect(() => {
     if (editing === wasEditing.current) return
     wasEditing.current = editing
-    if (editing) {
-      const input = inputRef.current
-      if (input) {
-        input.focus()
-        // Picked from the end back, with the start in view, so a long text stays where it was.
-        input.setSelectionRange(0, input.value.length, 'backward')
-        input.scrollLeft = 0
-      }
-    } else if (returnFocus.current) {
-      buttonRef.current?.focus()
-    }
+    openSinceMount.current = false
+    if (!editing && returnFocus.current) buttonRef.current?.focus()
     returnFocus.current = false
   }, [editing])
 
@@ -254,31 +243,34 @@ function InlineEdit({
     return () => clearTimeout(timer)
   }, [status])
 
-  // Actions: a save that worked closes the field once the spinner has shown long enough to read.
-  useEffect(() => {
-    if (status !== 'closing' || spinning) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the spinner's hold ends on a timer, and the field closes after it
-    setStatus('idle')
-    // Focus follows the field closing only when it is still inside: a
-    // person who moved on while the save ran keeps their place.
-    returnFocus.current = rootRef.current?.contains(document.activeElement) ?? false
-    setEditing(false)
-  }, [status, spinning, setEditing])
-
   // A save that ends after the component has gone changes nothing.
   useEffect(() => () => void (run.current += 1), [])
 
   // Actions' field waits for its save; Quiet's can be edited again while one runs.
   const waiting = !quiet && status !== 'idle'
 
-  const save = (next: string) => {
+  const save = (next: string, details: ChangeDetails<EditInPlaceReason>) => {
     const id = ++run.current
     const own = valueProp === undefined
     setStatus('saving')
     if (quiet) setPending(next)
+    let done: (failure?: Error) => void = () => {}
+    saving.current = undefined
     settle(
-      () => onValueChange?.(next),
+      () => {
+        const result = onValueChange?.(next, details)
+        if (result instanceof Promise) {
+          const wait = new Promise<void>((resolve, reject) => {
+            done = (failure) => (failure ? reject(failure) : resolve())
+          })
+          // Only an agent's rename waits on it: a person's save that fails says so in the field.
+          wait.catch(() => {})
+          saving.current = wait
+        }
+        return result
+      },
       (ok, waited) => {
+        done(ok ? undefined : new Error(failedLabel))
         if (run.current !== id) return
         setPending(null)
         setStatus(settledStatus(variant, ok, waited))
@@ -296,76 +288,75 @@ function InlineEdit({
     )
   }
 
-  const close = (follow: boolean) => {
+  /** What closing the field puts back, before a save that follows starts. */
+  const closing = (follow: boolean) => {
+    setError(null)
     setFailed(null)
-    if (status === 'failed') setStatus('idle')
+    setStatus((now) => (now === 'failed' ? 'idle' : now))
     returnFocus.current = follow
-    setEditing(false)
   }
 
-  const commit = (follow: boolean) => {
-    if (waiting) return
-    const outcome = inlineEditOutcome(draft, shown, validate)
+  /** Whether a commit of `text` closes the field, saving it when it changed. */
+  const commit = (text: string, details: { reason: EditInPlaceReason }) => {
+    if (waiting) return false
+    const follow = details.reason !== 'focus-out'
+    const outcome = inlineEditOutcome(text, shown, validate)
     if (outcome.kind === 'invalid') {
+      // A value that can't be saved is put back when focus leaves: a field
+      // left open without focus could no longer be closed with Escape.
+      if (!follow) {
+        closing(false)
+        return true
+      }
       setError(outcome.message)
-      return
+      return false
     }
-    setError(null)
     if (outcome.kind === 'unchanged') {
-      close(follow)
-      return
+      closing(follow)
+      return true
     }
     // Quiet closes at once and shows the save beside the text; Actions keeps the field open until it's done.
-    if (quiet) close(follow)
-    save(outcome.value)
+    if (quiet) closing(follow)
+    else setError(null)
+    edit.api.save(outcome.value, details)
+    return quiet
   }
 
-  const cancel = (follow = true) => {
+  const edit = usePrimitive(editInPlace, {
+    value: shown,
+    onValueChange: save,
+    editing,
+    onEditingChange: setEditing,
+    opening: () => (quiet ? openingText(failed, pending, value) : value),
+    commit,
+    saving: () => saving.current,
+    busy: waiting,
+    openSinceMount: () => openSinceMount.current,
+    disabled,
+  })
+
+  // Actions: a save that worked closes the field once the spinner has shown long enough to read.
+  useEffect(() => {
+    if (status !== 'closing' || spinning) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the spinner's hold ends on a timer, and the field closes after it
+    setStatus('idle')
+    // Focus follows the field closing only when it is still inside: a
+    // person who moved on while the save ran keeps their place.
+    returnFocus.current = rootRef.current?.contains(document.activeElement) ?? false
+    edit.api.edit.cancel()
+  }, [status, spinning, edit])
+
+  const cancel = () => {
     if (waiting) return
-    setError(null)
-    close(follow)
-  }
-
-  const open = () => {
-    if (disabled) return
-    setEditing(true)
-  }
-
-  const fieldKeyDown: InputPrimitive.Props['onKeyDown'] = (event) => {
-    onKeyDown?.(event)
-    // Enter that picks a word in an input method editor isn't a save.
-    if (isComposing(event.nativeEvent) || event.key !== 'Enter') return
-    event.preventDefault()
-    // A held Enter repeats, and would open the field it just closed.
-    if (!event.repeat) commit(true)
-  }
-
-  // Escape puts the text back from anywhere in the field, its buttons included.
-  const boxKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!editing || event.key !== 'Escape' || isComposing(event.nativeEvent)) return
-    // Only the field closes, not a dialog it sits in.
-    event.preventDefault()
-    event.stopPropagation()
-    cancel()
-  }
-
-  const boxBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (!editing) return
-    // Focus that leaves the field, its buttons included, saves; another
-    // window or tab taking focus isn't a press elsewhere.
-    if (!document.hasFocus()) return
-    if (rootRef.current?.contains(event.relatedTarget as Node | null)) return
-    // A value that can't be saved is put back: a field left open without
-    // focus could no longer be closed with Escape.
-    if (inlineEditOutcome(draft, shown, validate).kind === 'invalid') cancel(false)
-    else commit(false)
+    closing(true)
+    edit.api.cancel()
   }
 
   const mark = inlineEditMark(status, spinning)
   // The Field's control, once it opens.
   const field = useFieldProps(props)
   const fieldRef = field.props.ref
-  const inputRefs = useMemo(() => mergeRefs(inputRef, ref, fieldRef), [ref, fieldRef])
+  const inputRefs = useMemo(() => mergeRefs(ref, fieldRef), [ref, fieldRef])
 
   // Save keeps its spinner or its tick while it leaves with the field, so
   // nothing in it changes on the way out.
@@ -381,144 +372,147 @@ function InlineEdit({
       invalid={error !== null}
       className={cn('min-w-0', className)}
     >
-      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- it hears what bubbles from the field and its buttons: Escape and focus leaving, and a press beside the text, which the text's own button covers for the keyboard */}
-      <div
-        data-slot='inline-edit-box'
-        onBlur={boxBlur}
-        onKeyDown={boxKeyDown}
-        // A press on the box beside the text, such as on the invalid mark, keeps the caret in the field.
-        onPointerDown={editing ? focusControl : undefined}
-        // At rest, a press on the box beside the text edits it, as a press on the text does.
-        onClick={(event) => {
-          if (!editing && !buttonRef.current?.contains(event.target as Node)) open()
-        }}
-        data-editing={editing ? '' : undefined}
-        data-disabled={disabled ? '' : undefined}
-        className={inlineEditBoxVariants({ variant })}
-      >
-        {editing ? (
-          <>
-            <InputPrimitive
-              {...field.props}
-              ref={inputRefs}
-              data-slot='inline-edit-field'
-              aria-label={label}
-              value={draft}
-              placeholder={placeholder}
-              readOnly={readOnly || waiting}
-              onValueChange={(next) => {
-                setDraft(next)
-                setError(null)
-              }}
-              onKeyDown={fieldKeyDown}
-              className={cn(
-                textClassName,
-                'bg-transparent placeholder:text-muted-foreground focus-visible:outline-hidden',
+      {usePart(
+        edit,
+        'root',
+        {},
+        {
+          'aria-label': label,
+          // Escape puts the text back from anywhere in the field, through `cancel`, which waits for a save Actions keeps open.
+          onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+            if (
+              !editing ||
+              waiting ||
+              event.key !== 'Escape' ||
+              isComposing(event.nativeEvent)
+            )
+              return
+            closing(true)
+          },
+          // A press on the box beside the text, such as on the invalid mark, keeps the caret in the field.
+          onPointerDown: editing ? focusControl : undefined,
+          // At rest, a press on the box beside the text edits it, as a press on the text does.
+          onClick: (event: MouseEvent<HTMLDivElement>) => {
+            if (!editing && !buttonRef.current?.contains(event.target as Node)) {
+              edit.api.open('imperative', event.nativeEvent)
+            }
+          },
+          className: inlineEditBoxVariants({ variant }),
+          children: (
+            <>
+              {editing ? (
+                <>
+                  <InlineEditInput
+                    {...field.props}
+                    ref={inputRefs}
+                    aria-label={label}
+                    placeholder={placeholder}
+                    readOnly={readOnly || waiting}
+                    onChange={() => setError(null)}
+                    className={cn(
+                      textClassName,
+                      'bg-transparent placeholder:text-muted-foreground focus-visible:outline-hidden',
+                    )}
+                  />
+                  <InputInvalidIcon />
+                </>
+              ) : (
+                <InlineEditText
+                  ref={buttonRef}
+                  aria-describedby={hintId}
+                  aria-busy={status === 'saving' || undefined}
+                  disabled={disabled}
+                  className={cn(
+                    textClassName,
+                    'flex cursor-text items-center text-start focus-visible:outline-hidden disabled:cursor-default',
+                    // Quiet's text is as wide as it needs, with its mark after it;
+                    // Actions' leaves room at its end for the pencil.
+                    quiet
+                      ? 'w-auto flex-initial pe-0'
+                      : 'pe-[calc(var(--control-padding)*2+--spacing(4))]',
+                  )}
+                >
+                  <SwapText
+                    text={shown || placeholder || ''}
+                    className={cn(!shown && 'text-muted-foreground')}
+                  />
+                </InlineEditText>
               )}
-            />
-            <InputInvalidIcon />
-          </>
-        ) : (
-          <button
-            ref={buttonRef}
-            type='button'
-            data-slot='inline-edit-text'
-            aria-describedby={hintId}
-            aria-busy={status === 'saving' || undefined}
-            disabled={disabled}
-            onClick={open}
-            onKeyDown={(event) => {
-              // A held key repeats its press, which would save the field it just opened.
-              if (event.repeat && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault()
-              } else if (event.key === 'F2') {
-                event.preventDefault()
-                open()
-              }
-            }}
-            className={cn(
-              textClassName,
-              'flex cursor-text items-center text-start focus-visible:outline-hidden disabled:cursor-default',
-              // Quiet's text is as wide as it needs, with its mark after it;
-              // Actions' leaves room at its end for the pencil.
-              quiet
-                ? 'w-auto flex-initial pe-0'
-                : 'pe-[calc(var(--control-padding)*2+--spacing(4))]',
-            )}
-          >
-            <SwapText
-              text={shown || placeholder || ''}
-              className={cn(!shown && 'text-muted-foreground')}
-            />
-          </button>
-        )}
-        {quiet ? (
-          // Said by the status region and the description, not as part of the text's name.
-          <span aria-hidden className={markClassName}>
-            <Swap roll>{mark && !editing ? noticeIcon(mark, undefined) : null}</Swap>
-          </span>
-        ) : (
-          <span
-            aria-hidden
-            data-shown={editing ? undefined : ''}
-            className={pencilPresenceClassName}
-          >
-            <span className={pencilClassName}>
-              <IconPlaceholder
-                lucide='PencilIcon'
-                tabler='IconPencil'
-                hugeicons='PencilEdit01Icon'
-                phosphor='PencilSimpleIcon'
-                remixicon='RiPencilLine'
-                aria-hidden
-              />
-            </span>
-          </span>
-        )}
-        {quiet ? null : (
-          <InputGroupAddon
-            align='inline-end'
-            data-shown={editing ? '' : undefined}
-            // At rest they are gone from the tab order and from screen readers, and fade out where they are.
-            inert={!editing}
-            className={actionsClassName}
-            // The field keeps focus through a press on Save or Cancel, so
-            // the press is never a press elsewhere, which saves.
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <InputGroupButton
-              size='icon-xs'
-              aria-label={cancelLabel}
-              disabled={waiting}
-              onClick={() => cancel()}
-            >
-              <IconPlaceholder
-                lucide='XIcon'
-                tabler='IconX'
-                hugeicons='Cancel01Icon'
-                phosphor='XIcon'
-                remixicon='RiCloseLine'
-                aria-hidden
-              />
-            </InputGroupButton>
-            <InputGroupButton
-              size='icon-xs'
-              aria-label={saveLabel}
-              loading={editing ? saveLoading : heldLoading}
-              onClick={() => commit(true)}
-            >
-              <IconPlaceholder
-                lucide='CheckIcon'
-                tabler='IconCheck'
-                hugeicons='Tick02Icon'
-                phosphor='CheckIcon'
-                remixicon='RiCheckLine'
-                aria-hidden
-              />
-            </InputGroupButton>
-          </InputGroupAddon>
-        )}
-      </div>
+              {quiet ? (
+                // Said by the status region and the description, not as part of the text's name.
+                <span aria-hidden className={markClassName}>
+                  <Swap roll>
+                    {mark && !editing ? noticeIcon(mark, undefined) : null}
+                  </Swap>
+                </span>
+              ) : (
+                <span
+                  aria-hidden
+                  data-shown={editing ? undefined : ''}
+                  className={pencilPresenceClassName}
+                >
+                  <span className={pencilClassName}>
+                    <IconPlaceholder
+                      lucide='PencilIcon'
+                      tabler='IconPencil'
+                      hugeicons='PencilEdit01Icon'
+                      phosphor='PencilSimpleIcon'
+                      remixicon='RiPencilLine'
+                      aria-hidden
+                    />
+                  </span>
+                </span>
+              )}
+              {quiet ? null : (
+                <InputGroupAddon
+                  align='inline-end'
+                  data-shown={editing ? '' : undefined}
+                  // At rest they are gone from the tab order and from screen readers, and fade out where they are.
+                  inert={!editing}
+                  className={actionsClassName}
+                  // The field keeps focus through a press on Save or Cancel, so
+                  // the press is never a press elsewhere, which saves.
+                  onMouseDown={(event) => event.preventDefault()}
+                >
+                  <InputGroupButton
+                    size='icon-xs'
+                    aria-label={cancelLabel}
+                    disabled={waiting}
+                    onClick={cancel}
+                  >
+                    <IconPlaceholder
+                      lucide='XIcon'
+                      tabler='IconX'
+                      hugeicons='Cancel01Icon'
+                      phosphor='XIcon'
+                      remixicon='RiCloseLine'
+                      aria-hidden
+                    />
+                  </InputGroupButton>
+                  <InputGroupButton
+                    size='icon-xs'
+                    aria-label={saveLabel}
+                    loading={editing ? saveLoading : heldLoading}
+                    onClick={(event) =>
+                      edit.api.edit.end('imperative', event.nativeEvent)
+                    }
+                  >
+                    <IconPlaceholder
+                      lucide='CheckIcon'
+                      tabler='IconCheck'
+                      hugeicons='Tick02Icon'
+                      phosphor='CheckIcon'
+                      remixicon='RiCheckLine'
+                      aria-hidden
+                    />
+                  </InputGroupButton>
+                </InputGroupAddon>
+              )}
+            </>
+          ),
+        },
+        'div',
+      )}
       <FieldError>{error}</FieldError>
       <span id={hintId} hidden>
         {status === 'failed' ? `${editLabel}. ${failedLabel}` : editLabel}
@@ -526,6 +520,16 @@ function InlineEdit({
       {region}
     </Field>
   )
+}
+
+/** The field, filled and focused with its text picked as it opens. */
+function InlineEditInput(props: PartProps<'input'>) {
+  return usePart(editInPlace, 'input', {}, props, 'input')
+}
+
+/** The text at rest, a button that opens the field: a press, Enter or F2. */
+function InlineEditText(props: PartProps<'button'>) {
+  return usePart(editInPlace, 'text', {}, props, 'button')
 }
 
 /** What a commit of `draft` over `value` does: nothing, an error to show, or a save of the trimmed text. */

@@ -2,47 +2,33 @@
 
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { choicePressingClassName } from '@/registry/lib/choice'
-import { useControllable } from '@/registry/lib/controllable'
-import { focusPicked, useFieldProps, useLabelFocus } from '@/registry/lib/field-control'
-import { mergeRefs } from '@/registry/lib/refs'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { Radio as RadioPrimitive } from '@base-ui/react/radio'
-import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
+import { renderElement } from '@ui-sdk/react/primitive'
 import {
+  Rating as RatingPrimitive,
+  RatingItem as RatingItemPrimitive,
+} from '@ui-sdk/react/rating'
+import {
+  type ComponentProps,
   type CSSProperties,
-  type MouseEvent,
+  createContext,
+  type KeyboardEvent,
   type PointerEvent,
-  type ReactNode,
-  useCallback,
-  useMemo,
+  use,
   useState,
 } from 'react'
 
 import { cn } from '@/lib/utils'
 
-type RatingStep = 0.5 | 1
-
 type RatingProps = Omit<
-  RadioGroupPrimitive.Props<number | null>,
-  'className' | 'style' | 'value' | 'defaultValue' | 'onValueChange' | 'children'
+  ComponentProps<typeof RatingPrimitive>,
+  'className' | 'children' | 'step'
 > & {
   className?: string
-  style?: CSSProperties
-  value?: number | null
-  defaultValue?: number | null
-  onValueChange?: (value: number, details: RadioGroupPrimitive.ChangeEventDetails) => void
-  /** How many stars. */
-  max?: number
   /** `0.5` lets a person pick half a star. */
-  step?: RatingStep
-  /**
-   * Names each score, and the score a read-only rating shows. The default
-   * reads `3.5 out of 5 stars`.
-   */
-  getAriaLabel?: (value: number, max: number) => string
+  step?: 0.5 | 1
 }
 
-const defaultAriaLabel = (value: number, max: number) => `${value} out of ${max} stars`
+const defaultValueLabel = (value: number, max: number) => `${value} out of ${max} stars`
 
 // Each star sits in a cell as large as the density's smallest control, which
 // is what the pointer aims at: a whole star is one target, and with half steps
@@ -63,268 +49,175 @@ const phosphorFill = { weight: 'fill' } as const
 const emptyStarClassName = cn(
   choicePressingClassName,
   starClassName,
-  'text-muted-foreground group-aria-invalid/rating:text-destructive group-data-invalid/rating:text-destructive',
+  'text-muted-foreground group-aria-invalid/rating:text-destructive',
 )
 
 // The filled stars are one layer as wide as the row, clipped to the score, so
 // a new score wipes along the row from the old one in a single move and turns
 // back from wherever it is when the score changes again.
 const fillClassName =
-  'text-primary pointer-events-none absolute inset-0 flex transition-[clip-path] duration-(--motion-draw-duration) ease-(--motion-draw-easing) [clip-path:inset(0_calc(100%_-_var(--rating-fill))_0_0)] motion-reduce:transition-none rtl:[clip-path:inset(0_0_0_calc(100%_-_var(--rating-fill)))] forced-colors:text-[Highlight] [&_svg]:fill-current'
+  'text-primary pointer-events-none absolute inset-0 flex transition-[clip-path] duration-(--motion-draw-duration) ease-(--motion-draw-easing) [clip-path:inset(0_calc(100%_-_var(--rating-reach))_0_0)] motion-reduce:transition-none rtl:[clip-path:inset(0_0_0_calc(100%_-_var(--rating-reach)))] forced-colors:text-[Highlight] [&_svg]:fill-current'
 
-function Stars({
+/** The star a press is on, by pointer or Space, for its stars to sink a little. */
+const PressContext = createContext<{
+  pressed: number | null
+  press: (index: number | null) => void
+}>({ pressed: null, press: () => {} })
+
+function EmptyStar({ pressing }: { pressing: boolean }) {
+  return (
+    <span data-pressing={pressing || undefined} className={emptyStarClassName}>
+      <IconPlaceholder
+        lucide='StarIcon'
+        tabler='IconStar'
+        hugeicons='StarIcon'
+        phosphor='StarIcon'
+        remixicon='RiStarLine'
+        aria-hidden
+      />
+    </span>
+  )
+}
+
+/** The filled stars, one layer over the row, clipped to the score shown. */
+function Fill({
   max,
   shown,
   pressed,
-  cell,
 }: {
   max: number
   shown: number
   pressed: number | null
-  cell: (index: number, star: ReactNode) => ReactNode
 }) {
-  const stars = Array.from({ length: max }, (_, index) => index)
   return (
-    <>
-      {stars.map((index) =>
-        cell(
-          index,
+    <span
+      aria-hidden
+      data-rating-fill=''
+      className={fillClassName}
+      style={{ '--rating-reach': ratingFill(shown, max) } as CSSProperties}
+    >
+      {Array.from({ length: max }, (_, at) => (
+        // oxlint-disable-next-line react/no-array-index-key -- a star is its place in the row
+        <span key={at} className={cellClassName}>
           <span
-            data-pressing={pressed === index || undefined}
-            className={emptyStarClassName}
+            data-pressing={pressed === at + 1 || undefined}
+            className={cn(choicePressingClassName, starClassName)}
           >
             <IconPlaceholder
               lucide='StarIcon'
-              tabler='IconStar'
+              tabler='IconStarFilled'
               hugeicons='StarIcon'
               phosphor='StarIcon'
-              remixicon='RiStarLine'
+              remixicon='RiStarFill'
               aria-hidden
+              {...phosphorFill}
             />
-          </span>,
-        ),
-      )}
-      <span
-        aria-hidden
-        data-slot='rating-fill'
-        className={fillClassName}
-        style={{ '--rating-fill': ratingFill(shown, max) } as CSSProperties}
-      >
-        {stars.map((index) => (
-          <span key={index} className={cellClassName}>
-            <span
-              data-pressing={pressed === index || undefined}
-              className={cn(choicePressingClassName, starClassName)}
-            >
-              <IconPlaceholder
-                lucide='StarIcon'
-                tabler='IconStarFilled'
-                hugeicons='StarIcon'
-                phosphor='StarIcon'
-                remixicon='RiStarFill'
-                aria-hidden
-                {...phosphorFill}
-              />
-            </span>
           </span>
-        ))}
-      </span>
-    </>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** One star's cell: its empty icon, under ui-sdk's radios for its score. */
+function RatingItem() {
+  const { pressed, press } = use(PressContext)
+  return (
+    <RatingItemPrimitive
+      onPointerDown={(event: PointerEvent<HTMLSpanElement>) => {
+        if (event.button === 0) press(Number(event.currentTarget.dataset.index))
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLSpanElement>) => {
+        if (event.key === ' ') press(Number(event.currentTarget.dataset.index))
+      }}
+      onKeyUp={() => press(null)}
+      onBlur={() => press(null)}
+      render={(props, { index }) => (
+        <span {...props} data-index={index}>
+          {props.children}
+        </span>
+      )}
+      // A half's radio covers the star's first half and the whole's the rest, so the ring shows which is focused.
+      className={cn(
+        cellClassName,
+        '[&_[role=radio]]:rounded-(--control-radius-xs) [&_[role=radio]]:focus-visible:ring-3 [&_[role=radio]]:focus-visible:ring-ring/50 [&_[role=radio]]:focus-visible:outline-hidden',
+      )}
+    >
+      {({ index }) => <EmptyStar pressing={pressed === index} />}
+    </RatingItemPrimitive>
   )
 }
 
 function Rating({
   className,
-  value,
-  defaultValue = null,
-  onValueChange,
   max = 5,
-  step = 1,
+  getValueLabel = defaultValueLabel,
   readOnly,
-  disabled,
-  name,
-  form,
-  required,
-  inputRef,
-  getAriaLabel = defaultAriaLabel,
-  style: styleProp,
+  style,
+  render,
+  onPointerLeave,
+  onPointerUp,
+  onPointerCancel,
   ...props
 }: RatingProps) {
-  const rtl = useDirection() === 'rtl'
-  const { field, invalid, props: fieldProps } = useFieldProps(props)
-  // A label can't focus a group for itself: a press on it focuses the score.
-  const [group, setGroup] = useState<HTMLElement | null>(null)
-  const fieldRef = fieldProps.ref
-  const groupRef = useMemo(() => mergeRefs(setGroup, fieldRef), [fieldRef])
-  const focusScore = useCallback(() => focusPicked(group), [group])
-  useLabelFocus(
-    props['aria-labelledby'] ? undefined : fieldProps['aria-labelledby']?.split(' ')[0],
-    disabled === true || field?.disabled === true,
-    focusScore,
-  )
-  const [current, setCurrent] = useControllable(
-    value,
-    defaultValue,
-    (next: number | null, details: RadioGroupPrimitive.ChangeEventDetails) => {
-      if (next !== null) onValueChange?.(next, details)
-    },
-  )
-  const [preview, setPreview] = useState<number | null>(null)
-  // A press by the pointer ends when it's let go; by Space, when the key comes
-  // up or focus leaves, which the pointer's own press also makes happen.
-  const [pressed, setPressed] = useState<{ index: number; by: 'pointer' | 'key' } | null>(
-    null,
-  )
-  const releaseKey = () => setPressed((held) => (held?.by === 'key' ? null : held))
-
-  const style = { ...styleProp, '--rating-max': max } as CSSProperties
-
-  if (readOnly) {
-    const score = current ?? 0
-    return (
-      <div
-        data-slot='rating'
-        data-readonly=''
-        role='img'
-        aria-label={getAriaLabel(score, max)}
-        {...props}
-        style={style}
-        className={cn(rootClassName, className)}
-      >
-        <Stars
-          max={max}
-          shown={score}
-          pressed={null}
-          cell={(index, star) => (
-            <span key={index} className={cellClassName}>
-              {star}
-            </span>
-          )}
-        />
-      </div>
-    )
-  }
-
-  /** The score under the pointer in the star at `index`. */
-  const scoreAt = (
-    event: PointerEvent<HTMLElement> | MouseEvent<HTMLElement>,
-    index: number,
-  ) => {
-    const box = event.currentTarget.getBoundingClientRect()
-    const offset = rtl ? box.right - event.clientX : event.clientX - box.left
-    return ratingAt(offset, box.width, index, step)
-  }
-
-  const pick = (event: MouseEvent<HTMLElement>, index: number) => {
-    // The radios take no pointer, so a press on a star picks the radio for
-    // the half it landed on; the click that radio dispatches comes back here.
-    if ((event.target as Element).closest('[role=radio]')) return
-    const score = scoreAt(event, index)
-    const radio = event.currentTarget.querySelector<HTMLElement>(
-      `[data-score="${score}"]`,
-    )
-    radio?.click()
-    radio?.focus({ focusVisible: false })
-  }
-
+  const [pressed, press] = useState<number | null>(null)
   return (
-    <RadioGroupPrimitive<number | null>
-      {...fieldProps}
-      ref={groupRef}
-      data-slot='rating'
-      data-invalid={invalid || undefined}
-      value={current}
-      disabled={disabled || field?.disabled}
-      name={name ?? field?.name}
-      form={form}
-      required={required}
-      inputRef={inputRef}
-      onValueChange={(next, details) => {
-        if (next === null) return
-        setCurrent(next, details)
-      }}
-      onPointerLeave={(event) => {
-        setPreview(null)
-        setPressed(null)
-        props.onPointerLeave?.(event)
-      }}
-      onPointerUp={(event) => {
-        setPressed(null)
-        props.onPointerUp?.(event)
-      }}
-      onPointerCancel={(event) => {
-        setPressed(null)
-        props.onPointerCancel?.(event)
-      }}
-      onKeyDown={(event) => {
-        setPreview(null)
-        props.onKeyDown?.(event)
-      }}
-      className={cn(
-        rootClassName,
-        'data-disabled:pointer-events-none data-disabled:opacity-50 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-dashed forced-colors:data-invalid:outline-2 forced-colors:data-invalid:outline-dashed',
-        className,
-      )}
-      style={style}
-    >
-      <Stars
+    <PressContext value={{ pressed, press }}>
+      <RatingPrimitive
         max={max}
-        shown={preview ?? current ?? 0}
-        pressed={pressed?.index ?? null}
-        cell={(index, star) => (
-          // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the star is the pointer's target; the radios inside it take the keys
-          <span
-            key={index}
-            data-slot='rating-item'
-            className={cellClassName}
-            onPointerMove={(event) => {
-              if (event.pointerType === 'touch') return
-              setPreview(scoreAt(event, index))
-            }}
-            onPointerDown={(event) => {
-              if (event.button === 0) setPressed({ index, by: 'pointer' })
-            }}
-            onClick={(event) => pick(event, index)}
-          >
-            {star}
-            {ratingScores(index, step).map((score) => (
-              <RadioPrimitive.Root
-                key={score}
-                value={score}
-                data-score={score}
-                aria-label={getAriaLabel(score, max)}
-                onKeyDown={(event) => {
-                  if (event.key === ' ') setPressed({ index, by: 'key' })
-                }}
-                onKeyUp={releaseKey}
-                onBlur={releaseKey}
-                // A half covers the star's first half, so a screen reader's tap
-                // on it picks the half and its ring shows which half is focused.
-                className={cn(
-                  'focus-visible:ring-ring/50 pointer-events-none absolute inset-y-0 start-0 rounded-(--control-radius-xs) focus-visible:ring-3 focus-visible:outline-hidden',
-                  score % 1 === 0 ? 'end-0' : 'w-1/2',
-                )}
-              />
-            ))}
-          </span>
+        getValueLabel={getValueLabel}
+        readOnly={readOnly}
+        onPointerLeave={(event) => {
+          press(null)
+          onPointerLeave?.(event)
+        }}
+        onPointerUp={(event) => {
+          press(null)
+          onPointerUp?.(event)
+        }}
+        onPointerCancel={(event) => {
+          press(null)
+          onPointerCancel?.(event)
+        }}
+        style={(state) =>
+          ({
+            ...(typeof style === 'function' ? style(state) : style),
+            '--rating-max': max,
+          }) as CSSProperties
+        }
+        className={cn(
+          rootClassName,
+          !readOnly &&
+            'data-disabled:pointer-events-none data-disabled:opacity-50 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-dashed',
+          className,
         )}
-      />
-    </RadioGroupPrimitive>
+        // The filled stars are one layer after the stars, so a new score wipes along the row.
+        render={(rootProps, state) => {
+          const children = (
+            <>
+              {rootProps.children}
+              <Fill
+                max={max}
+                shown={state.highlighted ?? state.value ?? 0}
+                pressed={readOnly ? null : pressed}
+              />
+            </>
+          )
+          return renderElement('div', { ...rootProps, children }, render, state)
+        }}
+        {...props}
+      >
+        {/* Each star, which ui-sdk repeats along the row. A score that can't change is one image: its stars hold no radios, which a screen reader could still reach. */}
+        {readOnly ? (
+          <span aria-hidden className={cellClassName}>
+            <EmptyStar pressing={false} />
+          </span>
+        ) : (
+          <RatingItem />
+        )}
+      </RatingPrimitive>
+    </PressContext>
   )
-}
-
-/** The scores a person can pick in the star at `index`, counted from 0: its half, then all of it. */
-function ratingScores(index: number, step: RatingStep) {
-  return step === 0.5 ? [index + 0.5, index + 1] : [index + 1]
-}
-
-/**
- * The score a pointer `offset` px from the start edge of the star at `index`
- * picks, in a star `width` px wide: half of it on its first half when the
- * step is a half.
- */
-function ratingAt(offset: number, width: number, index: number, step: RatingStep) {
-  return step === 0.5 && offset < width / 2 ? index + 0.5 : index + 1
 }
 
 /**
@@ -343,5 +236,5 @@ function ratingFill(value: number, max: number) {
 }
 
 export { Rating }
-export { ratingAt, ratingFill, ratingScores }
-export type { RatingProps, RatingStep }
+export { ratingFill }
+export type { RatingProps }

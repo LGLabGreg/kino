@@ -12,11 +12,12 @@ import { cn } from '@/lib/utils'
 
 /*
  * The box every text control sits in: Input, Textarea, Input group, Number
- * field, Native select and the code field's slots. It reads its state from
- * the control inside it, so it works in a Field or on its own.
+ * input, Native select and the OTP input's slots. It reads its state from
+ * the control inside it, so it works in a Field or on its own; a hidden
+ * input that only holds a form's value, such as a File input's, isn't it.
  */
 const inputBoxClassName =
-  "group/input relative flex min-w-0 items-center rounded-(--control-radius) border border-input bg-transparent shadow-xs transition-[color,background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-aria-invalid:border-destructive has-aria-invalid:has-focus-visible:border-destructive has-aria-invalid:has-focus-visible:ring-destructive/20 forced-colors:has-aria-invalid:outline-2 forced-colors:has-aria-invalid:outline-offset-1 forced-colors:has-aria-invalid:outline-dashed has-[:is(input,textarea,select):disabled]:pointer-events-none has-[:is(input,textarea,select):disabled]:opacity-50 has-[:is(input,textarea,select)[aria-disabled=true]]:opacity-50 dark:bg-input/30 dark:has-aria-invalid:border-destructive/70 dark:has-aria-invalid:has-focus-visible:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-']):not(:is(button,[data-slot=button]):is([data-variant=default],[data-variant=destructive],[aria-pressed])_*)]:text-muted-foreground"
+  "group/input relative flex min-w-0 items-center rounded-(--control-radius) border border-input bg-transparent shadow-xs transition-[color,background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50 has-aria-invalid:border-destructive has-aria-invalid:has-focus-visible:border-destructive has-aria-invalid:has-focus-visible:ring-destructive/20 forced-colors:has-aria-invalid:outline-2 forced-colors:has-aria-invalid:outline-offset-1 forced-colors:has-aria-invalid:outline-dashed has-[:is(input:not([aria-hidden=true]),textarea,select):disabled]:pointer-events-none has-[:is(input:not([aria-hidden=true]),textarea,select):disabled]:opacity-50 has-[:is(input,textarea,select)[aria-disabled=true]]:opacity-50 dark:bg-input/30 dark:has-aria-invalid:border-destructive/70 dark:has-aria-invalid:has-focus-visible:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-']):not(:is(button,[data-slot=button]):is([data-variant=default],[data-variant=destructive],[aria-pressed])_*)]:text-muted-foreground"
 
 /**
  * The text inside a box, at the control's height. A search box hides the

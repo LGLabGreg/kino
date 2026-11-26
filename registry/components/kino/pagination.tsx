@@ -2,10 +2,10 @@
 
 import {
   isStep,
-  NumberField,
-  NumberFieldGroup,
-  NumberFieldInput,
-} from '@/registry/components/kino/number-field'
+  NumberInput,
+  NumberInputGroup,
+  NumberInputControl,
+} from '@/registry/components/kino/number-input'
 import {
   Select,
   SelectContent,
@@ -781,36 +781,28 @@ function PaginationPageField({
   return (
     <Place data-slot='pagination-page-field' className={layout} {...props}>
       <span id={labelId}>{label}</span>
-      <NumberField
+      <NumberInput
         value={draft}
         min={1}
         max={pageCount}
         step={1}
         disabled={disabled}
-        locale={locale}
+        locale={numberFormatter(locale).resolvedOptions().locale}
         format={{ maximumFractionDigits: 0, useGrouping: false }}
         onValueChange={(value, details) => {
           setDraft(value)
           // A step goes at once; what is typed or pasted goes when it is sent.
           if (value !== null && isStep(details.reason)) go(value)
         }}
-        onValueCommitted={send}
+        onValueCommit={send}
       >
-        <NumberFieldGroup className={pageBox}>
-          <NumberFieldInput
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return
-              // Base UI sends what was typed when the field is left, and only then writes the page
-              // back: Enter leaves it and comes straight back, so focus stays.
-              const input = event.currentTarget
-              input.blur()
-              input.focus()
-            }}
+        <NumberInputGroup className={pageBox}>
+          <NumberInputControl
             aria-labelledby={labelId}
             aria-describedby={ofText ? ofId : undefined}
           />
-        </NumberFieldGroup>
-      </NumberField>
+        </NumberInputGroup>
+      </NumberInput>
       {ofText ? (
         <span id={ofId} className={pageCountClassName}>
           {ofText}

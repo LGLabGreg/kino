@@ -1,6 +1,7 @@
 'use client'
 
 import { mergeRefs } from '@/registry/lib/refs'
+import type { ChangeDetails, ChangeSource } from '@ui-sdk/core'
 import { useFieldControl } from '@ui-sdk/react/field'
 import {
   createContext,
@@ -95,6 +96,44 @@ type RefTarget<P> = P extends { ref?: Ref<infer E> } ? E : Element
  */
 function keptOnReset(value: unknown, defaultValue: unknown) {
   return value !== undefined && defaultValue === undefined
+}
+
+/** How a person made a change, from the event behind it, as ui-sdk tells it: none is code's. */
+function sourceOf(event: Event | undefined): ChangeSource {
+  if (!event) return 'programmatic'
+  if (event.type.startsWith('key')) return 'keyboard'
+  if (
+    'pointerType' in event &&
+    typeof event.pointerType === 'string' &&
+    event.pointerType
+  )
+    return event.pointerType as ChangeSource
+  if ('detail' in event && event.type === 'click')
+    return event.detail === 0 ? 'virtual' : 'mouse'
+  return 'programmatic'
+}
+
+/**
+ * The details of a change a control of our own makes, in ui-sdk's shape, so
+ * its owner reads `details.source` and calls `details.cancel()` as on any
+ * of ui-sdk's: for a change no ui-sdk part reported, such as a form's reset.
+ */
+function changeDetails<Reason extends string>(
+  reason: Reason,
+  event?: Event,
+): ChangeDetails<Reason> {
+  let canceled = false
+  return {
+    reason,
+    event,
+    source: sourceOf(event),
+    cancel: () => {
+      canceled = true
+    },
+    get canceled() {
+      return canceled
+    },
+  } as ChangeDetails<Reason>
 }
 
 /**
@@ -257,18 +296,10 @@ function useFormReset(
   }, [element, form])
 }
 
-/** Focuses a radio group's picked radio, or its first one that can be picked, as a press on its label does. */
-function focusPicked(group: HTMLElement | null) {
-  const radio =
-    group?.querySelector<HTMLElement>('[role=radio][aria-checked=true]') ??
-    group?.querySelector<HTMLElement>('[role=radio]:not([data-disabled])')
-  radio?.focus()
-}
-
 export {
+  changeDetails,
   FieldCheck,
   FieldValues,
-  focusPicked,
   keptOnReset,
   OutsideField,
   useField,

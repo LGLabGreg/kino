@@ -1,9 +1,7 @@
 'use client'
 
-import { useFieldProps } from '@/registry/lib/field-control'
+import { Tooltip } from '@/registry/components/kino/tooltip'
 import { numberFormatter } from '@/registry/lib/number-format'
-import { usePopupLayer } from '@/registry/lib/popup'
-import { mergeRefs } from '@/registry/lib/refs'
 import { markResizing } from '@/registry/lib/resize'
 import {
   channelThumbClassName,
@@ -16,15 +14,27 @@ import {
   trackRootClassName,
   valuePercent,
 } from '@/registry/lib/track'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { Slider as SliderPrimitive } from '@base-ui/react/slider'
-import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
+import { type PartProps, renderElement } from '@ui-sdk/react/primitive'
+import {
+  SliderControl as SliderControlPrimitive,
+  SliderIndicator as SliderIndicatorPrimitive,
+  Slider as SliderPrimitive,
+  SliderThumb as SliderThumbPrimitive,
+  SliderTrack as SliderTrackPrimitive,
+  SliderValue as SliderValuePrimitive,
+  type SliderValueChangeReason,
+} from '@ui-sdk/react/slider'
+import { TooltipContent as TooltipContentPrimitive } from '@ui-sdk/react/tooltip'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
+  type ComponentProps,
+  createContext,
   type CSSProperties,
   Fragment,
   type ReactNode,
+  use,
   useCallback,
+  useId,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -52,11 +62,7 @@ interface ThumbReveal {
 type ThumbEvent =
   | { type: 'enter'; thumb: number }
   | { type: 'leave'; thumb: number }
-  | {
-      type: 'change'
-      reason: SliderPrimitive.Root.ChangeEventReason
-      thumb: number
-    }
+  | { type: 'change'; reason: SliderValueChangeReason; thumb: number }
   | { type: 'commit' }
   | { type: 'press' }
   | { type: 'focus' }
@@ -78,7 +84,7 @@ function revealStep(state: ThumbReveal, event: ThumbEvent): ThumbReveal {
       return {
         ...state,
         dragged: event.reason === 'drag' ? event.thumb : -1,
-        keyed: event.reason === 'keyboard' ? event.thumb : -1,
+        keyed: event.reason === 'step-key' ? event.thumb : -1,
       }
     case 'commit':
       return { ...state, dragged: -1 }
@@ -98,7 +104,7 @@ function thumbShowsValue(state: ThumbReveal, index: number) {
 const sliderTrackVariants = cva(
   cn(
     trackClassName,
-    'forced-colors:group-data-invalid/slider:outline-2 forced-colors:group-data-invalid/slider:outline-dashed',
+    'forced-colors:group-has-aria-invalid/slider:outline-2 forced-colors:group-has-aria-invalid/slider:outline-dashed forced-colors:group-aria-invalid/slider:outline-2 forced-colors:group-aria-invalid/slider:outline-dashed',
   ),
   {
     variants: {
@@ -113,10 +119,12 @@ const sliderTrackVariants = cva(
   },
 )
 
+// ui-sdk's Field marks a single thumb's input invalid, and a range's group.
 const sliderThumbVariants = cva(
   cn(
     thumbDotClassName,
-    'group-data-invalid/slider:border-destructive group-data-invalid/slider:ring-destructive/20 dark:group-data-invalid/slider:ring-destructive/40',
+    'group-has-aria-invalid/slider:border-destructive group-has-aria-invalid/slider:ring-destructive/20 dark:group-has-aria-invalid/slider:ring-destructive/40',
+    'group-aria-invalid/slider:border-destructive group-aria-invalid/slider:ring-destructive/20 dark:group-aria-invalid/slider:ring-destructive/40',
     'group-data-disabled/slider:ring-0',
   ),
   {
@@ -131,28 +139,41 @@ const sliderThumbVariants = cva(
   },
 )
 
-// Base UI places a thumb with `inset-inline-start` and the fill with `width`,
-// which motion.md won't let us animate. The thumb is pinned to the start and
-// moved with `translate`, against the control's width (`cqw`: the control is a
-// size container), and the fill is clipped, so both glide on the compositor.
+/** The slider's label's id, for its thumbs or its group, and the text the visible value shows. */
+const SliderContext = createContext<{
+  labelId: string
+  labelled: (on: boolean) => void
+  display: (value: number) => string
+} | null>(null)
 
-type SliderProps<Value extends number | readonly number[]> = Omit<
-  SliderPrimitive.Root.Props<Value>,
-  'orientation'
-> &
-  Pick<SliderPrimitive.Thumb.Props, 'getAriaLabel' | 'getAriaValueText'> & {
-    /** Names a slider that has no `SliderLabel`. */
-    'aria-label'?: string
-    /** The label and value, in a row above the track. */
-    children?: ReactNode
-    /**
-     * `channel` draws one channel of a colour: the track is the `--slider-track`
-     * background, with no fill, and the thumb is filled with `--slider-thumb`.
-     */
-    variant?: VariantProps<typeof sliderTrackVariants>['variant']
-  }
+// ui-sdk places a thumb with `inset-inline` and the fill with `width`, which
+// motion.md won't let us animate. The thumb is pinned to the start and moved
+// with `translate`, against the control's width (`cqw`: the control is a size
+// container), and the fill is clipped, so both glide on the compositor.
 
-function Slider<Value extends number | readonly number[]>({
+type SliderProps<Value extends number | number[]> = Omit<
+  ComponentProps<typeof SliderPrimitive<Value>>,
+  'orientation' | 'format' | 'className' | 'children'
+> & {
+  className?: string
+  /** How the value is written, in its thumb's number and in `SliderValue`. */
+  format?: Intl.NumberFormatOptions
+  /** What a screen reader hears for a value, from its written form; the written form by default. */
+  getAriaValueText?: (formatted: string, value: number) => string
+  /** Names the thumb at `index` of a range, such as "Lowest price". */
+  getAriaLabel?: (index: number) => string
+  /** Names a slider that has no `SliderLabel` or Field. */
+  'aria-label'?: string
+  /** The label and value, in a row above the track. */
+  children?: ReactNode
+  /**
+   * `channel` draws one channel of a colour: the track is the `--slider-track`
+   * background, with no fill, and the thumb is filled with `--slider-thumb`.
+   */
+  variant?: VariantProps<typeof sliderTrackVariants>['variant']
+}
+
+function Slider<Value extends number | number[]>({
   className,
   children,
   value,
@@ -163,183 +184,154 @@ function Slider<Value extends number | readonly number[]>({
   locale,
   disabled,
   onValueChange,
-  onValueCommitted,
+  onValueCommit,
+  onFocus,
   onBlur,
   getAriaLabel,
   getAriaValueText,
   'aria-label': ariaLabel,
-  style,
-  onFocus,
-  variant = 'default',
-  name,
   'aria-describedby': ariaDescribedBy,
+  style,
+  variant = 'default',
   ...props
 }: SliderProps<Value>) {
   const count = thumbCount(value ?? defaultValue)
-  // The first thumb's input is its Field's control: its label's target.
-  const {
-    field,
-    invalid,
-    props: fieldProps,
-  } = useFieldProps({
-    'aria-describedby': ariaDescribedBy,
-  })
-  const fieldRef = field ? fieldProps.ref : undefined
-  const off = disabled || field?.disabled
-  // Base UI's thumb takes no aria-invalid for its input, so it is set here.
-  const [input, setInput] = useState<HTMLInputElement | null>(null)
-  const inputRef = useMemo(
-    () => mergeRefs<HTMLInputElement>(setInput, fieldRef),
-    [fieldRef],
-  )
-  useLayoutEffect(() => {
-    if (invalid) input?.setAttribute('aria-invalid', 'true')
-    else input?.removeAttribute('aria-invalid')
-  }, [input, invalid])
+  const labelId = useId()
+  const [hasLabel, setHasLabel] = useState(false)
   const [reveal, send] = useReducer(revealStep, HIDDEN)
   const formatter = numberFormatter(locale, format)
+  const display = useCallback((next: number) => formatter.format(next), [formatter])
+  const context = useMemo(
+    () => ({ labelId, labelled: setHasLabel, display }),
+    [labelId, display],
+  )
   const [control, setControl] = useState<HTMLDivElement | null>(null)
   const controlRef = useCallback((element: HTMLDivElement | null) => {
     setControl(element)
     // Thumbs sit in `cqw`, so while the slider resizes they move at once.
     return markResizing(element)
   }, [])
+  const range = count > 1
 
   return (
-    <SliderPrimitive.Root
-      data-slot='slider'
-      value={value}
-      defaultValue={defaultValue}
-      min={min}
-      max={max}
-      format={format}
-      locale={locale}
-      name={name ?? field?.name}
-      disabled={off}
-      onValueChange={(next, details) => {
-        send({
-          type: 'change',
-          reason: details.reason,
-          thumb: details.activeThumbIndex,
-        })
-        onValueChange?.(next, details)
-      }}
-      onValueCommitted={(next, details) => {
-        send({ type: 'commit' })
-        onValueCommitted?.(next, details)
-      }}
-      onFocus={(event) => {
-        send({ type: 'focus' })
-        onFocus?.(event)
-      }}
-      onBlur={(event) => {
-        send({ type: 'blur' })
-        onBlur?.(event)
-      }}
-      aria-label={count > 1 ? ariaLabel : undefined}
-      data-invalid={invalid || undefined}
-      data-following={reveal.dragged >= 0 || undefined}
-      style={(state) =>
-        ({
-          ...(typeof style === 'function' ? style(state) : style),
-          '--slider-start':
-            state.values.length > 1 ? valuePercent(state.values[0], min, max) : 0,
-          '--slider-end': valuePercent(state.values[state.values.length - 1], min, max),
-        }) as CSSProperties
-      }
-      className={cn(trackRootClassName, 'group/slider', className)}
-      {...props}
-    >
-      {children ? (
-        <div data-slot='slider-header' className={trackHeaderClassName}>
-          {children}
-        </div>
-      ) : null}
-      <SliderPrimitive.Control
-        data-slot='slider-control'
-        ref={controlRef}
-        onPointerDown={() => send({ type: 'press' })}
-        className='group/control @container relative flex h-(--control-height-xs) w-full touch-none items-center select-none data-disabled:pointer-events-none data-disabled:opacity-50'
+    <SliderContext value={context}>
+      <SliderPrimitive<Value>
+        value={value}
+        defaultValue={defaultValue}
+        min={min}
+        max={max}
+        locale={locale}
+        disabled={disabled}
+        format={(next) => {
+          if (next === null) return ''
+          return getAriaValueText ? getAriaValueText(display(next), next) : display(next)
+        }}
+        onValueChange={(next, details) => {
+          send({ type: 'change', reason: details.reason, thumb: details.thumb ?? -1 })
+          onValueChange?.(next, details)
+        }}
+        onValueCommit={(next, details) => {
+          send({ type: 'commit' })
+          onValueCommit?.(next, details)
+        }}
+        onFocus={(event) => {
+          send({ type: 'focus' })
+          onFocus?.(event)
+        }}
+        onBlur={(event) => {
+          send({ type: 'blur' })
+          onBlur?.(event)
+        }}
+        aria-label={range ? ariaLabel : undefined}
+        aria-labelledby={range && hasLabel && !ariaLabel ? labelId : undefined}
+        style={(state) =>
+          ({
+            ...(typeof style === 'function' ? style(state) : style),
+            '--slider-start': range
+              ? valuePercent([state.value].flat()[0] ?? min, min, max)
+              : 0,
+            '--slider-end': valuePercent([state.value].flat().at(-1) ?? min, min, max),
+          }) as CSSProperties
+        }
+        // ui-sdk marks a press on the track as dragging too, which still glides; only a drag follows at once.
+        data-following={reveal.dragged >= 0 || undefined}
+        className={cn(trackRootClassName, 'group/slider', className)}
+        {...props}
       >
-        <SliderPrimitive.Track
-          data-slot='slider-track'
-          // In forced colours the fill turns to the system highlight, so a dashed track keeps the invalid state.
-          className={sliderTrackVariants({ variant })}
-          render={(trackProps, state) => (
-            <div {...trackProps}>
-              {trackProps.children}
-              {Array.from({ length: count }, (_, index) => (
-                // oxlint-disable-next-line react/no-array-index-key -- a thumb is its index in the value
-                <Fragment key={index}>
-                  <SliderPrimitive.Thumb
-                    data-slot='slider-thumb'
-                    index={index}
-                    inputRef={index === 0 ? inputRef : undefined}
-                    aria-labelledby={
-                      getAriaLabel || ariaLabel
-                        ? undefined
-                        : fieldProps['aria-labelledby']
-                    }
-                    aria-describedby={fieldProps['aria-describedby']}
-                    aria-label={getAriaLabel ? undefined : ariaLabel}
-                    getAriaLabel={getAriaLabel}
-                    getAriaValueText={getAriaValueText}
-                    style={
-                      {
-                        '--slider-value': valuePercent(
-                          state.values[index] ?? min,
-                          min,
-                          max,
-                        ),
-                        insetInlineStart: 0,
-                        translate:
-                          'calc(var(--track-dir) * (var(--slider-value) * 1cqw - 50%)) -50%',
-                      } as CSSProperties
-                    }
-                    onPointerEnter={() => send({ type: 'enter', thumb: index })}
-                    onPointerLeave={() => send({ type: 'leave', thumb: index })}
-                    className={cn(
-                      'group/thumb flex size-6 items-center justify-center rounded-full outline-hidden',
-                      // After a press on the track or a key, it glides on `layout`; while dragged, it follows the pointer at once.
-                      'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 group-data-resizing/control:transition-none motion-reduce:transition-none',
-                    )}
-                    render={(thumbProps) => (
-                      <div {...thumbProps}>
-                        {thumbProps.children}
+        {(state) => {
+          const values = [state.value].flat()
+          return (
+            <>
+              {children ? (
+                <div data-slider-header='' className={trackHeaderClassName}>
+                  {children}
+                </div>
+              ) : null}
+              <SliderControlPrimitive
+                ref={controlRef}
+                onPointerDown={() => send({ type: 'press' })}
+                className='group/control @container relative flex h-(--control-height-xs) w-full touch-none items-center select-none data-disabled:pointer-events-none data-disabled:opacity-50'
+              >
+                <SliderTrackPrimitive className={sliderTrackVariants({ variant })}>
+                  {variant === 'channel' ? null : (
+                    <SliderIndicatorPrimitive
+                      // ui-sdk sizes the fill with `width`, which moves on the main thread: it stays the track's width and is clipped instead.
+                      render={(fill) => <span {...fill} style={undefined} />}
+                      className={cn(
+                        trackFillClassName,
+                        'pointer-events-none inset-x-0',
+                        'transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 motion-reduce:transition-none',
+                        '[clip-path:inset(0_calc(100%-var(--slider-end)*1%)_0_calc(var(--slider-start)*1%)_round_9999px)]',
+                        'rtl:[clip-path:inset(0_calc(var(--slider-start)*1%)_0_calc(100%-var(--slider-end)*1%)_round_9999px)]',
+                        'group-has-aria-invalid/slider:bg-destructive group-aria-invalid/slider:bg-destructive',
+                      )}
+                    />
+                  )}
+                  {Array.from({ length: count }, (_, index) => (
+                    // oxlint-disable-next-line react/no-array-index-key -- a thumb is its index in the value
+                    <Fragment key={index}>
+                      <SliderThumbPrimitive
+                        index={index}
+                        // A range's thumbs take the slider's name too, unless `getAriaLabel` names each.
+                        aria-label={getAriaLabel?.(index) ?? ariaLabel}
+                        aria-labelledby={
+                          getAriaLabel || ariaLabel || !hasLabel ? undefined : labelId
+                        }
+                        aria-describedby={ariaDescribedBy}
+                        // ui-sdk places a thumb with `inset-inline`, which moves on the main thread, so the thumb takes our place instead.
+                        render={(thumb, { percent }) => (
+                          <div
+                            {...thumb}
+                            style={{ '--slider-value': percent } as CSSProperties}
+                          />
+                        )}
+                        onPointerEnter={() => send({ type: 'enter', thumb: index })}
+                        onPointerLeave={() => send({ type: 'leave', thumb: index })}
+                        className={cn(
+                          'group/thumb absolute start-0 top-1/2 flex size-6 [translate:calc(var(--track-dir)*(var(--slider-value)*1cqw-50%))_-50%] items-center justify-center rounded-full data-dragging:z-2 has-focus-visible:z-1',
+                          // After a press on the track or a key, it glides on `layout`; while dragged, it follows the pointer at once.
+                          'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 group-data-resizing/control:transition-none motion-reduce:transition-none',
+                        )}
+                      >
                         <span aria-hidden className={sliderThumbVariants({ variant })} />
-                      </div>
-                    )}
-                  />
-                  <SliderThumbValue
-                    control={control}
-                    open={!off && thumbShowsValue(reveal, index)}
-                    following={reveal.dragged >= 0}
-                    percent={valuePercent(state.values[index] ?? min, min, max)}
-                  >
-                    {formatter.format(state.values[index] ?? min)}
-                  </SliderThumbValue>
-                </Fragment>
-              ))}
-            </div>
-          )}
-        >
-          {variant === 'channel' ? null : (
-            <SliderPrimitive.Indicator
-              data-slot='slider-indicator'
-              style={{ insetInlineStart: 0, width: '100%' }}
-              className={cn(
-                trackFillClassName,
-                'pointer-events-none',
-                'transition-[clip-path] duration-(--motion-layout-duration) ease-(--motion-layout-easing) group-data-following/slider:duration-0 motion-reduce:transition-none',
-                '[clip-path:inset(0_calc(100%-var(--slider-end)*1%)_0_calc(var(--slider-start)*1%)_round_9999px)]',
-                'rtl:[clip-path:inset(0_calc(var(--slider-start)*1%)_0_calc(100%-var(--slider-end)*1%)_round_9999px)]',
-                'group-data-invalid/slider:bg-destructive',
-              )}
-            />
-          )}
-        </SliderPrimitive.Track>
-      </SliderPrimitive.Control>
-    </SliderPrimitive.Root>
+                      </SliderThumbPrimitive>
+                      <SliderThumbValue
+                        control={control}
+                        open={!state.disabled && thumbShowsValue(reveal, index)}
+                        following={reveal.dragged >= 0}
+                        percent={valuePercent(values[index] ?? min, min, max)}
+                      >
+                        {display(values[index] ?? min)}
+                      </SliderThumbValue>
+                    </Fragment>
+                  ))}
+                </SliderTrackPrimitive>
+              </SliderControlPrimitive>
+            </>
+          )
+        }}
+      </SliderPrimitive>
+    </SliderContext>
   )
 }
 
@@ -361,9 +353,23 @@ function trailStep(trail: ValueTrail, percent: number, open: boolean): ValueTrai
 }
 
 /**
- * A thumb's number, above it. It is portalled to the page's body, above its
- * containers, so none that clips, such as a Card, cuts it off. Its positioner is laid
- * over the control, as wide as it, and the number slides along it.
+ * The line through the middle of the control, as wide as it, that a thumb's
+ * number is placed above: the number then slides along it in CSS, in step
+ * with the thumb, rather than being placed again on every frame.
+ */
+function midline(control: HTMLElement) {
+  return {
+    getBoundingClientRect() {
+      const box = control.getBoundingClientRect()
+      return new DOMRect(box.left, box.top + box.height / 2, box.width, 0)
+    },
+  }
+}
+
+/**
+ * A thumb's number, above it, in Kino's Tooltip: in the top layer, so no box
+ * that clips, such as a Card, cuts it off. The tooltip is as wide as the
+ * control, and the number slides along it.
  */
 function SliderThumbValue({
   control,
@@ -380,102 +386,102 @@ function SliderThumbValue({
   percent: number
   children: ReactNode
 }) {
-  const dir = useDirection()
   const [trail, setTrail] = useState<ValueTrail>({ percent, open, from: percent })
   const next = trailStep(trail, percent, open)
   if (next !== trail) setTrail(next)
-  // Portalled out of the slider, it takes the feel, the reduced motion and the
-  // rise its thumb moves on, so the two stay in step.
-  const inherit = useCallback(
-    (positioner: HTMLDivElement | null) => {
-      if (!positioner || !control) return
-      for (const name of ['data-feel', 'data-motion']) {
-        const value = control.closest(`[${name}]`)?.getAttribute(name)
-        if (value) positioner.setAttribute(name, value)
-      }
-      const rise = getComputedStyle(control).getPropertyValue('--slider-value-rise')
-      if (rise) positioner.style.setProperty('--slider-value-rise', rise)
-    },
-    [control],
-  )
-  const layer = usePopupLayer()
+  const anchor = useMemo(() => (control ? midline(control) : null), [control])
   return (
-    <TooltipPrimitive.Root open={open}>
-      <TooltipPrimitive.Portal container={layer}>
-        <TooltipPrimitive.Positioner
-          anchor={control}
-          side='top'
-          align='start'
-          // 14px above the track's middle: the thumb's 8px radius and a 6px gap.
-          sideOffset={({ anchor }) => 14 - anchor.height / 2}
-          collisionAvoidance={{ side: 'none', align: 'none', fallbackAxisSide: 'none' }}
-          positionMethod='fixed'
-          ref={inherit}
-          // Hidden with its thumb when a box it sits in scrolls it out of view.
-          className='pointer-events-none isolate z-50 h-0 w-(--anchor-width) data-anchor-hidden:invisible'
+    <Tooltip open={open && anchor !== null}>
+      <TooltipContentPrimitive
+        anchor={anchor}
+        side='top'
+        align='start'
+        // The thumb's 8px radius and a 6px gap above the track's middle.
+        sideOffset={14}
+        aria-hidden
+        // The number repeats the thumb's value, which the thumb says itself.
+        data-agent-hidden
+        className={cn(
+          trackDirClassName,
+          'group/value pointer-events-none isolate h-0 w-(--anchor-width) overflow-visible',
+        )}
+      >
+        <div
+          data-following={following || undefined}
+          style={
+            { '--slider-value': percent, '--slider-from': next.from } as CSSProperties
+          }
+          className={cn(
+            // A percentage of its own width, the track's, so a resize moves it at once rather than gliding.
+            'absolute start-0 bottom-0 w-full [translate:calc(var(--track-dir)*var(--slider-value)*1%)_0]',
+            // It appears where the thumb was, so it glides beside a thumb that the keys moved.
+            'starting:[translate:calc(var(--track-dir)*var(--slider-from)*1%)_0]',
+            // Glides with the thumb after a press or a key, and trails it a little while dragged.
+            'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-following:duration-(--motion-press-duration) data-following:ease-(--motion-press-easing) motion-reduce:transition-none',
+          )}
         >
-          <div
-            dir={dir}
-            data-following={following || undefined}
-            style={
-              { '--slider-value': percent, '--slider-from': next.from } as CSSProperties
-            }
+          <span
+            data-slider-thumb-value=''
             className={cn(
-              trackDirClassName,
-              // A percentage of its own width, the track's, so a resize moves it at once rather than gliding.
-              'absolute start-0 bottom-0 w-full [translate:calc(var(--track-dir)*var(--slider-value)*1%)_0]',
-              // It appears where the thumb was, so it glides beside a thumb that the keys moved.
-              'starting:[translate:calc(var(--track-dir)*var(--slider-from)*1%)_0]',
-              // Glides with the thumb after a press or a key, and trails it a little while dragged.
-              'transition-[translate] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-following:duration-(--motion-press-duration) data-following:ease-(--motion-press-easing) motion-reduce:transition-none',
+              'bg-primary text-primary-foreground absolute start-0 bottom-0 flex h-6 -translate-x-1/2 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap tabular-nums shadow-md rtl:translate-x-1/2 forced-colors:border',
+              // Rises out of the thumb, from a little below and smaller, and sinks back into it.
+              'origin-bottom group-data-ending-style/value:[transform:translateY(var(--slider-value-rise,6px))_scale(0.6)] group-data-ending-style/value:opacity-0 group-data-starting-style/value:[transform:translateY(var(--slider-value-rise,6px))_scale(0.6)] group-data-starting-style/value:opacity-0',
+              '[transition:transform_var(--motion-enter-duration)_var(--motion-enter-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-ending-style/value:[transition:transform_var(--motion-exit-duration)_var(--motion-exit-easing),opacity_var(--motion-exit-duration)_var(--motion-exit-easing)] motion-reduce:[transition-property:opacity] motion-reduce:group-data-ending-style/value:[transform:none] motion-reduce:group-data-starting-style/value:[transform:none]',
             )}
           >
-            <TooltipPrimitive.Popup
-              aria-hidden
-              data-slot='slider-thumb-value'
-              className={cn(
-                'bg-primary text-primary-foreground absolute start-0 bottom-0 flex h-6 -translate-x-1/2 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap tabular-nums shadow-md outline-hidden rtl:translate-x-1/2 forced-colors:border',
-                // Rises out of the thumb, from a little below and smaller, and sinks back into it.
-                'origin-bottom data-ending-style:[transform:translateY(var(--slider-value-rise,6px))_scale(0.6)] data-ending-style:opacity-0 data-starting-style:[transform:translateY(var(--slider-value-rise,6px))_scale(0.6)] data-starting-style:opacity-0',
-                '[transition:transform_var(--motion-enter-duration)_var(--motion-enter-easing),opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] data-ending-style:[transition:transform_var(--motion-exit-duration)_var(--motion-exit-easing),opacity_var(--motion-exit-duration)_var(--motion-exit-easing)] motion-reduce:[transition-property:opacity] motion-reduce:data-ending-style:[transform:none] motion-reduce:data-starting-style:[transform:none]',
-              )}
-            >
-              {children}
-            </TooltipPrimitive.Popup>
-          </div>
-        </TooltipPrimitive.Positioner>
-      </TooltipPrimitive.Portal>
-    </TooltipPrimitive.Root>
+            {children}
+          </span>
+        </div>
+      </TooltipContentPrimitive>
+    </Tooltip>
   )
 }
 
+/** The slider's name, in the row above the track: it names its thumb, or a range's group. */
 function SliderLabel({
   className,
+  render,
   ...props
-}: Omit<SliderPrimitive.Label.Props, 'className'> & { className?: string }) {
-  return (
-    <SliderPrimitive.Label
-      data-slot='slider-label'
-      className={cn(
+}: Omit<PartProps<'div'>, 'className'> & { className?: string }) {
+  const slider = use(SliderContext)
+  const labelled = slider?.labelled
+  useLayoutEffect(() => {
+    labelled?.(true)
+    return () => labelled?.(false)
+  }, [labelled])
+  return renderElement(
+    'div',
+    {
+      id: slider?.labelId,
+      'data-slider-label': '',
+      className: cn(
         trackLabelClassName,
         'group-data-disabled/slider:text-muted-foreground',
         className,
-      )}
-      {...props}
-    />
+      ),
+      ...props,
+    },
+    render,
   )
 }
 
+/** The value, written as the slider's `format` says, a range's two joined with an en dash. Children replace it. */
 function SliderValue({
   className,
+  children,
   ...props
-}: Omit<SliderPrimitive.Value.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof SliderValuePrimitive>, 'className'> & {
+  className?: string
+}) {
+  const display = use(SliderContext)?.display
   return (
-    <SliderPrimitive.Value
-      data-slot='slider-value'
+    <SliderValuePrimitive
       className={cn('text-muted-foreground ms-auto shrink-0 tabular-nums', className)}
       {...props}
-    />
+    >
+      {children ??
+        (({ value, text }) => (display ? [value].flat().map(display).join(' – ') : text))}
+    </SliderValuePrimitive>
   )
 }
 

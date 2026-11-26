@@ -524,7 +524,7 @@ function ChannelSlider({
   'aria-label': ariaLabel,
   getAriaValueText,
   onValueChange,
-  onValueCommitted,
+  onValueCommit,
   disabled,
   ...props
 }: ChannelSliderProps & { channel: Channel }) {
@@ -548,9 +548,9 @@ function ChannelSlider({
         change(withChannel(color, channel, next))
         onValueChange?.(next, details)
       }}
-      onValueCommitted={(next, details) => {
+      onValueCommit={(next, details) => {
         commit(writeColor(withChannel(color, channel, next), format))
-        onValueCommitted?.(next, details)
+        onValueCommit?.(next, details)
       }}
       style={(state) =>
         ({

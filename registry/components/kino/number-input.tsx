@@ -6,24 +6,36 @@ import {
   inputControlClassName,
 } from '@/registry/components/kino/input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { useField, useFieldProps } from '@/registry/lib/field-control'
+import { mergeRefs } from '@/registry/lib/refs'
 import { runningTransitions } from '@/registry/lib/resize'
 import { Roll } from '@/registry/lib/roll'
-import { NumberField as NumberFieldPrimitive } from '@base-ui/react/number-field'
+import {
+  NumberInputControl as NumberInputControlPrimitive,
+  NumberInputDecrement as NumberInputDecrementPrimitive,
+  NumberInputGroup as NumberInputGroupPrimitive,
+  NumberInputIncrement as NumberInputIncrementPrimitive,
+  NumberInput as NumberInputPrimitive,
+  NumberInputScrubAreaCursor as NumberInputScrubAreaCursorPrimitive,
+  NumberInputScrubArea as NumberInputScrubAreaPrimitive,
+  type NumberInputValueChangeReason,
+} from '@ui-sdk/react/number-input'
 import {
   type ComponentProps,
   createContext,
+  type ReactNode,
   type TransitionEvent,
   use,
-  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
   useState,
 } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * A number field whose digits roll when the value is stepped: by the
- * buttons, the arrow keys, the wheel or a scrub. Typing never rolls.
+ * A number input whose digits roll when the value is stepped: by the
+ * buttons, the arrow keys, the wheel, a scrub or an agent. Typing never rolls.
  */
 
 /** The digits are still, or rolling up (`1`) or down (`-1`). */
@@ -31,25 +43,30 @@ type RollState = { phase: 'still' } | { phase: 'rolling'; trend: 1 | -1 }
 
 const STILL: RollState = { phase: 'still' }
 
-const STEP_REASONS = new Set<NumberFieldPrimitive.Root.ChangeEventReason>([
+const STEP_REASONS = new Set<NumberInputValueChangeReason>([
   'increment-press',
   'decrement-press',
-  'keyboard',
+  'step-key',
   'wheel',
   'scrub',
+  'imperative',
 ])
 
 /** Whether a change of this reason, from `prev` to `next`, rolls the digits, and which way. */
 function rollOf(
-  reason: NumberFieldPrimitive.Root.ChangeEventReason,
+  reason: NumberInputValueChangeReason,
   next: number | null,
   prev: number | null,
 ): RollState {
   return isStep(reason) ? rollTo(next, prev) : STILL
 }
 
-/** Whether a change of this reason stepped the value, by a button, a key, the wheel or a scrub, rather than typing or pasting it. */
-function isStep(reason: NumberFieldPrimitive.Root.ChangeEventReason) {
+/**
+ * Whether a change of this reason stepped the value, by a button, a key, the
+ * wheel, a scrub, or an agent or a controller setting it, rather than typing,
+ * pasting or a form's reset.
+ */
+function isStep(reason: NumberInputValueChangeReason) {
   return STEP_REASONS.has(reason)
 }
 
@@ -59,32 +76,28 @@ function rollTo(next: number | null, prev: number | null): RollState {
   return { phase: 'rolling', trend: next > prev ? 1 : -1 }
 }
 
-/**
- * The input's id, which Base UI's buttons name and the Field's label names
- * too, so all of them point at the one input.
- */
-const InputIdContext = createContext<string | undefined>(undefined)
-
-/** The id of the input inside the `NumberField` around it, for an input part of its own. */
-function useNumberFieldInputId() {
-  return use(InputIdContext)
-}
-
-const RollContext = createContext<{ roll: RollState; settle: () => void }>({
+/** The roll, the input's text the copy shows (null until it has been read), and how the copy says it has landed. */
+const RollContext = createContext<{
+  roll: RollState
+  text: string | null
+  settle: () => void
+}>({
   roll: STILL,
+  text: null,
   settle: () => {},
 })
 
-function NumberField({
+function NumberInput({
   className,
   onValueChange,
-  name,
-  disabled,
+  onInput,
+  onBlur,
+  onKeyUp,
+  ref,
   ...props
-}: Omit<NumberFieldPrimitive.Root.Props, 'className'> & { className?: string }) {
-  const field = useField()
-  const ownId = useId()
-  const inputId = props.id ?? ownId
+}: Omit<ComponentProps<typeof NumberInputPrimitive>, 'className'> & {
+  className?: string
+}) {
   const [roll, setRoll] = useState<RollState>(STILL)
   // The value it showed last. A parent that owns the value may change it on its own, as a pager's Next does: that rolls too.
   const [shown, setShown] = useState<number | null>(
@@ -94,36 +107,59 @@ function NumberField({
     setShown(props.value)
     setRoll(rollTo(props.value, shown))
   }
-  const settle = () => setRoll(STILL)
+
+  // The input's text, which ui-sdk writes itself, read once it has: after
+  // ui-sdk's own effects on every render, and after a keystroke or a blur
+  // reaches the root. The copy that rolls shows it.
+  const root = useRef<HTMLDivElement>(null)
+  const refs = useMemo(() => mergeRefs(root, ref), [ref])
+  // Null until the first read, so the copy starts with the text and nothing rolls in on load.
+  const [text, setText] = useState<string | null>(null)
+  const readText = () => {
+    const input = root.current?.querySelector<HTMLInputElement>(
+      '[data-slot=number-input-control]',
+    )
+    if (input && input.value !== text) setText(input.value)
+  }
+  useLayoutEffect(readText)
 
   return (
-    <InputIdContext value={inputId}>
-      <RollContext value={{ roll, settle }}>
-        <NumberFieldPrimitive.Root
-          data-slot='number-field'
-          name={name ?? field?.name}
-          disabled={disabled || field?.disabled}
-          className={cn('flex min-w-0 flex-col', className)}
-          onValueChange={(value, details) => {
-            setShown(value)
-            setRoll(rollOf(details.reason, value, shown))
-            onValueChange?.(value, details)
-          }}
-          {...props}
-          id={inputId}
-        />
-      </RollContext>
-    </InputIdContext>
+    <RollContext value={{ roll, text, settle: () => setRoll(STILL) }}>
+      <NumberInputPrimitive
+        ref={refs}
+        className={cn('flex min-w-0 flex-col', className)}
+        onValueChange={(value, details) => {
+          onValueChange?.(value, details)
+          if (details.canceled) return
+          setShown(value)
+          setRoll(rollOf(details.reason, value, shown))
+        }}
+        onInput={(event) => {
+          onInput?.(event)
+          readText()
+        }}
+        onBlur={(event) => {
+          onBlur?.(event)
+          readText()
+        }}
+        onKeyUp={(event) => {
+          onKeyUp?.(event)
+          readText()
+        }}
+        {...props}
+      />
+    </RollContext>
   )
 }
 
-function NumberFieldGroup({
+function NumberInputGroup({
   className,
   ...props
-}: Omit<NumberFieldPrimitive.Group.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NumberInputGroupPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <NumberFieldPrimitive.Group
-      data-slot='number-field-group'
+    <NumberInputGroupPrimitive
       className={cn(inputBoxClassName, 'w-full overflow-hidden', className)}
       {...props}
     />
@@ -133,14 +169,15 @@ function NumberFieldGroup({
 const stepperClassName =
   'flex size-(--control-height) shrink-0 items-center justify-center text-muted-foreground transition-[color,background-color] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none hover:bg-muted hover:text-foreground data-disabled:opacity-50 data-disabled:hover:bg-transparent'
 
-function NumberFieldDecrement({
+function NumberInputDecrement({
   className,
   children,
   ...props
-}: Omit<NumberFieldPrimitive.Decrement.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NumberInputDecrementPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <NumberFieldPrimitive.Decrement
-      data-slot='number-field-decrement'
+    <NumberInputDecrementPrimitive
       aria-label='Decrease'
       className={cn(stepperClassName, 'border-e border-input', className)}
       {...props}
@@ -155,18 +192,19 @@ function NumberFieldDecrement({
           aria-hidden
         />
       )}
-    </NumberFieldPrimitive.Decrement>
+    </NumberInputDecrementPrimitive>
   )
 }
 
-function NumberFieldIncrement({
+function NumberInputIncrement({
   className,
   children,
   ...props
-}: Omit<NumberFieldPrimitive.Increment.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NumberInputIncrementPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <NumberFieldPrimitive.Increment
-      data-slot='number-field-increment'
+    <NumberInputIncrementPrimitive
       aria-label='Increase'
       className={cn(stepperClassName, 'border-s border-input', className)}
       {...props}
@@ -181,29 +219,30 @@ function NumberFieldIncrement({
           aria-hidden
         />
       )}
-    </NumberFieldPrimitive.Increment>
+    </NumberInputIncrementPrimitive>
   )
 }
 
+type NumberInputControlProps = Omit<
+  ComponentProps<typeof NumberInputControlPrimitive>,
+  'className'
+> & { className?: string }
+
 /**
- * A number field's `<input>`, with a copy of its value drawn over it that
+ * ui-sdk's number `<input>`, with a copy of its text drawn over it that
  * rolls while the value is stepped. `className` sets where the text sits and
  * its padding, on the input and the copy alike. For a field of your own
- * around Base UI's input, such as the Money input.
+ * around it, such as the Money input.
  */
 function RollingInput({
-  inputProps,
-  inputValue,
   decimal,
   className,
-}: {
-  inputProps: ComponentProps<'input'>
-  inputValue: string
+  ...props
+}: NumberInputControlProps & {
   /** The locale's decimal point, so digits line up on it when a step adds decimals: 1,280 to 1,281.00 rolls one digit. */
   decimal?: string
-  className?: string
 }) {
-  const { roll, settle } = use(RollContext)
+  const { roll, text, settle } = use(RollContext)
   const rolling = roll.phase === 'rolling'
   const settleWhenStill = (event: TransitionEvent<HTMLSpanElement>) => {
     const moving = runningTransitions(event.currentTarget, { subtree: true }).some(
@@ -214,16 +253,17 @@ function RollingInput({
   return (
     // While the digits roll, the input's own text hides under a copy that rolls.
     <span className='relative flex min-w-0 flex-1'>
-      <input
-        {...inputProps}
+      <NumberInputControlPrimitive
         className={cn(
           inputControlClassName,
           'tabular-nums',
           className,
           rolling && 'text-transparent caret-transparent',
         )}
+        {...props}
       />
       <span
+        aria-hidden
         className={cn(
           'pointer-events-none absolute inset-0 flex items-center overflow-hidden px-(--control-padding) text-base tabular-nums md:text-sm',
           className,
@@ -235,11 +275,13 @@ function RollingInput({
       >
         {/* A full-width line, so the copy sits where the input's text-align puts its text. */}
         <span className='w-full'>
-          <Roll
-            value={inputValue}
-            tail={rollTail(inputValue, decimal)}
-            trend={rolling ? roll.trend : 1}
-          />
+          {text === null ? null : (
+            <Roll
+              value={text}
+              tail={rollTail(text, decimal)}
+              trend={rolling ? roll.trend : 1}
+            />
+          )}
         </span>
       </span>
     </span>
@@ -252,45 +294,37 @@ function rollTail(value: string, decimal: string | undefined) {
   return at === -1 ? 0 : value.length - at
 }
 
-function NumberFieldInput({
-  className,
-  ...props
-}: Omit<NumberFieldPrimitive.Input.Props, 'className'> & { className?: string }) {
-  const field = useFieldProps(props, { id: useNumberFieldInputId() })
+/** The number input's text box, centred, with the invalid mark at its end. `className` goes to the box around them. */
+function NumberInputControl({ className, ...props }: NumberInputControlProps) {
   return (
-    <NumberFieldPrimitive.Input
-      data-slot='number-field-input'
-      render={(inputProps, state) => (
-        <span className={cn('flex min-w-0 flex-1 items-center', className)}>
-          <RollingInput
-            inputProps={inputProps}
-            inputValue={state.inputValue}
-            className='text-center'
-          />
-          <InputInvalidIcon />
-        </span>
-      )}
-      {...field.props}
-    />
+    <span className={cn('flex min-w-0 flex-1 items-center', className)}>
+      <RollingInput className='text-center' {...props} />
+      <InputInvalidIcon />
+    </span>
   )
 }
 
 /**
  * An area, such as the field's label, that changes the value when dragged
- * sideways, or up and down with `direction`. While it drags, the pointer is locked and hidden, so the area
- * draws its own cursor where the pointer would be.
+ * sideways, or up and down with `orientation`. While it drags, the pointer is
+ * locked and hidden, so the area draws its own cursor where the pointer would be.
  */
-function NumberFieldScrubArea({
+function NumberInputScrubArea({
   className,
   children,
-  direction = 'horizontal',
+  orientation = 'horizontal',
   ...props
-}: Omit<NumberFieldPrimitive.ScrubArea.Props, 'className'> & { className?: string }) {
-  const vertical = direction === 'vertical'
+}: Omit<
+  ComponentProps<typeof NumberInputScrubAreaPrimitive>,
+  'className' | 'children'
+> & {
+  className?: string
+  children?: ReactNode
+}) {
+  const vertical = orientation === 'vertical'
   return (
-    <NumberFieldPrimitive.ScrubArea
-      data-slot='number-field-scrub-area'
-      direction={direction}
+    <NumberInputScrubAreaPrimitive
+      orientation={orientation}
       className={cn(
         'w-fit',
         vertical ? 'cursor-ns-resize' : 'cursor-ew-resize',
@@ -299,10 +333,9 @@ function NumberFieldScrubArea({
       {...props}
     >
       {children}
-      <NumberFieldPrimitive.ScrubAreaCursor
-        data-slot='number-field-scrub-area-cursor'
-        // An outline in the background colour keeps it readable over any content.
-        className='text-foreground z-50 drop-shadow-[0_0_1px_var(--background)] [&_svg]:size-5'
+      <NumberInputScrubAreaCursorPrimitive
+        // ui-sdk places it at the pointer from its corner, so the icon is centred on it. An outline in the background colour keeps it readable over any content.
+        className='text-foreground z-50 -ms-2.5 -mt-2.5 drop-shadow-[0_0_1px_var(--background)] [&_svg]:size-5'
       >
         {vertical ? (
           <IconPlaceholder
@@ -323,21 +356,20 @@ function NumberFieldScrubArea({
             aria-hidden
           />
         )}
-      </NumberFieldPrimitive.ScrubAreaCursor>
-    </NumberFieldPrimitive.ScrubArea>
+      </NumberInputScrubAreaCursorPrimitive>
+    </NumberInputScrubAreaPrimitive>
   )
 }
 
 export {
   isStep,
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-  NumberFieldScrubArea,
+  NumberInput,
+  NumberInputControl,
+  NumberInputDecrement,
+  NumberInputGroup,
+  NumberInputIncrement,
+  NumberInputScrubArea,
   RollingInput,
   rollOf,
   rollTail,
-  useNumberFieldInputId,
 }

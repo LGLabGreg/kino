@@ -1,11 +1,14 @@
+import { numberFormatter as madeOnce } from '@ui-sdk/core/number'
+
 /*
  * One `Intl.NumberFormat` for each locale and set of options, however often
  * they are passed anew, so every part that writes numbers (a rolling number,
  * a chart's axis and tooltip) writes them the same way without making a
- * formatter each render.
+ * formatter each render. ui-sdk's Number module makes each one once; this
+ * adds what it lacks: the options a formatter was made with, as given, and
+ * a file's size as a file manager writes it.
  */
 
-const formatters = new Map<string, Intl.NumberFormat>()
 const optionsOf = new WeakMap<Intl.NumberFormat, Intl.NumberFormatOptions | undefined>()
 
 /** The formatter for `locale` and `format`, made once. */
@@ -13,13 +16,13 @@ export function numberFormatter(
   locale: Intl.LocalesArgument,
   format?: Intl.NumberFormatOptions,
 ): Intl.NumberFormat {
-  const key = `${String(locale)}|${JSON.stringify(format ?? {})}`
-  let formatter = formatters.get(key)
-  if (!formatter) {
-    formatter = new Intl.NumberFormat(locale, format)
-    formatters.set(key, formatter)
-    optionsOf.set(formatter, format)
-  }
+  // ui-sdk takes one tag: a list or an `Intl.Locale` gives the one `Intl` would pick from it.
+  const tag =
+    typeof locale === 'string' || locale === undefined
+      ? locale
+      : Intl.NumberFormat.supportedLocalesOf(locale)[0]
+  const formatter = madeOnce(tag, format)
+  if (!optionsOf.has(formatter)) optionsOf.set(formatter, format)
   return formatter
 }
 

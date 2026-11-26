@@ -5,7 +5,12 @@ import { InputGroup, inputGroupBesideStart } from '@/registry/components/kino/in
 import { AddonPicker, type AddonPickerOption } from '@/registry/lib/addon-picker'
 import { countryAliases, CountryFlag, countryName } from '@/registry/lib/countries'
 import { useLocale } from '@/registry/lib/dates'
-import { FieldCheck, keptOnReset, useFieldProps } from '@/registry/lib/field-control'
+import {
+  changeDetails,
+  FieldCheck,
+  keptOnReset,
+  useField,
+} from '@/registry/lib/field-control'
 import {
   callingCode,
   caretAt,
@@ -20,6 +25,8 @@ import {
   wholeNumber,
 } from '@/registry/lib/phone-number'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
+import type { ChangeDetails } from '@ui-sdk/core'
+import { Input as InputPrimitive } from '@ui-sdk/react/input'
 import { type CountryCode, getCountries } from 'libphonenumber-js/min'
 import {
   type ComponentProps,
@@ -42,17 +49,25 @@ import { cn } from '@/lib/utils'
  */
 
 interface PhoneInputProps extends Omit<
-  ComponentProps<'input'>,
-  'value' | 'defaultValue' | 'onChange' | 'type' | 'className' | 'children'
+  ComponentProps<typeof InputPrimitive>,
+  | 'value'
+  | 'defaultValue'
+  | 'onValueChange'
+  | 'controller'
+  | 'type'
+  | 'className'
+  | 'children'
 > {
   /** The number in E.164, such as `+442079460958`, or `''`. */
   value?: string
   defaultValue?: string
-  onValueChange?: (value: string) => void
+  /** Called with the number in E.164 and who changed it in `details.source`; `details.cancel()` keeps the last number. */
+  onValueChange?: (value: string, details: ChangeDetails) => void
   /** An ISO 3166-1 code, such as `GB`. */
   country?: CountryCode
   defaultCountry?: CountryCode
-  onCountryChange?: (country: CountryCode) => void
+  /** Called with the country, from a pick or a number typed with another's code; `details.cancel()` keeps the last one. */
+  onCountryChange?: (country: CountryCode, details: ChangeDetails) => void
   /** The countries the list offers, when not every one. */
   countries?: readonly CountryCode[]
   /** The language of the countries' names; the browser's by default. */
@@ -118,29 +133,35 @@ function PhoneInput({
   })
 
   const problem = phoneProblem(reading.value)
-  // The number's box is what its Field's label names, its description and check describe.
-  const { field, invalid, props: inputProps } = useFieldProps({ ...props, id: idProp })
-  const fieldRef = inputProps.ref
+  const field = useField()
   const inputRef = useMemo(
-    () => mergeRefs<HTMLInputElement>(input, markMounted, ref, fieldRef),
-    [ref, fieldRef],
+    () => mergeRefs<HTMLInputElement>(input, markMounted, ref),
+    [ref],
   )
   const disabled = disabledProp || field?.disabled === true
 
-  function commit(next: PhoneReading, caretAfter: number) {
+  /** Tells the owner what `next` changes, and whether to keep it: no unless both take it. */
+  function told(next: PhoneReading, details: ChangeDetails) {
+    if (next.value !== reading.value) onValueChange?.(next.value, details)
+    if (next.country !== country && !details.canceled)
+      onCountryChange?.(next.country, details)
+    return !details.canceled
+  }
+
+  function commit(next: PhoneReading, caretAfter: number, details: ChangeDetails) {
     caret.current = caretAfter
     // A render even when nothing changed, so the caret is placed after React puts the old text back.
-    setReading(
-      next.text === reading.text && next.country === reading.country
-        ? { ...reading }
-        : next,
-    )
-    if (next.value !== reading.value) onValueChange?.(next.value)
-    if (next.country !== country) onCountryChange?.(next.country)
+    const changed = next.text !== reading.text || next.country !== reading.country
+    setReading(changed && told(next, details) ? next : { ...reading })
   }
 
   /** `text` as the person left it, with the caret at `caretIn`. */
-  function take(text: string, caretIn: number, replaced: boolean) {
+  function take(
+    text: string,
+    caretIn: number,
+    replaced: boolean,
+    details: ChangeDetails,
+  ) {
     const chars = replaced ? wholeNumber(text, country) : phoneChars(text)
     // Only an edit that adds digits can make the number too long: one too long already (picked for another country) can still be shortened.
     const shorter = !replaced && chars.length <= phoneChars(reading.text).length
@@ -162,25 +183,22 @@ function PhoneInput({
       read.shift === null || replaced
         ? read.reading.text.length
         : caretAt(read.reading.text, before + read.shift)
-    commit(read.reading, after)
+    commit(read.reading, after, details)
   }
 
   /** Back to the number it started with, as a form's reset does. */
-  function reset() {
+  function reset(event: Event) {
     if (keptOnReset(valueProp, defaultValue)) return
     const initial = readValue(defaultValue ?? '', countryProp ?? defaultCountry)
+    told(initial, changeDetails('reset', event))
+    // A reset can't be turned down: the form has already put its fields back.
     setReading(initial)
-    if (initial.value !== reading.value) onValueChange?.(initial.value)
-    if (initial.country !== country) onCountryChange?.(initial.country)
   }
 
-  function pick(next: string) {
-    const picked = next as CountryCode
-    const read = readForCountry(reading, picked)
+  function pick(next: string, event: Event | undefined) {
+    const read = readForCountry(reading, next as CountryCode)
     caret.current = read.text.length
-    setReading(read)
-    if (read.value !== reading.value) onValueChange?.(read.value)
-    if (picked !== country) onCountryChange?.(picked)
+    if (told(read, changeDetails('item-press', event))) setReading(read)
   }
 
   const options = useMemo(() => {
@@ -216,33 +234,35 @@ function PhoneInput({
           </span>
         </span>
       </AddonPicker>
-      <input
-        {...inputProps}
+      {/* The number's box is what its Field's label names, its description and check describe; the check below sends the number. */}
+      <InputPrimitive
+        {...props}
+        id={idProp}
         ref={inputRef}
-        data-slot='phone-input-control'
+        // The Field's name goes on the check, which sends the number in E.164, not the text shown.
+        name={undefined}
+        data-phone-input-control=''
         type='tel'
         inputMode='tel'
         autoComplete={props.autoComplete ?? 'tel'}
         // A number reads left to right in every language.
         dir='ltr'
-        aria-invalid={invalid || props['aria-invalid'] || undefined}
         aria-required={required || undefined}
         value={reading.text}
         placeholder={placeholder ?? examplePhone(country)}
         disabled={disabled}
         readOnly={readOnly}
-        onChange={(event) => {
-          const native = event.nativeEvent as InputEvent
+        onValueChange={(text, details) => {
+          // A form's reset is the check's to make.
+          if (details.reason === 'reset') return
+          // An agent's or a controller's change has no event: a whole number arrived.
+          const inputType = (details.event as InputEvent | undefined)?.inputType
           const replaced =
-            native.inputType === undefined ||
-            native.inputType === 'insertFromPaste' ||
-            native.inputType === 'insertReplacementText' ||
+            inputType === undefined ||
+            inputType === 'insertFromPaste' ||
+            inputType === 'insertReplacementText' ||
             reading.text === ''
-          take(
-            event.target.value,
-            event.target.selectionStart ?? event.target.value.length,
-            replaced,
-          )
+          take(text, input.current?.selectionStart ?? text.length, replaced, details)
         }}
         onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
           onKeyDown?.(event)
@@ -262,7 +282,12 @@ function PhoneInput({
           const next = deleteAcross(target.value, start, event.key === 'Backspace')
           if (!next) return
           event.preventDefault()
-          take(next.text, next.caret, false)
+          take(
+            next.text,
+            next.caret,
+            false,
+            changeDetails('input-change', event.nativeEvent),
+          )
         }}
         onFocus={onFocus}
         onBlur={onBlur}

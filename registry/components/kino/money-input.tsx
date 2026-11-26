@@ -5,23 +5,33 @@ import {
   InputInvalidIcon,
   inputBoxClassName,
 } from '@/registry/components/kino/input'
-import {
-  NumberField,
-  RollingInput,
-  useNumberFieldInputId,
-} from '@/registry/components/kino/number-field'
+import { NumberInput, RollingInput } from '@/registry/components/kino/number-input'
 import { AddonPicker, type AddonPickerOption } from '@/registry/lib/addon-picker'
 import { CountryFlag } from '@/registry/lib/countries'
-import { FieldValues, useFieldProps } from '@/registry/lib/field-control'
-import { numberFormatter } from '@/registry/lib/number-format'
-import { createChangeEventDetails } from '@base-ui/react/internals/createBaseUIEventDetails'
-import { REASONS } from '@base-ui/react/internals/reasons'
-import { NumberField as NumberFieldPrimitive } from '@base-ui/react/number-field'
 import {
+  changeDetails,
+  FieldValues,
+  keptOnReset,
+  useFormReset,
+} from '@/registry/lib/field-control'
+import { numberFormatter } from '@/registry/lib/number-format'
+import { mergeRefs } from '@/registry/lib/refs'
+import type { ChangeDetails as PickDetails } from '@ui-sdk/core'
+import {
+  createNumberInputController,
+  type NumberInputControl as NumberInputControlPrimitive,
+  NumberInputGroup as NumberInputGroupPrimitive,
+} from '@ui-sdk/react/number-input'
+import {
+  type ComponentProps,
   createContext,
+  type KeyboardEvent,
+  type ClipboardEvent,
+  type ChangeEvent,
   type RefObject,
   use,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -250,14 +260,16 @@ function toMinor(major: number, digits: number) {
   return Math.round(major * 10 ** digits)
 }
 
-type InputHandlerEvent<Handler extends 'onChange' | 'onKeyDown' | 'onPaste'> = Parameters<
-  NonNullable<NumberFieldPrimitive.Input.Props[Handler]>
->[0]
+type NumberInputProps = ComponentProps<typeof NumberInput>
+
+type ChangeDetails = Parameters<NonNullable<NumberInputProps['onValueChange']>>[1]
+
+type CommitDetails = Parameters<NonNullable<NumberInputProps['onValueCommit']>>[1]
 
 const MoneyContext = createContext<{
   format: MoneyFormat
   allowNegative: boolean
-  changeCurrency: (currency: string) => void
+  changeCurrency: (currency: string, event: Event | undefined) => void
   inputRef: RefObject<HTMLInputElement | null>
   disabled: boolean
   readOnly: boolean
@@ -269,11 +281,19 @@ function useMoney() {
   return context
 }
 
-type MinorUnits = 'value' | 'defaultValue' | 'min' | 'max' | 'step' | 'largeStep'
+// Props the Money input takes in minor units. `smallStep` is always `step`: a finer one would leave part of a minor unit.
+type MinorUnits =
+  | 'value'
+  | 'defaultValue'
+  | 'min'
+  | 'max'
+  | 'step'
+  | 'largeStep'
+  | 'smallStep'
 
 type MoneyInputProps = Omit<
-  NumberFieldPrimitive.Root.Props,
-  'className' | 'format' | 'onValueChange' | 'onValueCommitted' | MinorUnits
+  NumberInputProps,
+  'className' | 'format' | 'onValueChange' | 'onValueCommit' | MinorUnits
 > & {
   className?: string
   /** The currency, as an ISO 4217 code such as `USD`, when you hold the state. */
@@ -282,29 +302,31 @@ type MoneyInputProps = Omit<
   defaultCurrency?: string
   /**
    * Called when a person picks another currency, with the amount moved to it:
-   * the same number, rounded to the new currency’s decimals. A parent that
-   * holds both sets them together, or neither to turn the change down.
+   * the same number, rounded to the new currency’s decimals, and who picked
+   * it in `details.source`. A parent that holds both sets them together, or
+   * neither to turn the change down; left to the field, `details.cancel()` does.
    */
-  onCurrencyChange?: (currency: string, details: { value: number | null }) => void
+  onCurrencyChange?: (
+    currency: string,
+    details: PickDetails<'item-press'> & { value: number | null },
+  ) => void
   /** The amount in minor units, such as cents. */
   value?: number | null
   /** The amount at first, in minor units, when you leave the state to the field. */
   defaultValue?: number | null
   /** Called with the amount in minor units. */
-  onValueChange?: (
-    value: number | null,
-    details: NumberFieldPrimitive.Root.ChangeEventDetails,
-  ) => void
-  /** Called with the amount in minor units when a change is done: on blur or a step. */
-  onValueCommitted?: (
-    value: number | null,
-    details: NumberFieldPrimitive.Root.CommitEventDetails,
-  ) => void
+  onValueChange?: (value: number | null, details: ChangeDetails) => void
+  /** Called with the amount in minor units when a change is done: on blur, Enter or the end of a step. */
+  onValueCommit?: (value: number | null, details: CommitDetails) => void
   /** The lowest amount, in minor units. */
   min?: number
   /** The highest amount, in minor units. */
   max?: number
-  /** How far an arrow key steps, in minor units. One unit of the currency by default. */
+  /**
+   * How far an arrow key steps, in minor units, and what a typed amount is
+   * rounded to once it's done. One minor unit, such as a cent, by default,
+   * so a typed amount keeps every digit the currency has.
+   */
   step?: number
   /** How far Shift with an arrow steps, in minor units. Ten units by default. */
   largeStep?: number
@@ -324,21 +346,26 @@ function MoneyInput({
   onCurrencyChange,
   locale,
   value: valueProp,
-  defaultValue = null,
+  defaultValue: defaultValueProp,
   onValueChange,
-  onValueCommitted,
+  onValueCommit,
   min,
   max,
   step,
   largeStep,
   currencyName,
   form,
+  controller: controllerProp,
+  ref,
   ...props
 }: MoneyInputProps) {
+  const defaultValue = defaultValueProp ?? null
   const [ownCurrency, setOwnCurrency] = useState(defaultCurrency)
   const [ownValue, setOwnValue] = useState<number | null>(defaultValue)
   const currency = currencyProp ?? ownCurrency
   const value = valueProp === undefined ? ownValue : valueProp
+  // The currency the field's own amount is in.
+  const [ownValueCurrency, setOwnValueCurrency] = useState(currency)
   const localeKey = Array.isArray(locale) ? locale.join() : String(locale ?? '')
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key stands for the locale
   const format = useMemo(() => moneyFormat(locale, currency), [localeKey, currency])
@@ -348,17 +375,47 @@ function MoneyInput({
     minor === undefined ? undefined : toMajor(minor, digits)
   const unit = 10 ** digits
 
-  const changeValue = (
-    next: number | null,
-    details: NumberFieldPrimitive.Root.ChangeEventDetails,
-  ) => {
+  const changeValue = (next: number | null, details: ChangeDetails) => {
     onValueChange?.(next, details)
-    if (!details.isCanceled) setOwnValue(next)
+    if (!details.canceled) setOwnValue(next)
   }
 
-  // The currency the field's own amount is in: when the currency changes, by
-  // a pick or from its parent, that amount moves to it.
-  const [ownValueCurrency, setOwnValueCurrency] = useState(currency)
+  // The number input always holds the amount from here, so a form's reset is
+  // ours: the amount and the currency go back to their defaults, in the
+  // default currency's decimals, and a parent that holds the amount with a
+  // default hears it, as a native field's owner would.
+  const root = useRef<HTMLDivElement>(null)
+  const refs = useMemo(() => mergeRefs(root, ref), [ref])
+  useFormReset(
+    root,
+    () => {
+      if (currencyProp === undefined) {
+        setOwnCurrency(defaultCurrency)
+        setOwnValueCurrency(defaultCurrency)
+      }
+      if (valueProp === undefined) setOwnValue(defaultValue)
+    },
+    form,
+  )
+  const resetValue = (details: ChangeDetails) => {
+    if (keptOnReset(valueProp, defaultValueProp)) details.cancel()
+    else if (valueProp !== undefined) onValueChange?.(defaultValue, details)
+  }
+
+  // A pick moves a parent's amount to the new currency once the input has
+  // its decimals, step and limits, through the input, so the parent hears a
+  // change like any other.
+  const ownController = useMemo(() => createNumberInputController(), [])
+  const controller = controllerProp ?? ownController
+  const moving = useRef<number | null | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (moving.current === undefined) return
+    const moved = moving.current
+    moving.current = undefined
+    controller.setValue(moved === null ? null : toMajor(moved, digits))
+  })
+
+  // When the currency changes, by a pick or from its parent, the field's own amount moves to it.
   if (ownValueCurrency !== currency) {
     setOwnValueCurrency(currency)
     if (ownValue !== null) {
@@ -366,16 +423,15 @@ function MoneyInput({
     }
   }
 
-  const changeCurrency = (next: string) => {
+  const changeCurrency = (next: string, event: Event | undefined) => {
     if (next === currency) return
     const moved =
       value === null ? null : rescale(value, digits, moneyFormat(locale, next).digits)
-    onCurrencyChange?.(next, { value: moved })
-    if (currencyProp !== undefined) return
+    const details = Object.assign(changeDetails('item-press', event), { value: moved })
+    onCurrencyChange?.(next, details)
+    if (currencyProp !== undefined || details.canceled) return
     setOwnCurrency(next)
-    if (valueProp !== undefined && moved !== value) {
-      onValueChange?.(moved, createChangeEventDetails(REASONS.none))
-    }
+    if (valueProp !== undefined && moved !== value) moving.current = moved
   }
 
   return (
@@ -389,21 +445,27 @@ function MoneyInput({
         readOnly: props.readOnly ?? false,
       }}
     >
-      <NumberField
-        data-slot='money-input'
+      <NumberInput
+        ref={refs}
+        data-money-input=''
         className={className}
+        controller={controller}
         locale={locale}
         format={{ minimumFractionDigits: digits, maximumFractionDigits: digits }}
         value={value === null ? null : toMajor(value, digits)}
         min={major(min)}
         max={major(max)}
-        step={(step ?? unit) / unit}
+        // ui-sdk snaps a committed amount to `step`, so it is the amount's
+        // precision, and Alt with an arrow moves no finer than the currency.
+        step={(step ?? 1) / unit}
+        smallStep={(step ?? 1) / unit}
         largeStep={(largeStep ?? unit * 10) / unit}
-        onValueChange={(next, details) =>
-          changeValue(next === null ? null : toMinor(next, digits), details)
-        }
-        onValueCommitted={(next, details) =>
-          onValueCommitted?.(next === null ? null : toMinor(next, digits), details)
+        onValueChange={(next, details) => {
+          if (details.reason === 'reset') resetValue(details)
+          else changeValue(next === null ? null : toMinor(next, digits), details)
+        }}
+        onValueCommit={(next, details) =>
+          onValueCommit?.(next === null ? null : toMinor(next, digits), details)
         }
         form={form}
         {...props}
@@ -416,10 +478,12 @@ function MoneyInput({
 function MoneyInputGroup({
   className,
   ...props
-}: Omit<NumberFieldPrimitive.Group.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NumberInputGroupPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <NumberFieldPrimitive.Group
-      data-slot='money-input-group'
+    <NumberInputGroupPrimitive
+      data-money-input-group=''
       onPointerDown={focusControl}
       className={cn(inputBoxClassName, 'w-full', className)}
       {...props}
@@ -429,7 +493,7 @@ function MoneyInputGroup({
 
 /**
  * Replaces a text control's value as an edit, so undo can take it back and
- * React and Base UI hear it. Where the browser has no `insertText`, the value
+ * React and ui-sdk hear it. Where the browser has no `insertText`, the value
  * is set and the input event sent by hand.
  */
 function writeText(input: HTMLInputElement, text: string) {
@@ -461,21 +525,17 @@ function MoneyInputInput({
   onChange,
   onKeyDown,
   onPaste,
+  ref,
   ...props
-}: Omit<NumberFieldPrimitive.Input.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof NumberInputControlPrimitive>, 'className'> & {
+  className?: string
+}) {
   const { format, allowNegative, inputRef } = useMoney()
   const nameId = useId()
-  const field = useFieldProps(
-    {
-      ...props,
-      ref: inputRef,
-      'aria-describedby': [nameId, props['aria-describedby']].filter(Boolean).join(' '),
-    },
-    { id: useNumberFieldInputId() },
-  )
+  const refs = useMemo(() => mergeRefs(inputRef, ref), [inputRef, ref])
 
   // Groups the digits as they're typed, keeping the caret beside the same digit.
-  const regroupTyping = (event: InputHandlerEvent<'onChange'>) => {
+  const regroupTyping = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget
     const composing =
       'isComposing' in event.nativeEvent && event.nativeEvent.isComposing === true
@@ -502,14 +562,25 @@ function MoneyInputInput({
   }
 
   // Backspace or Delete beside a group separator removes the digit past it.
-  const skipSeparator = (event: InputHandlerEvent<'onKeyDown'>) => {
+  const skipSeparator = (event: KeyboardEvent<HTMLInputElement>) => {
     onKeyDown?.(event)
     const input = event.currentTarget
     const { selectionStart: start, selectionEnd: end, value } = input
     // A currency without decimals takes no point.
     if (format.digits === 0 && POINTS.includes(event.key)) event.preventDefault()
-    // Home and End move the caret, as in any text: Base UI would set the amount to its min or max.
-    if (event.key === 'Home' || event.key === 'End') event.preventBaseUIHandler()
+    // Home and End move the caret, as in any text, where the number input
+    // would set the amount to its min or max. Stopping that stops the
+    // browser's move too, so it is made here, Shift selecting as it goes.
+    if ((event.key === 'Home' || event.key === 'End') && start !== null && end !== null) {
+      event.preventDefault()
+      const home = event.key === 'Home'
+      const to = home ? 0 : value.length
+      const anchor = input.selectionDirection === 'backward' ? end : start
+      if (!event.shiftKey) input.setSelectionRange(to, to)
+      else if (home) input.setSelectionRange(to, anchor, 'backward')
+      else input.setSelectionRange(anchor, to, 'forward')
+      return
+    }
     if (start === null || start !== end) return
     const isGroup = (char: string | undefined) =>
       char !== undefined &&
@@ -522,7 +593,7 @@ function MoneyInputInput({
   }
 
   // A pasted amount is read in any format and written in the locale's.
-  const pasteAmount = (event: InputHandlerEvent<'onPaste'>) => {
+  const pasteAmount = (event: ClipboardEvent<HTMLInputElement>) => {
     onPaste?.(event)
     if (event.defaultPrevented) return
     const input = event.currentTarget
@@ -558,7 +629,7 @@ function MoneyInputInput({
 
   const symbol = (
     <span
-      data-slot='money-input-symbol'
+      data-money-input-symbol=''
       aria-hidden
       suppressHydrationWarning
       className={cn(
@@ -572,46 +643,42 @@ function MoneyInputInput({
   )
 
   return (
-    <NumberFieldPrimitive.Input
-      data-slot='money-input-input'
-      inputMode={format.digits > 0 ? 'decimal' : 'numeric'}
-      // Zero in the currency's decimals, so an empty field shows what it takes.
-      placeholder={writeAmount(
-        {
-          negative: false,
-          integer: '0',
-          fraction: format.digits > 0 ? '0'.repeat(format.digits) : null,
-        },
-        format,
-      )}
-      onChange={regroupTyping}
-      onKeyDown={skipSeparator}
-      onPaste={pasteAmount}
-      render={(inputProps, state) => (
-        <span className={cn('flex min-w-0 flex-1 items-center', className)}>
-          {/* The amount reads the locale's way on any page: dollars in a right-to-left app are still $1,280.50. */}
-          <span dir={format.direction} className='flex min-w-0 flex-1 items-center'>
-            {symbol}
-            <RollingInput
-              inputProps={inputProps}
-              inputValue={state.inputValue}
-              decimal={format.decimal}
-              className={cn(
-                // The digits sit against the symbol.
-                format.side === 'start' ? 'text-start' : 'text-end',
-                format.side === 'start' && (format.spaced ? 'ps-1' : 'ps-0'),
-                format.side === 'end' && (format.spaced ? 'pe-1' : 'pe-0'),
-              )}
-            />
-          </span>
-          <span id={nameId} className='sr-only' suppressHydrationWarning>
-            {format.name}
-          </span>
-          <InputInvalidIcon />
-        </span>
-      )}
-      {...field.props}
-    />
+    <span className={cn('flex min-w-0 flex-1 items-center', className)}>
+      {/* The amount reads the locale's way on any page: dollars in a right-to-left app are still $1,280.50. */}
+      <span dir={format.direction} className='flex min-w-0 flex-1 items-center'>
+        {symbol}
+        <RollingInput
+          data-money-input-input=''
+          inputMode={format.digits > 0 ? 'decimal' : 'numeric'}
+          // Zero in the currency's decimals, so an empty field shows what it takes.
+          placeholder={writeAmount(
+            {
+              negative: false,
+              integer: '0',
+              fraction: format.digits > 0 ? '0'.repeat(format.digits) : null,
+            },
+            format,
+          )}
+          decimal={format.decimal}
+          className={cn(
+            // The digits sit against the symbol.
+            format.side === 'start' ? 'text-start' : 'text-end',
+            format.side === 'start' && (format.spaced ? 'ps-1' : 'ps-0'),
+            format.side === 'end' && (format.spaced ? 'pe-1' : 'pe-0'),
+          )}
+          {...props}
+          ref={refs}
+          aria-describedby={[nameId, props['aria-describedby']].filter(Boolean).join(' ')}
+          onChange={regroupTyping}
+          onKeyDown={skipSeparator}
+          onPaste={pasteAmount}
+        />
+      </span>
+      <span id={nameId} className='sr-only' suppressHydrationWarning>
+        {format.name}
+      </span>
+      <InputInvalidIcon />
+    </span>
   )
 }
 

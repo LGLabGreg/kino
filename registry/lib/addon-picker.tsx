@@ -91,7 +91,8 @@ function AddonPicker({
 }: {
   options: readonly AddonPickerOption[]
   value: string
-  onValueChange: (value: string) => void
+  /** Called with the pick and the event behind it. */
+  onValueChange: (value: string, event: Event | undefined) => void
   /** What is picked, such as "Country": the button reads "Country: United Kingdom", and the list takes it as its name. */
   label: string
   searchPlaceholder: string
@@ -123,10 +124,10 @@ function AddonPicker({
         <Combobox
           items={ranked}
           value={selected}
-          onValueChange={(option) => {
+          onValueChange={(option, details) => {
             if (!option) return
             picked.current = true
-            onValueChange(option.value)
+            onValueChange(option.value, details.event)
             // Straight away, not once the list has closed, so the next keys reach the field.
             returnFocus?.current?.focus({ preventScroll: true })
           }}
