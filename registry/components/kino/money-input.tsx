@@ -16,7 +16,7 @@ import {
 } from '@/registry/lib/field-control'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { mergeRefs } from '@/registry/lib/refs'
-import type { ChangeDetails as PickDetails } from '@ui-sdk/core'
+import { isComposing, type ChangeDetails as PickDetails } from '@ui-sdk/core'
 import {
   createNumberInputController,
   type NumberInputControl as NumberInputControlPrimitive,
@@ -537,8 +537,7 @@ function MoneyInputInput({
   // Groups the digits as they're typed, keeping the caret beside the same digit.
   const regroupTyping = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget
-    const composing =
-      'isComposing' in event.nativeEvent && event.nativeEvent.isComposing === true
+    const composing = isComposing(event)
     // An undo or a redo brings back a text as it was; regrouping it would be a new edit, and undo would never get past it.
     const history =
       'inputType' in event.nativeEvent &&

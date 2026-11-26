@@ -8,10 +8,10 @@ import {
   InputGroupInput,
   inputGroupPresence,
 } from '@/registry/components/kino/input-group'
-import { Kbd, KbdGroup } from '@/registry/components/kino/kbd'
+import { KbdGroup } from '@/registry/components/kino/kbd'
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { ariaShortcut, useApplePlatform, useShortcut } from '@/registry/lib/keys'
+import { useAriaKeyshortcuts, useShortcut } from '@/registry/lib/keys'
 import { numberFormatter } from '@/registry/lib/number-format'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Roll } from '@/registry/lib/roll'
@@ -59,9 +59,10 @@ type SearchFieldProps = Omit<ComponentProps<typeof InputControl>, 'type'> &
     loading?: boolean
     /**
      * Keys that focus the field from anywhere on the page, shown at its end
-     * until the person types, and not on a touch screen: `['Mod', 'K']` or `['/']`.
+     * until the person types, and not on a touch screen, as ui-sdk writes them:
+     * `'mod+k'` or `'/'`.
      */
-    shortcut?: string[]
+    shortcut?: string
     /** Called once the clear button or Escape has emptied the field. */
     onClear?: () => void
     /** How many results the search found, shown while there is text and read out. */
@@ -99,12 +100,15 @@ function SearchField({
   const controller = controllerProp ?? ownController
   const [input, setInput] = useState<HTMLInputElement | null>(null)
   // One callback for the field's life, so React doesn't hand it the element again each render.
-  const inputRef = useMemo(() => mergeRefs(setInput, ref), [ref])
+  const ariaKeys = useAriaKeyshortcuts(disabled ? null : shortcut)
+  const inputRef = useMemo(
+    () => mergeRefs<HTMLInputElement>(setInput, ariaKeys, ref),
+    [ariaKeys, ref],
+  )
   const [typed, setTyped] = useState(() => String(defaultValue ?? '') !== '')
   const filled = value === undefined ? typed : String(value) !== ''
   const [focused, setFocused] = useState(false)
   const spinning = useSpinner(loading)
-  const apple = useApplePlatform()
   const editable = !disabled && !readOnly
   const hinting = shortcut !== undefined && !filled && !focused && !disabled
   const counting = filled && count !== undefined
@@ -118,7 +122,7 @@ function SearchField({
   const number = countNumber(counted.label)
 
   useShortcut(
-    disabled ? undefined : shortcut,
+    disabled || !input ? undefined : shortcut,
     () => {
       input?.focus()
       input?.select()
@@ -155,7 +159,6 @@ function SearchField({
         enterKeyHint='search'
         autoComplete='off'
         spellCheck={false}
-        aria-keyshortcuts={shortcut ? ariaShortcut(shortcut, apple) : undefined}
         value={value}
         defaultValue={defaultValue}
         controller={controller}
@@ -235,11 +238,8 @@ function SearchField({
                 inputGroupPresence,
                 'me-1 text-xs not-data-shown:hidden pointer-coarse:hidden data-mounted:starting:opacity-0 motion-safe:data-mounted:starting:scale-75',
               )}
-            >
-              {shortcut.map((key) => (
-                <Kbd key={key}>{key}</Kbd>
-              ))}
-            </KbdGroup>
+              keys={shortcut}
+            />
           ) : null}
           {/* The wrapper shows and hides it, so the button keeps its own hover and press, and its room. */}
           <span
@@ -256,7 +256,10 @@ function SearchField({
               onPointerDown={(event: PointerEvent) => event.preventDefault()}
               // ui-sdk's clear, so the change reaches `onValueChange` as a `clear-press`.
               onClick={(event: MouseEvent) =>
-                controller.clear({ reason: 'clear-press', event: event.nativeEvent })
+                controller.clear({
+                  reason: 'clear-press',
+                  event: event.nativeEvent,
+                })
               }
               className='text-muted-foreground'
             >
@@ -294,7 +297,11 @@ function resultsLabel(
 function countNumber(label: string): { text: string; start: number; end: number } | null {
   const match = /\p{Nd}(?:[\p{Nd},.\u00A0\u202F]*\p{Nd})?/u.exec(label)
   if (!match) return null
-  return { text: match[0], start: match.index, end: match.index + match[0].length }
+  return {
+    text: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }
 }
 
 export { SearchField, searchFieldVariants }

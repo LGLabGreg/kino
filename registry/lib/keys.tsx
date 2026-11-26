@@ -1,9 +1,13 @@
 'use client'
 
+import { ariaKeyshortcuts } from '@ui-sdk/core'
+import { shortcuts } from '@ui-sdk/core/shortcuts'
 import {
   Children,
   isValidElement,
   type ReactNode,
+  type RefCallback,
+  useCallback,
   useEffect,
   useRef,
   useSyncExternalStore,
@@ -49,17 +53,23 @@ const ALIASES: Record<string, KeyName> = {
   tab: 'Tab',
   '↑': 'ArrowUp',
   up: 'ArrowUp',
+  arrowup: 'ArrowUp',
   '↓': 'ArrowDown',
   down: 'ArrowDown',
+  arrowdown: 'ArrowDown',
   '←': 'ArrowLeft',
   left: 'ArrowLeft',
+  arrowleft: 'ArrowLeft',
   '→': 'ArrowRight',
   right: 'ArrowRight',
+  arrowright: 'ArrowRight',
   '␣': ' ',
   space: ' ',
   pgup: 'PageUp',
+  pageup: 'PageUp',
   'page up': 'PageUp',
   pgdn: 'PageDown',
+  pagedown: 'PageDown',
   'page down': 'PageDown',
   home: 'Home',
   end: 'End',
@@ -214,95 +224,52 @@ export function onlyTypes(
   )
 }
 
-type ShortcutPress = Pick<
-  KeyboardEvent,
-  'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'
->
-
 /**
- * Whether a key press belongs to an input method that is composing, such as
- * the Enter that picks a word in Japanese: it is never a shortcut. Safari
- * sends that Enter with `isComposing` false, and only keyCode 229 tells.
- */
-export function isComposing(event: Pick<KeyboardEvent, 'isComposing' | 'keyCode'>) {
-  return event.isComposing || event.keyCode === 229
-}
-
-/**
- * Whether a press is the shortcut `keys` names, as `['Mod', 'K']` or `['/']`:
- * the same modifiers, no more, and one other key, by what it typed or where it
- * is. Shift is left free for a sign it types, as `?` is Shift and `/`.
- */
-export function matchesShortcut(
-  press: ShortcutPress,
-  keys: readonly string[],
-  apple: boolean,
-): boolean {
-  const names = keys.map((key) => resolveKey(keyFromLabel(key), apple))
-  const others = names.filter((name) => !MODIFIERS.has(name))
-  if (others.length !== 1) return false
-  const [other] = others
-  const wants = (modifier: string) => names.includes(modifier)
-  const sign = other.length === 1 && !/[\p{L}\p{N}]/u.test(other)
-  return (
-    press.metaKey === wants('Meta') &&
-    press.ctrlKey === wants('Control') &&
-    press.altKey === wants('Alt') &&
-    (sign || press.shiftKey === wants('Shift')) &&
-    eventKeys(press).includes(other)
-  )
-}
-
-/**
- * Whether an element is behind a modal layer, such as an open dialog, which
- * makes the rest of the page inert or hides it from screen readers.
- */
-function outOfReach(element: Element) {
-  return element.closest('[inert], [aria-hidden="true"]') !== null
-}
-
-/**
- * Runs `onPress` when the person presses the shortcut anywhere on the page,
- * except a key that only types while they type in a field: `/` still types a
- * slash there, and ⌘K still runs. While `target`, the element it acts on, is
- * behind an open dialog, the press is left for the dialog.
+ * Runs `onPress` when the person presses `keys`, ui-sdk's shortcut string
+ * (`'mod+k'`, `'/'`), through ui-sdk's one shortcut listener. A plain key
+ * typed in a field stays text, and a modal over the page pauses it. `layer`
+ * is ui-sdk's: an element on the page, or one inside a popup, so the
+ * shortcut runs while that popup is open, such as ⌘K closing the dialog it
+ * opened.
  */
 export function useShortcut(
-  keys: readonly string[] | undefined,
+  keys: string | null | undefined,
   onPress: (event: KeyboardEvent) => void,
-  target?: Element | null,
+  layer?: Element | null,
 ) {
-  const apple = useApplePlatform()
   const press = useRef(onPress)
   useEffect(() => {
     press.current = onPress
   })
-  // By content, so a new array with the same keys doesn't listen again.
-  const shortcut = keys ? JSON.stringify(keys) : undefined
   useEffect(() => {
-    if (!shortcut) return undefined
-    const names = JSON.parse(shortcut) as string[]
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || isComposing(event)) return
-      if (onlyTypes(event, inField(event.target))) return
-      if (!matchesShortcut(event, names, apple)) return
-      if (target && outOfReach(target)) return
-      event.preventDefault()
-      press.current(event)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [shortcut, apple, target])
+    if (!keys) return undefined
+    return shortcuts.register(keys, (event) => press.current(event), {
+      layer: layer ?? undefined,
+    })
+  }, [keys, layer])
 }
 
-/** The shortcut as `aria-keyshortcuts` writes it: `Meta+K` on a Mac, `Control+K` elsewhere. */
-export function ariaShortcut(keys: readonly string[], apple: boolean): string {
-  return keys
-    .map((key) => {
-      const name = resolveKey(keyFromLabel(key), apple)
-      return name.length === 1 ? name.toUpperCase() : name === ' ' ? 'Space' : name
-    })
-    .join('+')
+/**
+ * A ref callback that sets `aria-keyshortcuts` from ui-sdk's shortcut string
+ * once the element is in the page, where the platform is known, so the
+ * server's and the client's first render agree.
+ */
+export function useAriaKeyshortcuts(
+  keys: string | null | undefined,
+): RefCallback<Element> {
+  return useCallback(
+    (element: Element | null) => {
+      if (!element || !keys) return undefined
+      element.setAttribute('aria-keyshortcuts', ariaKeyshortcuts(keys))
+      return () => element.removeAttribute('aria-keyshortcuts')
+    },
+    [keys],
+  )
+}
+
+/** The keys of ui-sdk's shortcut string, each as `Kbd` names it: `'mod+shift+k'` is Mod, Shift, k. */
+export function shortcutKeys(keys: string): KeyName[] {
+  return keys.split('+').map(keyFromLabel)
 }
 
 function inField(target: EventTarget | null) {

@@ -1,6 +1,11 @@
 'use client'
 
-import { type KbdKeyProps, useKbdKey, useOrderedKeys } from '@/registry/lib/keys'
+import {
+  type KbdKeyProps,
+  shortcutKeys,
+  useKbdKey,
+  useOrderedKeys,
+} from '@/registry/lib/keys'
 import type { ComponentProps } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -39,9 +44,25 @@ function Kbd({
   )
 }
 
-/** Keys pressed together, as ⇧⌘P, in the order the platform writes them. */
-function KbdGroup({ className, children, ...props }: ComponentProps<'kbd'>) {
-  const { keys } = useOrderedKeys(children)
+/**
+ * Keys pressed together, as ⇧⌘P, in the order the platform writes them: its
+ * `Kbd`s, or a shortcut as ui-sdk writes it, `keys='mod+shift+p'`.
+ */
+function KbdGroup({
+  keys: shortcut,
+  className,
+  children,
+  ...props
+}: ComponentProps<'kbd'> & {
+  /** A shortcut as ui-sdk writes it, such as `'mod+k'`, drawn as a `Kbd` per key. */
+  keys?: string
+}) {
+  const { keys } = useOrderedKeys(
+    children ??
+      (shortcut
+        ? shortcutKeys(shortcut).map((key) => <Kbd key={key} name={key} />)
+        : null),
+  )
   return (
     <kbd
       data-slot='kbd-group'

@@ -2,7 +2,7 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { CommandDialog } from '@/registry/components/kino/command'
-import { Kbd, KbdGroup } from '@/registry/components/kino/kbd'
+import { KbdGroup } from '@/registry/components/kino/kbd'
 import { Separator } from '@/registry/components/kino/separator'
 import {
   Sidebar,
@@ -33,7 +33,7 @@ import {
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
-import { ariaShortcut, useApplePlatform, useShortcut } from '@/registry/lib/keys'
+import { useAriaKeyshortcuts, useShortcut } from '@/registry/lib/keys'
 import {
   type ComponentProps,
   createContext,
@@ -102,7 +102,7 @@ const insetHeaderHeight =
   '[--app-shell-header-height:calc(var(--control-height-lg)-var(--control-height-sm)+max(var(--control-height-sm),2rem)+var(--control-padding)-1px)]'
 
 /** The keys that open the search from anywhere on the page. */
-const SEARCH_SHORTCUT = ['Mod', 'K'] as const
+const SEARCH_SHORTCUT = 'mod+k'
 
 /**
  * The app's frame. It fills the height its parent gives it, and the page
@@ -139,8 +139,8 @@ function AppShell({
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** The keys that collapse the sidebar, or null for none. */
-  shortcut?: readonly string[] | null
+  /** The keys that collapse the sidebar, as ui-sdk writes them (`'mod+b'`), or null for none. */
+  shortcut?: string | null
   /**
    * Whether the header and the page are the page's banner and `main`. Turn it
    * off inside a page that has its own, such as a preview.
@@ -338,8 +338,8 @@ function AppShellSearch({
   label?: string
   /** Names the dialog for a screen reader. */
   title?: string
-  /** The keys that open it from anywhere on the page, or null for none. */
-  shortcut?: readonly string[] | null
+  /** The keys that open it from anywhere on the page, as ui-sdk writes them (`'mod+k'`), or null for none. */
+  shortcut?: string | null
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -347,11 +347,11 @@ function AppShellSearch({
   children: ReactNode
 }) {
   const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange)
-  const apple = useApplePlatform()
   const [box, setBox] = useState<HTMLSpanElement | null>(null)
+  const [dialog, setDialog] = useState<HTMLDivElement | null>(null)
   // Left to another dialog that covers the page, but the search's own keys close it.
-  useShortcut(shortcut ?? undefined, () => setOpen(!open), open ? null : box)
-  const keys = shortcut ? ariaShortcut(shortcut, apple) : undefined
+  useShortcut(shortcut, () => setOpen(!open), open ? dialog : box)
+  const keysRef = useAriaKeyshortcuts(shortcut)
   return (
     <span ref={setBox} data-slot='app-shell-search' className='contents'>
       {/* A field's look on a wide shell, by the shell's width, so the sidebar's collapse doesn't swap it: its keys are read as aria-keyshortcuts, not as its name. */}
@@ -359,7 +359,7 @@ function AppShellSearch({
         render={
           <Button
             variant='outline'
-            aria-keyshortcuts={keys}
+            ref={keysRef}
             onClick={() => setOpen(true)}
             className={cn(
               'text-muted-foreground hidden w-56 justify-start @4xl/sidebar-provider:inline-flex',
@@ -379,11 +379,7 @@ function AppShellSearch({
               {label}
             </span>
             {shortcut ? (
-              <KbdGroup aria-hidden className='pointer-coarse:hidden'>
-                {shortcut.map((key) => (
-                  <Kbd key={key} name={key} />
-                ))}
-              </KbdGroup>
+              <KbdGroup aria-hidden keys={shortcut} className='pointer-coarse:hidden' />
             ) : null}
           </Button>
         }
@@ -395,7 +391,7 @@ function AppShellSearch({
               variant='ghost'
               size='icon'
               aria-label={label}
-              aria-keyshortcuts={keys}
+              ref={keysRef}
               onClick={() => setOpen(true)}
               className={cn(
                 'text-muted-foreground @4xl/sidebar-provider:hidden',
@@ -417,16 +413,17 @@ function AppShellSearch({
           {label}
           {shortcut ? (
             <TooltipShortcut>
-              <KbdGroup>
-                {shortcut.map((key) => (
-                  <Kbd key={key} name={key} />
-                ))}
-              </KbdGroup>
+              <KbdGroup keys={shortcut} />
             </TooltipShortcut>
           ) : null}
         </TooltipContent>
       </Tooltip>
-      <CommandDialog title={title} open={open} onOpenChange={setOpen}>
+      <CommandDialog
+        title={title}
+        open={open}
+        onOpenChange={setOpen}
+        contentProps={{ ref: setDialog }}
+      >
         {children}
       </CommandDialog>
     </span>

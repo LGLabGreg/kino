@@ -3,7 +3,7 @@
 import { Button } from '@/registry/components/kino/button'
 import { Spinner, useSpinner } from '@/registry/components/kino/spinner'
 import { useSaveBar } from '@/registry/lib/form-changes'
-import { ariaShortcut, useApplePlatform } from '@/registry/lib/keys'
+import { useAriaKeyshortcuts } from '@/registry/lib/keys'
 import { mergeRefs } from '@/registry/lib/refs'
 import { Swap, SwapText, swapIconClassName } from '@/registry/lib/swap'
 import { isRTL } from '@ui-sdk/core'
@@ -72,7 +72,7 @@ function SaveBar({
   const { here, into, away, anchorRef, guardRef, onGuardFocus, onButtonKeyDown, formId } =
     placement
   const refs = useMemo(() => mergeRefs(ref, barRef), [ref, barRef])
-  const apple = useApplePlatform()
+  const saveKeys = useAriaKeyshortcuts('mod+s')
   const spinning = useSpinner(saving)
   const barId = useId()
   // Rendered out of the form's tree, so it takes the form's reading direction as it opens.
@@ -159,7 +159,7 @@ function SaveBar({
             size='sm'
             disabled={locked}
             focusableWhenDisabled
-            aria-keyshortcuts={ariaShortcut(['Mod', 'S'], apple)}
+            ref={saveKeys}
             tabIndex={away ? -1 : undefined}
             onKeyDown={onButtonKeyDown('last')}
           >

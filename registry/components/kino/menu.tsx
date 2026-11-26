@@ -1,9 +1,9 @@
 'use client'
 
-import { Kbd, KbdGroup } from '@/registry/components/kino/kbd'
+import { KbdGroup } from '@/registry/components/kino/kbd'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { followRows, tintedRowTextClassName } from '@/registry/lib/highlight'
-import { ariaShortcut, useApplePlatform } from '@/registry/lib/keys'
+import { useAriaKeyshortcuts } from '@/registry/lib/keys'
 import {
   listIndicatorClassName,
   menuGutterClassName,
@@ -56,6 +56,7 @@ import {
   type ComponentProps,
   createContext,
   type ReactNode,
+  type Ref,
   type RefCallback,
   use,
   useMemo,
@@ -235,6 +236,7 @@ function MenuContent({
  */
 function MenuItem({
   className,
+  ref,
   destructive = false,
   shortcut,
   children,
@@ -249,7 +251,7 @@ function MenuItem({
       data-menu-row=''
       data-variant={destructive ? 'destructive' : 'default'}
       destructive={destructive}
-      aria-keyshortcuts={useAriaShortcut(shortcut)}
+      ref={useShortcutRef(shortcut, ref)}
       className={cn(
         menuRowVariants({ variant: destructive ? 'destructive' : 'default' }),
         menuInset,
@@ -266,6 +268,7 @@ function MenuItem({
 /** A row that turns a setting on and off, with a tick in the gutter. */
 function MenuCheckboxItem({
   className,
+  ref,
   shortcut,
   children,
   ...props
@@ -277,7 +280,7 @@ function MenuCheckboxItem({
   return (
     <MenuCheckboxItemPrimitive
       data-menu-row=''
-      aria-keyshortcuts={useAriaShortcut(shortcut)}
+      ref={useShortcutRef(shortcut, ref)}
       className={cn(menuRowVariants(), 'group/menu-row', className)}
       {...props}
     >
@@ -320,6 +323,7 @@ function MenuRadioGroup<T extends string = string>(
 /** One choice of a radio group: the picked one is tinted, with a medium label. */
 function MenuRadioItem({
   className,
+  ref,
   shortcut,
   children,
   ...props
@@ -331,7 +335,7 @@ function MenuRadioItem({
   return (
     <MenuRadioItemPrimitive
       data-menu-row=''
-      aria-keyshortcuts={useAriaShortcut(shortcut)}
+      ref={useShortcutRef(shortcut, ref)}
       className={cn(
         menuRowVariants(),
         'group/menu-row',
@@ -381,15 +385,16 @@ function MenuSeparator({
 interface ShortcutProps {
   /**
    * The keys that do the same as the row, as ui-sdk writes them, such as
-   * `'Mod+Shift+D'`: shown as `Kbd`s at the row's end and given to it as
+   * `'mod+shift+d'`: shown as `Kbd`s at the row's end and given to it as
    * `aria-keyshortcuts`. A hint only: the app runs the shortcut.
    */
   shortcut?: string
 }
 
-function useAriaShortcut(shortcut: string | undefined) {
-  const apple = useApplePlatform()
-  return shortcut ? ariaShortcut(shortcut.split('+'), apple) : undefined
+/** A row's ref, which also says its `shortcut` as `aria-keyshortcuts`. */
+function useShortcutRef<T extends Element>(shortcut: string | undefined, ref?: Ref<T>) {
+  const ariaKeys = useAriaKeyshortcuts(shortcut)
+  return useMemo(() => mergeRefs<T>(ariaKeys, ref), [ariaKeys, ref])
 }
 
 /**
@@ -403,7 +408,7 @@ function MenuShortcut({
   children,
   ...props
 }: Omit<ComponentProps<typeof MenuShortcutPrimitive>, 'className'> & {
-  /** The keys, as a row's `shortcut` takes them: `'Mod+Shift+D'`. */
+  /** The keys, as a row's `shortcut` takes them: `'mod+shift+d'`. */
   shortcut?: string
   className?: string
 }) {
@@ -413,13 +418,7 @@ function MenuShortcut({
       className={cn(menuShortcutClassName, className)}
       {...props}
     >
-      {children ?? (
-        <KbdGroup>
-          {shortcut?.split('+').map((key) => (
-            <Kbd key={key} name={key} />
-          ))}
-        </KbdGroup>
-      )}
+      {children ?? <KbdGroup keys={shortcut} />}
     </MenuShortcutPrimitive>
   )
 }

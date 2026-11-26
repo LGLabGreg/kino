@@ -8,7 +8,7 @@ import {
   collapsibleRowClassName,
 } from '@/registry/components/kino/collapsible'
 import { Drawer, DrawerContent, DrawerTitle } from '@/registry/components/kino/drawer'
-import { Kbd, KbdGroup } from '@/registry/components/kino/kbd'
+import { KbdGroup } from '@/registry/components/kino/kbd'
 import { ScrollArea } from '@/registry/components/kino/scroll-area'
 import {
   Tooltip,
@@ -29,12 +29,13 @@ import {
   rowHighlightClassName,
   rowTintClassName,
 } from '@/registry/lib/highlight'
-import { ariaShortcut, useApplePlatform, useShortcut } from '@/registry/lib/keys'
+import { useAriaKeyshortcuts, useShortcut } from '@/registry/lib/keys'
 import { HOVER_DELAY } from '@/registry/lib/popup'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { collapseClassName, transitionsSettled } from '@/registry/lib/resize'
 import { narrowerThan, useNarrowerThan } from '@/registry/lib/roomy'
 import { SwapTextTitleContext } from '@/registry/lib/swap'
+import { shortcuts } from '@ui-sdk/core/shortcuts'
 import { Button as ButtonPrimitive } from '@ui-sdk/react/button'
 import {
   CollapsiblePanel as CollapsiblePanelPrimitive,
@@ -73,7 +74,7 @@ import { cn } from '@/lib/utils'
 type SidebarSide = 'start' | 'end'
 
 /** Toggles the sidebar from anywhere on the page. */
-const SIDEBAR_SHORTCUT = ['Mod', 'B'] as const
+const SIDEBAR_SHORTCUT = 'mod+b'
 
 /** Under this width, in rem, the provider is a phone's screen: the sidebar is a Drawer. */
 const SHEET_BELOW_REM = 48
@@ -90,7 +91,7 @@ interface SidebarContextValue {
   toggle: () => void
   /** The sidebar's id, for its triggers' `aria-controls`. */
   id: string
-  shortcut: readonly string[] | null
+  shortcut: string | null
 }
 
 const SidebarContext = createContext<SidebarContextValue | null>(null)
@@ -131,8 +132,8 @@ function SidebarProvider({
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
-  /** The keys that toggle it from anywhere on the page, or null for none. */
-  shortcut?: readonly string[] | null
+  /** The keys that toggle it from anywhere on the page, as ui-sdk writes them (`'mod+b'`), or null for none. */
+  shortcut?: string | null
 }) {
   const [open, setOpen] = useControllable(openProp, defaultOpen, onOpenChange)
   const [box, setBox] = useState<HTMLDivElement | null>(null)
@@ -148,7 +149,7 @@ function SidebarProvider({
     else setOpen(!open)
   }
 
-  useShortcut(shortcut ?? undefined, toggle, box)
+  useShortcut(shortcut, toggle, box)
   const boxRef = useMemo(() => mergeRefs(setBox, ref), [ref])
 
   return (
@@ -1263,12 +1264,6 @@ function usePeek({
   useEffect(() => {
     const panel = panelRef.current
     if (peek !== 'open' || !panel) return
-    const keyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      const focused = panel.contains(document.activeElement)
-      setPeek('closing')
-      if (focused) trigger()?.focus()
-    }
     const menus = new MutationObserver(() => {
       if (!inside.current && !panel.querySelector(OPEN_POPUP)) scheduleClose()
     })
@@ -1277,9 +1272,18 @@ function usePeek({
       attributes: true,
       attributeFilter: ['aria-expanded'],
     })
-    document.addEventListener('keydown', keyDown)
+    // A popup open above it takes Escape first.
+    const unregister = shortcuts.register(
+      'escape',
+      () => {
+        const focused = panel.contains(document.activeElement)
+        setPeek('closing')
+        if (focused) trigger()?.focus()
+      },
+      { layer: panel, allowInInput: true },
+    )
     return () => {
-      document.removeEventListener('keydown', keyDown)
+      unregister()
       menus.disconnect()
     }
   })
@@ -1342,8 +1346,8 @@ function SidebarTrigger({
   ...props
 }: ComponentProps<typeof Button>) {
   const { open, sheet, sheetOpen, toggle, id, shortcut } = useSidebar()
-  const triggerRef = useMemo(() => mergeRefs(markMounted, ref), [ref])
-  const apple = useApplePlatform()
+  const ariaKeys = useAriaKeyshortcuts(shortcut)
+  const triggerRef = useMemo(() => mergeRefs(markMounted, ariaKeys, ref), [ariaKeys, ref])
   const expanded = sheet ? sheetOpen : open
   const label = sheet ? 'Open sidebar' : open ? 'Collapse sidebar' : 'Expand sidebar'
   return (
@@ -1357,7 +1361,6 @@ function SidebarTrigger({
             aria-label={label}
             aria-expanded={expanded}
             aria-controls={id}
-            aria-keyshortcuts={shortcut ? ariaShortcut(shortcut, apple) : undefined}
             ref={triggerRef}
             className={cn(
               // The page may load as wide as a phone's, which the provider learns only once it is measured: its expanded look lands at once, never fading on load.
@@ -1386,11 +1389,7 @@ function SidebarTrigger({
         {label}
         {shortcut ? (
           <TooltipShortcut>
-            <KbdGroup>
-              {shortcut.map((key) => (
-                <Kbd key={key}>{key}</Kbd>
-              ))}
-            </KbdGroup>
+            <KbdGroup keys={shortcut} />
           </TooltipShortcut>
         ) : null}
       </TooltipContent>

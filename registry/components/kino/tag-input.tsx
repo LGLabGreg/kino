@@ -13,7 +13,7 @@ import {
   ComboboxValue,
 } from '@/registry/components/kino/combobox'
 import { announce } from '@/registry/lib/announce'
-import { isComposing } from '@/registry/lib/keys'
+import { isComposing } from '@ui-sdk/core'
 import { createComboboxController } from '@ui-sdk/react/combobox'
 import {
   type ComponentProps,
@@ -387,7 +387,9 @@ function TagInputItem({
   value,
   children,
   ...props
-}: Omit<ComponentProps<typeof ComboboxItem>, 'value' | 'indicator'> & { value: string }) {
+}: Omit<ComponentProps<typeof ComboboxItem>, 'value' | 'indicator'> & {
+  value: string
+}) {
   return (
     <ComboboxItem value={value} label={value} indicator={false} {...props}>
       {children ?? value}

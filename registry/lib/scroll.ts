@@ -277,7 +277,7 @@ export function holdAtEdge(element: Element, watch: Element, line: number) {
 }
 
 /** Whether a height transition runs on `watch` or inside it. */
-export function heightsMoving(watch: Element) {
+function heightsMoving(watch: Element) {
   return runningTransitions(watch, { property: 'height', subtree: true }).length > 0
 }
 
@@ -288,7 +288,7 @@ export function heightsMoving(watch: Element) {
  * frame of a height transition, so what it keeps in place never lags one.
  * Returns a function that stops it sooner, and when it has stopped.
  */
-export function whileHeightsMove(
+function whileHeightsMove(
   watch: Element,
   scroller: Element | null,
   step: () => boolean,

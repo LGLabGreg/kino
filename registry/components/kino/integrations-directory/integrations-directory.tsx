@@ -180,7 +180,7 @@ function IntegrationsDirectory({
               aria-label='Search integrations'
               aria-controls={gridId}
               placeholder='Search integrations'
-              shortcut={['/']}
+              shortcut='/'
               value={query}
               onValueChange={(next) => setQuery(String(next))}
               count={searching ? shown.length : undefined}
@@ -265,7 +265,10 @@ function IntegrationsDirectory({
                     {requestHref ? (
                       <a
                         href={requestHref}
-                        className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+                        className={buttonVariants({
+                          variant: 'ghost',
+                          size: 'sm',
+                        })}
                       >
                         Request an integration
                       </a>

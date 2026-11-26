@@ -6,10 +6,10 @@ import {
   useFormSubmission,
 } from '@/registry/components/kino/field'
 import { announce } from '@/registry/lib/announce'
-import { isComposing, matchesShortcut, useApplePlatform } from '@/registry/lib/keys'
 import { refuse } from '@/registry/lib/refuse'
 import { transitionsQuiet } from '@/registry/lib/resize'
 import { revealBehavior } from '@/registry/lib/scroll'
+import { shortcuts } from '@ui-sdk/core/shortcuts'
 import {
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -273,17 +273,16 @@ type SaveBarView = 'changed' | 'saving' | 'saved' | 'failed' | 'blocked'
 /**
  * Whether ⌘S pressed at a place is this form's to save: pressed in the form
  * or in its own bar, which sits outside it, or anywhere outside every form
- * and bar, unless something there took the press first.
+ * and bar.
  */
 export function ownsSaveShortcut(press: {
   inForm: boolean
   inBar: boolean
   inOtherForm: boolean
   inOtherBar: boolean
-  taken: boolean
 }) {
   if (press.inForm || press.inBar) return true
-  return !(press.taken || press.inOtherForm || press.inOtherBar)
+  return !(press.inOtherForm || press.inOtherBar)
 }
 
 /** What a save bar says in each view, for the screen reader and on the bar. */
@@ -551,29 +550,22 @@ export function useSaveBar({
 
   // ⌘S or Ctrl+S saves this form when pressed in it, or outside every form;
   // pressed in another form, it is that form's. Behind a dialog, it is the dialog's.
-  const apple = useApplePlatform()
   useEffect(() => {
-    if (!changed || saving) return undefined
-    const onKeyDown = (event: KeyboardEvent) => {
-      const form = elementRef.current
-      if (!form || isComposing(event) || !matchesShortcut(event, ['Mod', 'S'], apple))
-        return
-      const target = event.target instanceof Element ? event.target : null
-      const owns = ownsSaveShortcut({
-        inForm: target !== null && form.contains(target),
-        inBar: target !== null && !!bar.current?.contains(target),
-        inOtherForm: !!target?.closest('form'),
-        inOtherBar: !!target?.closest('[data-slot=save-bar]'),
-        taken: event.defaultPrevented,
-      })
-      if (!owns) return
-      if (form.closest('[inert], [aria-hidden="true"]')) return
-      event.preventDefault()
-      form.requestSubmit()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [changed, saving, apple, elementRef])
+    const form = elementRef.current
+    if (!changed || saving || !form) return undefined
+    return shortcuts.register('mod+s', () => form.requestSubmit(), {
+      layer: form,
+      when: () => {
+        const focused = document.activeElement
+        return ownsSaveShortcut({
+          inForm: focused !== null && form.contains(focused),
+          inBar: focused !== null && !!bar.current?.contains(focused),
+          inOtherForm: !!focused?.closest('form'),
+          inOtherBar: !!focused?.closest('[data-slot=save-bar]'),
+        })
+      },
+    })
+  }, [changed, saving, elementRef])
 
   // Named after its form, so two bars on a page tell themselves apart.
   useLayoutEffect(() => {
