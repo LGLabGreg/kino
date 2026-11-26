@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/banner-dark.png">
-  <img alt="Kino. Your agent builds it. Kino makes it move. React components with the motion already designed, and docs your agent can read." src=".github/banner-light.png">
+  <img alt="Kino. Your agent builds it. Kino makes it move. React components with the motion already designed. A coding agent builds with them from the docs, and an agent in your app can use every control." src=".github/banner-light.png">
 </picture>
 
 [Website](https://kinoui.com) · [Docs](https://kinoui.com/docs) · [Installation](https://kinoui.com/docs/installation)
