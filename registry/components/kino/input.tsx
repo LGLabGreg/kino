@@ -32,12 +32,22 @@ const inputControlClassName =
  * value as the press starts, so a focused value never blurs and comes back.
  */
 function focusControl(event: PointerEvent<HTMLElement>) {
+  const box = event.currentTarget
   const target = event.target as HTMLElement
+  // A popup opened from a part in the box, such as a currency picker's list,
+  // sits inside it in the page: a press there isn't on the box.
+  const inPopup = (element: Element) => {
+    const popup = element.closest('[data-presentation]')
+    return popup !== null && box.contains(popup)
+  }
   if (target.closest('input, textarea, select, button, a, [data-slot*=scrub]')) return
+  if (inPopup(target)) return
   // Not a part's own hidden input, such as a Combobox's or a field's form value.
-  const control = event.currentTarget.querySelector<HTMLElement>(
-    ':is(input, textarea, select):not([type=hidden], [aria-hidden=true])',
-  )
+  const control = [
+    ...box.querySelectorAll<HTMLElement>(
+      ':is(input, textarea, select):not([type=hidden], [aria-hidden=true])',
+    ),
+  ].find((each) => !inPopup(each))
   if (!control) return
   event.preventDefault()
   control.focus()

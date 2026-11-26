@@ -158,7 +158,8 @@ function TooltipGroup({ children }: { children: ReactNode }) {
  * One tooltip: a trigger and its content. It waits 200ms before it opens,
  * then the next one opens at once while the pointer moves on. Inside a
  * `TooltipGroup`, the group holds whether it is open, and its props are
- * ignored, except `disabled` and `shortcut`.
+ * ignored, except `disabled` and `shortcut`. One open as it turns disabled
+ * closes.
  */
 function Tooltip({
   children,
@@ -166,11 +167,18 @@ function Tooltip({
   type,
   disabled = false,
   shortcut,
+  open: openProp,
+  onOpenChange,
   ...props
 }: ComponentProps<typeof TooltipPrimitive>) {
   const group = use(GroupContext)
   const id = useId()
   const [repeats, setRepeats] = useState(false)
+  // ui-sdk's `disabled` only stops it opening, so one open as it turns
+  // disabled is closed here, as a group closes it.
+  const [ownOpen, setOwnOpen] = useState(props.defaultOpen ?? false)
+  // Closed for good: enabled again, it waits for a pointer or focus.
+  if (disabled && ownOpen) setOwnOpen(false)
   useEffect(() => {
     if (!group) return
     group.disable(id, disabled)
@@ -190,6 +198,11 @@ function Tooltip({
       disabled={disabled}
       shortcut={shortcut}
       {...props}
+      open={(openProp ?? ownOpen) && !disabled}
+      onOpenChange={(open, details) => {
+        onOpenChange?.(open, details)
+        if (!details.canceled) setOwnOpen(open)
+      }}
     >
       <RepeatsContext value={setRepeats}>{children}</RepeatsContext>
     </TooltipPrimitive>

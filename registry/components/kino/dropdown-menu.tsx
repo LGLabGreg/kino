@@ -3,12 +3,10 @@
 import {
   MenuCheckboxItem,
   MenuContent,
-  MenuEmpty,
   MenuItem,
   MenuLabel,
   MenuLinkItem,
   MenuRadioItem,
-  MenuSearch,
   MenuSeparator,
   MenuShortcut,
   MenuSubContent,
@@ -32,22 +30,6 @@ function DropdownMenuTrigger<Payload>(props: MenuPrimitive.Trigger.Props<Payload
  */
 function DropdownMenuContent(props: ComponentProps<typeof MenuContent>) {
   return <MenuContent data-slot='dropdown-menu-content' {...props} />
-}
-
-/**
- * Makes the menu or submenu it wraps searchable: put a `DropdownMenuSearch`
- * and a `DropdownMenuEmpty` in its content's `search`. Renders no element.
- */
-function DropdownMenuFilterProvider(props: MenuPrimitive.FilterProvider.Props) {
-  return <MenuPrimitive.FilterProvider {...props} />
-}
-
-function DropdownMenuSearch(props: ComponentProps<typeof MenuSearch>) {
-  return <MenuSearch data-slot='dropdown-menu-search' {...props} />
-}
-
-function DropdownMenuEmpty(props: ComponentProps<typeof MenuEmpty>) {
-  return <MenuEmpty data-slot='dropdown-menu-empty' {...props} />
 }
 
 function DropdownMenuGroup(props: MenuPrimitive.Group.Props) {
@@ -102,15 +84,12 @@ export {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuEmpty,
-  DropdownMenuFilterProvider,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuLinkItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSearch,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuSub,

@@ -154,12 +154,21 @@ function CutTooltip({
   const [owner, setOwner] = useState<HTMLElement | null>(null)
   const cut = useCut(owner, labels)
   const lines = cut.length > 0 && text !== undefined ? [text] : cut
+  // What it said last, which it keeps showing as it closes once the text fits.
+  const [said, setSaid] = useState(lines)
+  if (lines.length > 0 && !sameLines(said, lines)) setSaid(lines)
   return (
     <SwapTextTitleContext value={false}>
-      <Tooltip disabled={disabled || lines.length === 0}>
+      <Tooltip
+        disabled={disabled || lines.length === 0}
+        // Measured again as it opens, since a value just changed may not be measured yet.
+        onOpenChange={(open, details) => {
+          if (open && owner && cutLines(owner, labels).length === 0) details.cancel()
+        }}
+      >
         <TooltipTrigger ref={setOwner} render={undescribed(render)} />
         <TooltipContent side={side} align={align}>
-          <CutLines lines={lines} />
+          <CutLines lines={lines.length > 0 ? lines : said} />
         </TooltipContent>
       </Tooltip>
     </SwapTextTitleContext>

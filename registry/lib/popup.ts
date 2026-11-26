@@ -1,6 +1,13 @@
 'use client'
 
-import { type CSSProperties, createContext, use, useState } from 'react'
+import { reducesMotion, watchReducedMotion } from '@/registry/lib/reduce-motion'
+import {
+  type CSSProperties,
+  createContext,
+  use,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 
 /*
  * How every popup anchored to a trigger opens and closes: it grows out from
@@ -19,6 +26,44 @@ export const HOVER_DELAY = 200
 
 /** How far from the screen's edge a popup stays, in px. */
 export const POPUP_COLLISION_PADDING = 8
+
+/** How a ui-sdk popup presents: `auto` is a sheet on a small touch screen. */
+export type PopupPresentation = 'popover' | 'sheet' | 'auto'
+
+/**
+ * How it opens: `auto` stays a popover while motion is reduced, since
+ * ui-sdk slides the sheet in on a spring of its own, which reduced motion
+ * can't stop. That spring doesn't follow the feel either, so every popup is
+ * a popover unless you ask.
+ */
+export function popupPresentation<P extends PopupPresentation>(
+  presentation: P,
+  reduced: boolean,
+): P | 'popover' {
+  return presentation === 'auto' && reduced ? 'popover' : presentation
+}
+
+/**
+ * `popupPresentation` for a popup, read where its trigger is, and the ref
+ * for that trigger: the motion preference can be set on any element.
+ */
+export function usePopupPresentation<P extends PopupPresentation>(presentation: P) {
+  const [trigger, setTrigger] = useState<HTMLElement | null>(null)
+  return [usePopupPresentationAt(presentation, trigger), setTrigger] as const
+}
+
+/** `popupPresentation` for a popup, read around `element`, such as the field it opens from. */
+export function usePopupPresentationAt<P extends PopupPresentation>(
+  presentation: P,
+  element: HTMLElement | null,
+) {
+  const reduced = useSyncExternalStore(
+    watchReducedMotion,
+    () => reducesMotion(element),
+    () => false,
+  )
+  return popupPresentation(presentation, reduced)
+}
 
 export type PhysicalSide = 'top' | 'bottom' | 'left' | 'right'
 /** A side as Base UI names it: the inline sides follow the reading direction. */
@@ -105,12 +150,15 @@ export const popupSurfaceClassName =
  * A popup ui-sdk places: the box it grows from, on the side it landed on
  * (`popupGrowFrom`, written out for Tailwind), and `group/popup`, which the
  * box inside it (`popupGrowBoxClassName`) and its content read. It paints
- * nothing itself, so a popup of the old library opened inside it shows whole.
- * ui-sdk keeps the room left on screen to the popup itself, so it hands it
- * on as `--popup-available-height`.
+ * nothing itself, so a popup of the old library opened inside it shows whole:
+ * ui-sdk clears the browser's own popover styles on some popups only, not
+ * the Select's or the lists', so it clears the ones that would show, the
+ * background behind the surface's corners and the scroll box that clips its
+ * ring and shadow. ui-sdk keeps the room left on screen to the popup itself,
+ * so it hands it on as `--popup-available-height` and `--popup-available-width`.
  */
 export const popupPlacedClassName =
-  'group/popup isolate outline-hidden [--popup-available-height:var(--available-height)] data-[side=bottom]:[--popup-grow-from:inset(0px_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_100%_max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_round_var(--control-radius-capped))] data-[side=top]:[--popup-grow-from:inset(100%_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_0px_max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_round_var(--control-radius-capped))] data-[side=right]:[--popup-grow-from:inset(max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_100%_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_0px_round_var(--control-radius-capped))] data-[side=left]:[--popup-grow-from:inset(max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_0px_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_100%_round_var(--control-radius-capped))]'
+  'group/popup isolate overflow-visible bg-transparent text-inherit outline-hidden [--popup-available-height:var(--available-height)] [--popup-available-width:var(--available-width)] data-[side=bottom]:[--popup-grow-from:inset(0px_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_100%_max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_round_var(--control-radius-capped))] data-[side=top]:[--popup-grow-from:inset(100%_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_0px_max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-width)_/_2))_round_var(--control-radius-capped))] data-[side=right]:[--popup-grow-from:inset(max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_100%_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_0px_round_var(--control-radius-capped))] data-[side=left]:[--popup-grow-from:inset(max(0px,calc(var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_0px_max(0px,calc(100%_-_var(--arrow-offset,50%)_-_var(--anchor-height)_/_2))_100%_round_var(--control-radius-capped))]'
 
 /**
  * The box inside a placed popup: it grows on `morph` and folds back on

@@ -1,8 +1,9 @@
 /*
- * How Kino's searches match what a person types: as Base UI's own filter
- * does, a run of the text as long as the query that compares equal ignoring
- * case, accents and punctuation, in the list's `locale`, so what is marked
- * is what made the row match.
+ * How Kino's own searches, outside a ui-sdk list, match what a person types:
+ * a run of the text as long as the query that compares equal ignoring case,
+ * accents and punctuation, in a `locale` the search is given. A ui-sdk list
+ * filters and marks its rows itself (`matchRanges` in `@ui-sdk/core/text-match`),
+ * in the page's language only.
  */
 const collators = new Map<string, Intl.Collator>()
 
@@ -21,9 +22,8 @@ function matchCollator(locale: Intl.LocalesArgument) {
 }
 
 /**
- * Where `query` first matches in `text`, as `[start, end)`, the way Base UI's
- * filter matches it in `locale` (the runtime's by default, as Base UI's), or
- * null when it doesn't or there is nothing typed.
+ * Where `query` first matches in `text`, as `[start, end)`, in `locale` (the
+ * runtime's by default), or null when it doesn't or there is nothing typed.
  */
 function matchRange(
   text: string,

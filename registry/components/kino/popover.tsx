@@ -5,7 +5,8 @@ import {
   panelBodyFrameClassName,
   panelFooterTint,
   panelSheetBackdropClassName,
-  panelSheetClassName,
+  popupSheetClassName,
+  popupSheetPanelClassName,
   useScrollRegion,
 } from '@/registry/lib/panel'
 import {
@@ -17,8 +18,8 @@ import {
   popupPlacedClassName,
   popupSurfaceClassName,
   useOwnPopupLayer,
+  usePopupPresentation,
 } from '@/registry/lib/popup'
-import { reducesMotion, watchReducedMotion } from '@/registry/lib/reduce-motion'
 import { mergeRefs } from '@/registry/lib/refs'
 import { edgeFadeClassName } from '@/registry/lib/scroll'
 import {
@@ -38,8 +39,6 @@ import {
   use,
   useMemo,
   useRef,
-  useState,
-  useSyncExternalStore,
 } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -57,22 +56,17 @@ const TriggerContext = createContext<((element: HTMLElement | null) => void) | n
  * `presentation='auto'`, a small touch screen opens it as a sheet from the
  * bottom edge, unless motion is reduced around its trigger: ui-sdk slides the
  * sheet in on a spring of its own, which reduced motion can't stop, so it
- * opens as a popover then. That spring doesn't follow the feel either, so it
- * is a popover unless you ask.
+ * opens as a popover then (`popupPresentation`).
  */
 function Popover({
   delay = HOVER_DELAY,
   presentation = 'popover',
   ...props
 }: ComponentProps<typeof PopoverPrimitive>) {
-  const [trigger, setTrigger] = useState<HTMLElement | null>(null)
+  const [shown, setTrigger] = usePopupPresentation(presentation)
   return (
     <TriggerContext value={setTrigger}>
-      <PopoverPrimitive
-        delay={delay}
-        presentation={usePopoverPresentation(presentation, trigger)}
-        {...props}
-      />
+      <PopoverPrimitive delay={delay} presentation={shown} {...props} />
     </TriggerContext>
   )
 }
@@ -100,9 +94,9 @@ const popoverFooterClassName = cn(
 const popoverContentClassName = cn(
   popupPlacedClassName,
   panelSheetBackdropClassName,
-  // The browser's own popover look, which ui-sdk resets for its Popover but not for every popup on this look, such as the Date picker's.
-  'overflow-visible border-0 bg-transparent p-0 text-inherit',
-  'flex max-h-(--available-height) max-w-(--available-width) flex-col text-sm data-[presentation=sheet]:max-h-[calc(100dvh-(--spacing(12)))] data-[presentation=sheet]:w-full data-[presentation=sheet]:max-w-160 data-[presentation=sheet]:self-center',
+  'border-0 p-0',
+  'flex max-h-(--available-height) max-w-(--available-width) flex-col text-sm',
+  popupSheetClassName,
   popoverFooterClassName,
 )
 
@@ -129,7 +123,7 @@ function PopoverBox({
       className={cn(
         'flex min-h-0 flex-1 flex-col',
         presentation === 'sheet'
-          ? cn(panelSheetClassName, 'pb-[env(safe-area-inset-bottom)]')
+          ? popupSheetPanelClassName
           : cn(
               'relative rounded-(--surface-radius)',
               popupSurfaceClassName,
@@ -335,31 +329,6 @@ function PopoverFooter({
   )
 }
 
-type PopoverPresentation = NonNullable<
-  ComponentProps<typeof PopoverPrimitive>['presentation']
->
-
-/** How it opens: `auto` stays a popover while motion is reduced, since the sheet would slide in. */
-function popoverPresentation(
-  presentation: PopoverPresentation,
-  reduced: boolean,
-): PopoverPresentation {
-  return presentation === 'auto' && reduced ? 'popover' : presentation
-}
-
-/** The presentation a popup on the Popover's look takes, with motion reduced or not around `element`, its trigger. */
-function usePopoverPresentation(
-  presentation: PopoverPresentation,
-  element: HTMLElement | null,
-): PopoverPresentation {
-  const reduced = useSyncExternalStore(
-    watchReducedMotion,
-    () => reducesMotion(element),
-    () => false,
-  )
-  return popoverPresentation(presentation, reduced)
-}
-
 /**
  * What a popup on the Popover's look puts on ui-sdk's content part: its ref,
  * which gives it a layer of its own for what opens inside it (`layer`), its
@@ -391,8 +360,6 @@ export {
   PopoverHeader,
   PopoverTitle,
   PopoverTrigger,
-  popoverPresentation,
   usePopoverContent,
-  usePopoverPresentation,
 }
 export type { PopoverOpenChangeDetails }

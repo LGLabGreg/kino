@@ -704,7 +704,7 @@ function MoneyInputCurrency({
 }: {
   /** ISO 4217 codes, in the order the list shows them. */
   currencies: readonly string[]
-  /** What is picked: the button reads "Currency: US Dollar (USD)". */
+  /** What is picked: the button reads "Currency: US Dollar, USD". */
   label?: string
   searchPlaceholder?: string
   className?: string

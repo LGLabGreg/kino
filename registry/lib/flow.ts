@@ -1,7 +1,7 @@
 /*
  * Items in a wrapping row, such as a field's chips, that glide to their new
  * places when the row changes, and leave as a copy that fades where they
- * were: Base UI unmounts a chip the moment it is removed, so the chip itself
+ * were: ui-sdk unmounts a chip the moment it is removed, so the chip itself
  * can't stay to leave. JavaScript only says where each item starts from;
  * the item's own `translate` transition, on `layout`, does the moving, and
  * its leaving styles, on `exit`, the fading. Kept outside components: the
@@ -287,7 +287,7 @@ interface Leaving {
 }
 
 /**
- * Leaves a copy of `item` in `parent`, before `next`: Base UI unmounts what
+ * Leaves a copy of `item` in `parent`, before `next`: ui-sdk unmounts what
  * goes the moment it goes, so the copy plays its leaving styles in its
  * place. The copy can't be reached or read, and takes `style` (where it
  * was seen). `from` puts on the copy, once it is in, the values it and

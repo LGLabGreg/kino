@@ -12,11 +12,7 @@ import {
   InputGroupButton,
   inputGroupPresence,
 } from '@/registry/components/kino/input-group'
-import {
-  PopoverBox,
-  usePopoverContent,
-  usePopoverPresentation,
-} from '@/registry/components/kino/popover'
+import { PopoverBox, usePopoverContent } from '@/registry/components/kino/popover'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
   CALENDAR_LABELS,
@@ -52,6 +48,7 @@ import {
   pillRowClassName,
   pillTrackClassName,
 } from '@/registry/lib/pill'
+import { usePopupPresentationAt } from '@/registry/lib/popup'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { useRoomy } from '@/registry/lib/roomy'
 import {
@@ -217,7 +214,7 @@ function DatePicker({
       max={bounds.max}
       today={today ?? undefined}
       timeZone={timeZone}
-      presentation={usePopoverPresentation(presentation, box)}
+      presentation={usePopupPresentationAt(presentation, box)}
       className={className}
     >
       {(state) => (

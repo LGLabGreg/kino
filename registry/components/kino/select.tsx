@@ -3,11 +3,10 @@
 import { InputInvalidIcon } from '@/registry/components/kino/input'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
-import { useField, useFieldProps } from '@/registry/lib/field-control'
 import { followRows } from '@/registry/lib/highlight'
 import {
+  listIndicatorClassName,
   MenuHighlight,
-  menuIndicatorClassName,
   menuIndicatorSlot,
   menuLabelClassName,
   menuRowVariants,
@@ -15,24 +14,43 @@ import {
   MenuTick,
 } from '@/registry/lib/menu'
 import {
-  popupGrowClassName,
+  PanelHandle,
+  panelSheetBackdropClassName,
+  popupSheetClassName,
+  popupSheetPanelClassName,
+} from '@/registry/lib/panel'
+import {
+  POPUP_COLLISION_PADDING,
+  popupGrowBoxClassName,
   popupGrowContentClassName,
-  basePositionerProps,
+  popupPlacedClassName,
   popupSurfaceClassName,
-  basePopupGrow,
-  usePopupLayer,
+  usePopupPresentation,
 } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { edgeFadeClassName, followEdges } from '@/registry/lib/scroll'
-import { useDirection } from '@base-ui/react/direction-provider'
-import { Select as SelectPrimitive } from '@base-ui/react/select'
+import {
+  Select as SelectPrimitive,
+  SelectContent as SelectContentPrimitive,
+  SelectGroup as SelectGroupPrimitive,
+  SelectGroupLabel as SelectGroupLabelPrimitive,
+  SelectItem as SelectItemPrimitive,
+  SelectItemIcon as SelectItemIconPrimitive,
+  SelectItemIndicator as SelectItemIndicatorPrimitive,
+  SelectList as SelectListPrimitive,
+  type SelectProps,
+  SelectSeparator as SelectSeparatorPrimitive,
+  SelectTrigger as SelectTriggerPrimitive,
+  SelectValue as SelectValuePrimitive,
+  SelectValueIcon as SelectValueIconPrimitive,
+} from '@ui-sdk/react/select'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
   type ComponentProps,
   createContext,
-  type RefObject,
+  type ReactNode,
+  type RefCallback,
   use,
-  useEffect,
   useMemo,
   useRef,
 } from 'react'
@@ -40,44 +58,54 @@ import {
 import { cn } from '@/lib/utils'
 
 /*
- * A select that opens over its trigger, with the picked row on the trigger's
- * value, and unfolds out of the trigger's own outline. Where there is no
- * room above and below, or on touch, it opens under the trigger and grows
- * as the Popover does.
+ * A select that opens over its trigger, with the picked row's text on the
+ * trigger's value, and unfolds out of the trigger's own outline. Where there
+ * is no room above and below, with nothing picked, or on touch, it opens
+ * under the trigger and grows as the Popover does.
  */
 
-const TriggerContext = createContext<RefObject<HTMLButtonElement | null> | null>(null)
+type TriggerContextValue = {
+  /** The trigger, read when the list opens. */
+  trigger: { current: HTMLButtonElement | null }
+  /** Tells the presentation where the trigger is, to read the motion preference there. */
+  setTrigger: (element: HTMLElement | null) => void
+}
 
-function Select<Value, Multiple extends boolean | undefined = false>({
-  name,
-  disabled,
-  ...props
-}: SelectPrimitive.Root.Props<Value, Multiple>) {
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  // In a Field, it sends its value under the Field's name and turns off with it.
-  const field = useField()
+const TriggerContext = createContext<TriggerContextValue | null>(null)
+
+/**
+ * In a Field, it takes the Field's label, name and state, as ui-sdk's
+ * controls do. With `presentation='auto'`, a small touch screen opens it
+ * as a sheet, unless motion is reduced around its trigger
+ * (`popupPresentation`).
+ */
+function Select<Value = string, Multiple extends boolean | undefined = false>(
+  props: SelectProps<Value, Multiple>,
+) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  const [shown, setTrigger] = usePopupPresentation(props.presentation ?? 'popover')
+  const context = useMemo(() => ({ trigger, setTrigger }), [setTrigger])
   return (
-    <TriggerContext value={triggerRef}>
-      <SelectPrimitive.Root
-        name={name ?? field?.name}
-        disabled={disabled || field?.disabled}
+    <TriggerContext value={context}>
+      <SelectPrimitive<Value, Multiple>
+        // Focus stays on the trigger, as on a native select and in the APG's
+        // select-only combobox; a sheet moves it into the rows, for touch screen readers.
+        virtualFocus={shown !== 'sheet'}
         {...props}
+        presentation={shown}
       />
     </TriggerContext>
   )
 }
 
-function SelectGroup(props: SelectPrimitive.Group.Props) {
-  return <SelectPrimitive.Group data-slot='select-group' {...props} />
-}
-
 function SelectValue({
   className,
   ...props
-}: Omit<SelectPrimitive.Value.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof SelectValuePrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <SelectPrimitive.Value
-      data-slot='select-value'
+    <SelectValuePrimitive
       data-cut
       className={cn(
         // A bare label truncates with an ellipsis; an icon and a label sit in a row.
@@ -89,8 +117,23 @@ function SelectValue({
   )
 }
 
+/** The picked row's `SelectItemIcon`, before the value in the trigger. */
+function SelectValueIcon({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof SelectValueIconPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <SelectValueIconPrimitive
+      className={cn('flex shrink-0 items-center', className)}
+      {...props}
+    />
+  )
+}
+
 const selectTriggerVariants = cva(
-  "flex w-fit min-w-0 items-center justify-between gap-2 rounded-(--control-radius) border border-input bg-transparent text-start text-sm whitespace-nowrap shadow-xs transition-[color,background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden data-disabled:pointer-events-none data-disabled:opacity-50 data-popup-open:bg-muted/50 aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-offset-1 forced-colors:aria-invalid:outline-dashed dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/70 dark:aria-invalid:focus-visible:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+  "flex w-fit min-w-0 items-center justify-between gap-2 rounded-(--control-radius) border border-input bg-transparent text-start text-sm whitespace-nowrap shadow-xs transition-[color,background-color,border-color,box-shadow] duration-(--motion-press-duration) ease-(--motion-press-fade-easing) select-none hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-hidden data-disabled:pointer-events-none data-disabled:opacity-50 data-open:bg-muted/50 aria-invalid:border-destructive aria-invalid:focus-visible:border-destructive aria-invalid:focus-visible:ring-destructive/20 forced-colors:aria-invalid:outline-2 forced-colors:aria-invalid:outline-offset-1 forced-colors:aria-invalid:outline-dashed dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/70 dark:aria-invalid:focus-visible:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
   {
     variants: {
       size: {
@@ -108,32 +151,29 @@ function SelectTrigger({
   children,
   ref,
   ...props
-}: Omit<
-  SelectPrimitive.Trigger.Props & VariantProps<typeof selectTriggerVariants>,
-  'className'
-> & { className?: string }) {
-  const triggerRef = use(TriggerContext)
-  // The trigger is what a Field's label names, its description describes and its check marks.
-  const field = useFieldProps(props)
-  const fieldRef = field.props.ref
+}: Omit<ComponentProps<typeof SelectTriggerPrimitive>, 'className' | 'children'> &
+  VariantProps<typeof selectTriggerVariants> & {
+    className?: string
+    children?: ReactNode
+  }) {
+  const context = use(TriggerContext)
   const refs = useMemo(
-    () => mergeRefs(triggerRef ?? undefined, ref, fieldRef),
-    [triggerRef, ref, fieldRef],
+    () => mergeRefs(context?.trigger, context?.setTrigger, ref),
+    [context, ref],
   )
   return (
     <CutTooltip
       render={
-        <SelectPrimitive.Trigger
-          data-slot='select-trigger'
+        <SelectTriggerPrimitive
+          ref={refs}
           data-size={size}
           className={cn(selectTriggerVariants({ size }), className)}
-          {...field.props}
-          ref={refs}
+          {...props}
         >
           {children}
           {/* As on every text control, an invalid value is marked by more than its colour. */}
           <InputInvalidIcon className='-me-1 pe-0' />
-          <SelectPrimitive.Icon className='flex shrink-0'>
+          <span aria-hidden className='flex shrink-0'>
             <IconPlaceholder
               lucide='ChevronDownIcon'
               tabler='IconChevronDown'
@@ -142,316 +182,343 @@ function SelectTrigger({
               remixicon='RiArrowDownSLine'
               aria-hidden
             />
-          </SelectPrimitive.Icon>
-        </SelectPrimitive.Trigger>
+          </span>
+        </SelectTriggerPrimitive>
       }
     />
   )
 }
 
-/*
- * Where the trigger is inside the popup, as the `inset()` the popup unfolds
- * from. Measured once Base UI has placed the popup over the trigger, and
- * again whenever the popup moves or grows. Kept outside the component: the
- * React Compiler can drop side effects written inside one.
- */
 type Edges = { top: number; right: number; bottom: number; left: number }
 
 /**
- * The `inset()` sides, in pixels, that show the trigger inside the popup:
- * inside the trigger's 1px border, so its outline still shows on the first
- * frame, and past the tick's tip, which sits 5px inside its start (the
+ * Whether the list sits over its trigger, as ui-sdk places it with
+ * `alignItemWithTrigger`, rather than above or below it.
+ */
+function overTrigger(list: Edges, trigger: Edges) {
+  return list.top < trigger.bottom && list.bottom > trigger.top
+}
+
+/**
+ * How far, in px along the x axis, to move a list placed over its trigger so
+ * its rows' content starts where the trigger's does: `textStart` and
+ * `valueStart` are where each starts on screen (its left edge, or its right
+ * in right to left), and `current` how far the list is moved now, which
+ * `textStart` and `list` include. It stays `padding` inside the screen's
+ * edges, `viewport` wide.
+ */
+function triggerShift({
+  textStart,
+  valueStart,
+  list,
+  current,
+  viewport,
+  padding = POPUP_COLLISION_PADDING,
+}: {
+  textStart: number
+  valueStart: number
+  list: Pick<Edges, 'left' | 'right'>
+  current: number
+  viewport: number
+  padding?: number
+}) {
+  const wanted = current + valueStart - textStart
+  const least = padding - (list.left - current)
+  const most = viewport - padding - (list.right - current)
+  return Math.round(Math.min(Math.max(wanted, least), most))
+}
+
+/** Where a row's or a trigger's content starts on screen: past its tick and gap, or past its border and padding. */
+function contentStart(row: HTMLElement, rtl: boolean) {
+  const style = getComputedStyle(row)
+  const box = row.getBoundingClientRect()
+  const tick = row.querySelector(':scope > [data-menu-indicator]')
+  if (tick) {
+    const at = tick.getBoundingClientRect()
+    const gap = parseFloat(style.columnGap) || 0
+    return rtl ? at.left - gap : at.right + gap
+  }
+  return rtl
+    ? box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight)
+    : box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft)
+}
+
+/**
+ * The `inset()` sides, in pixels, that show the trigger inside the list's
+ * box: inside the trigger's 1px border, so its outline still shows on the
+ * first frame, and past the tick's tip, which sits 5px inside its start (the
  * right in right to left).
  */
-function triggerInset(popup: Edges, trigger: Edges, rtl: boolean): Edges {
+function triggerInset(box: Edges, trigger: Edges, rtl: boolean): Edges {
   return {
-    top: trigger.top - popup.top + 1,
-    right: popup.right - trigger.right + (rtl ? 6 : 1),
-    bottom: popup.bottom - trigger.bottom + 1,
-    left: trigger.left - popup.left + (rtl ? 1 : 6),
+    top: trigger.top - box.top + 1,
+    right: box.right - trigger.right + (rtl ? 6 : 1),
+    bottom: box.bottom - trigger.bottom + 1,
+    left: trigger.left - box.left + (rtl ? 1 : 6),
   }
 }
 
-function trackTriggerBox(popup: HTMLElement, trigger: HTMLElement) {
+/*
+ * Over its trigger, the list is marked `data-over-trigger`, moved so the
+ * picked row's text lines up with the value (`--select-shift`) and widened
+ * by as much (`--select-reach`), and its box unfolds from the trigger's own
+ * outline (`--select-trigger-box`). Measured whenever ui-sdk places the list
+ * and whenever it grows. Kept outside the component: the React Compiler can
+ * drop side effects written inside one.
+ */
+function trackTrigger(content: HTMLElement, box: HTMLElement, trigger: HTMLElement) {
   const write = () => {
-    const box = popup.getBoundingClientRect()
-    if (!box.width) return
-    const { top, right, bottom, left } = triggerInset(
-      box,
-      trigger.getBoundingClientRect(),
-      getComputedStyle(popup).direction === 'rtl',
+    const placed = content.getBoundingClientRect()
+    if (!placed.width) return
+    const at = trigger.getBoundingClientRect()
+    const over = content.dataset.presentation !== 'sheet' && overTrigger(placed, at)
+    content.toggleAttribute('data-over-trigger', over)
+    if (!over) return
+    const rtl = getComputedStyle(content).direction === 'rtl'
+    const row = content.querySelector<HTMLElement>(
+      '[data-slot=select-item][data-selected]',
     )
-    popup.style.setProperty(
+    const current = parseFloat(content.style.getPropertyValue('--select-shift')) || 0
+    const shift = row
+      ? triggerShift({
+          textStart: contentStart(row, rtl),
+          valueStart: contentStart(trigger, rtl),
+          list: placed,
+          current,
+          viewport: document.documentElement.clientWidth,
+        })
+      : current
+    if (shift !== current) {
+      content.style.setProperty('--select-shift', `${shift}px`)
+      content.style.setProperty('--select-reach', `${Math.abs(shift)}px`)
+    }
+    // Read once the move and the reach are written, which the box takes at once.
+    const shown = box.getBoundingClientRect()
+    const { top, right, bottom, left } = triggerInset(shown, at, rtl)
+    box.style.setProperty(
       '--select-trigger-box',
       `inset(${top}px ${right}px ${bottom}px ${left}px round max(0px, calc(var(--control-radius-capped) - 1px)))`,
     )
   }
   // A close that interrupts the unfold fades where the box is, rather than
-  // letting it grow on while it fades.
+  // letting it grow on while it fades; once it has closed, the next open
+  // unfolds again.
   const hold = () => {
-    if (popup.hasAttribute('data-starting-style')) popup.style.clipPath = ''
-    else if (popup.hasAttribute('data-ending-style') && popup.dataset.side === 'none') {
-      popup.style.clipPath = getComputedStyle(popup).clipPath
-    }
+    box.style.clipPath =
+      content.hasAttribute('data-ending-style') &&
+      content.hasAttribute('data-over-trigger')
+        ? getComputedStyle(box).clipPath
+        : ''
   }
   write()
-  const observer = new MutationObserver((records) => {
+  const placing = new MutationObserver((records) => {
     write()
-    if (records.some((record) => record.target === popup)) hold()
+    if (records.some((record) => record.attributeName !== 'style')) hold()
   })
-  if (popup.parentElement) {
-    observer.observe(popup.parentElement, {
-      attributes: true,
-      attributeFilter: ['style'],
-    })
-  }
-  observer.observe(popup, {
+  placing.observe(content, {
     attributes: true,
-    attributeFilter: ['data-side', 'data-starting-style', 'data-ending-style'],
+    attributeFilter: ['style', 'data-side', 'data-starting-style', 'data-ending-style'],
   })
   const resize = new ResizeObserver(write)
-  resize.observe(popup)
+  resize.observe(content)
   return () => {
-    observer.disconnect()
+    placing.disconnect()
     resize.disconnect()
   }
 }
 
+/** A ref for the rows: the highlight that glides between them, the list's fading edges and its place over the trigger. */
+function followSelect(trigger: { current: HTMLElement | null } | undefined) {
+  return (rows: HTMLDivElement | null) => {
+    const list = rows?.parentElement
+    const content = rows?.closest<HTMLElement>('[data-slot=select-content]')
+    const layer = rows?.querySelector<HTMLElement>(':scope > [data-slot=menu-highlight]')
+    if (!rows || !list || !content || !layer) return
+    const stops = [
+      followRows(rows, layer, { popup: content, bounds: list }),
+      followEdges(list, '--scroll-fade'),
+    ]
+    const box = list.parentElement
+    if (box && trigger?.current) stops.push(trackTrigger(content, box, trigger.current))
+    return () => {
+      for (const stop of stops) stop()
+    }
+  }
+}
+
 /*
- * Over the trigger (`data-side='none'`), the box starts as the trigger's own
- * outline with its rows already showing, so the picked row sits on the value
- * from the first frame. It closes by fading where it is, quickly, so the
- * trigger and its new value show through at once and are never covered by a
- * box folding back over them. Under the trigger, the Popover's Grow.
+ * Over the trigger, the box starts as the trigger's own outline with its
+ * rows already showing, so the picked row sits on the value from the first
+ * frame. It closes by fading where it is, quickly, so the trigger and its
+ * new value show through at once and are never covered by a box folding
+ * back over them. Elsewhere, the Popover's Grow.
  */
 const selectUnfoldClassName =
-  'data-[side=none]:data-starting-style:[clip-path:var(--select-trigger-box)] data-[side=none]:data-ending-style:[clip-path:var(--popup-grow-to)] data-[side=none]:data-ending-style:opacity-0 data-[side=none]:data-ending-style:duration-[calc(var(--motion-exit-duration)*0.5)] motion-reduce:data-[side=none]:data-starting-style:[clip-path:var(--popup-grow-to)]'
+  'group-data-over-trigger/popup:group-data-starting-style/popup:[clip-path:var(--select-trigger-box)] group-data-over-trigger/popup:group-data-ending-style/popup:[clip-path:var(--popup-grow-to)] group-data-over-trigger/popup:group-data-ending-style/popup:opacity-0 group-data-over-trigger/popup:group-data-ending-style/popup:duration-[calc(var(--motion-exit-duration)*0.5)] motion-reduce:group-data-over-trigger/popup:group-data-starting-style/popup:[clip-path:var(--popup-grow-to)]'
 
-// Over the trigger the rows show at once and fade with the box; under it
-// they fade in and out as a Popover's content does. While it starts, the
-// rows take their starting opacity at once, so a popup Base UI moves from
-// over the trigger to under it still fades its rows in.
+// Over the trigger the rows show at once and fade with the box; elsewhere
+// they fade in and out as a Popover's content does.
 const selectRowsClassName =
-  'group-data-starting-style/popup:transition-none group-data-[side=none]/popup:transition-none group-data-[side=none]/popup:group-data-starting-style/popup:opacity-100 group-data-[side=none]/popup:group-data-ending-style/popup:opacity-100'
-
-/**
- * The popup's box, its rows and the highlight. Base UI keeps it mounted,
- * hidden, while the list is closed, so the highlight starts afresh on every
- * open.
- */
-function SelectPopup({
-  className,
-  children,
-  style,
-  ref,
-  ...props
-}: Omit<SelectPrimitive.Popup.Props, 'className'> & { className?: string }) {
-  const triggerRef = use(TriggerContext)
-  const { dir, style: growStyle, anchor } = basePopupGrow(useDirection())
-  const popupRef = useRef<HTMLDivElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
-  const rowsRef = useRef<HTMLDivElement>(null)
-  const layerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const popup = popupRef.current
-    if (!popup || !rowsRef.current || !layerRef.current || !listRef.current) return
-    const stopRows = followRows(rowsRef.current, layerRef.current, {
-      popup,
-      bounds: listRef.current,
-    })
-    const stopEdges = followEdges(listRef.current, '--scroll-fade')
-    return () => {
-      stopRows()
-      stopEdges()
-    }
-  }, [])
-  useEffect(() => {
-    if (!popupRef.current || !triggerRef?.current) return
-    return trackTriggerBox(popupRef.current, triggerRef.current)
-  }, [triggerRef])
-  return (
-    <SelectPrimitive.Popup
-      // A ref of the user's own still lets the popup measure itself.
-      ref={mergeRefs(popupRef, ref)}
-      data-slot='select-content'
-      // Portalled out of the page's tree, so it takes the reading direction with it.
-      dir={dir}
-      style={(state) => ({
-        ...growStyle({ side: state.side === 'none' ? 'bottom' : state.side }),
-        ...(typeof style === 'function' ? style(state) : style),
-      })}
-      className={cn(
-        // Over the trigger, Base UI sizes the box to the screen, and it starts
-        // a tick's width before the trigger so its text lines up with the value.
-        'group/popup relative flex max-h-[min(var(--available-height),24rem)] max-w-[min(20rem,var(--available-width))] min-w-(--anchor-width) flex-col overflow-hidden rounded-(--list-radius) text-sm data-[side=none]:max-h-none data-[side=none]:min-w-[calc(var(--anchor-width)+1.75rem)]',
-        popupSurfaceClassName,
-        popupGrowClassName,
-        selectUnfoldClassName,
-      )}
-      {...props}
-    >
-      <SelectScrollUpButton />
-      <SelectPrimitive.List
-        ref={listRef}
-        // Its scroll padding, the fade's width, is also the scroll buttons' height,
-        // so a row the keys move to is never under one.
-        className={cn(
-          'scrollbar-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain',
-          edgeFadeClassName,
-        )}
-      >
-        <div
-          ref={rowsRef}
-          className={cn(
-            // The 4px around the rows is the highlight's margin, not a
-            // surface's padding, so it stays the same at every density.
-            'group/menu relative flex flex-col p-1',
-            popupGrowContentClassName,
-            selectRowsClassName,
-            className,
-          )}
-        >
-          <MenuHighlight ref={layerRef} />
-          {children}
-        </div>
-      </SelectPrimitive.List>
-      <SelectScrollDownButton />
-      <SelectPrimitive.Arrow {...anchor} />
-    </SelectPrimitive.Popup>
-  )
-}
+  'group-data-over-trigger/popup:transition-none group-data-over-trigger/popup:group-data-starting-style/popup:opacity-100 group-data-over-trigger/popup:group-data-ending-style/popup:opacity-100'
 
 /**
  * The list. Over the trigger by default, with the picked row on the
  * trigger's value; `side`, `align` and the offsets apply when it opens under
- * the trigger instead. `className` goes to the rows inside the box; every
- * other prop goes to Base UI's Popup. A long list scrolls.
+ * the trigger instead, or with `alignItemWithTrigger={false}`. `className`
+ * goes to the rows inside the box; every other prop goes to ui-sdk's
+ * content. A long list scrolls.
  */
 function SelectContent({
+  className,
+  children,
   alignItemWithTrigger = true,
   side = 'bottom',
   align = 'start',
   sideOffset = 6,
-  alignOffset = 0,
   ...props
-}: ComponentProps<typeof SelectPopup> &
-  Pick<
-    SelectPrimitive.Positioner.Props,
-    'alignItemWithTrigger' | 'side' | 'align' | 'sideOffset' | 'alignOffset'
-  >) {
+}: Omit<ComponentProps<typeof SelectContentPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
+  const context = use(TriggerContext)
+  const rowsRef: RefCallback<HTMLDivElement> = useMemo(
+    () => followSelect(context?.trigger),
+    [context],
+  )
   return (
-    <SelectPrimitive.Portal container={usePopupLayer()}>
-      <SelectPrimitive.Positioner
-        {...basePositionerProps}
-        alignItemWithTrigger={alignItemWithTrigger}
-        side={side}
-        align={align}
-        sideOffset={sideOffset}
-        alignOffset={alignOffset}
-      >
-        <SelectPopup {...props} />
-      </SelectPrimitive.Positioner>
-    </SelectPrimitive.Portal>
+    <SelectContentPrimitive
+      alignItemWithTrigger={alignItemWithTrigger}
+      side={side}
+      align={align}
+      sideOffset={sideOffset}
+      collisionPadding={POPUP_COLLISION_PADDING}
+      arrowPadding={0}
+      className={cn(
+        popupPlacedClassName,
+        panelSheetBackdropClassName,
+        // Over the trigger, it starts a tick's width before the trigger, so
+        // its rows' text lines up with the value, and reaches as far past its end.
+        'flex max-h-[min(var(--available-height),24rem)] max-w-[min(20rem,var(--available-width))] min-w-(--anchor-width) flex-col text-sm data-over-trigger:min-w-[calc(var(--anchor-width)+var(--select-reach,0px))] data-over-trigger:[translate:var(--select-shift,0px)_0]',
+        popupSheetClassName,
+      )}
+      {...props}
+    >
+      {({ presentation }) => (
+        <div
+          className={cn(
+            'flex min-h-0 flex-1 flex-col',
+            presentation === 'sheet'
+              ? popupSheetPanelClassName
+              : cn(
+                  'relative overflow-hidden rounded-(--list-radius)',
+                  popupSurfaceClassName,
+                  popupGrowBoxClassName,
+                  selectUnfoldClassName,
+                ),
+          )}
+        >
+          {presentation === 'sheet' ? <PanelHandle /> : null}
+          <SelectListPrimitive
+            className={cn(
+              'scrollbar-thin relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-[inherit]',
+              edgeFadeClassName,
+            )}
+          >
+            <div
+              ref={rowsRef}
+              className={cn(
+                // The 4px around the rows is the highlight's margin, not a
+                // surface's padding, so it stays the same at every density.
+                'group/menu relative flex flex-col p-1',
+                presentation === 'sheet' ? null : popupGrowContentClassName,
+                selectRowsClassName,
+                className,
+              )}
+            >
+              <MenuHighlight />
+              {children}
+            </div>
+          </SelectListPrimitive>
+        </div>
+      )}
+    </SelectContentPrimitive>
   )
 }
 
-function SelectLabel({
+function SelectGroup(props: ComponentProps<typeof SelectGroupPrimitive>) {
+  return <SelectGroupPrimitive {...props} />
+}
+
+function SelectGroupLabel({
   className,
   ...props
-}: Omit<SelectPrimitive.GroupLabel.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof SelectGroupLabelPrimitive>, 'className'> & {
+  className?: string
+}) {
   return (
-    <SelectPrimitive.GroupLabel
-      data-slot='select-label'
-      className={cn(menuLabelClassName, className)}
-      {...props}
-    />
+    <SelectGroupLabelPrimitive className={cn(menuLabelClassName, className)} {...props} />
   )
 }
 
-/** A row: the menus' own, with the tick first, as on macOS, so the text lines up with the trigger's value. */
+/**
+ * A row: the menus' own, with the tick first, as on macOS, so the text lines
+ * up with the trigger's value. Its text is what the trigger shows, or
+ * `label` where it holds more than text. Put an icon in a `SelectItemIcon`
+ * before the text, and the trigger's `SelectValueIcon` shows it.
+ */
 function SelectItem({
   className,
   children,
   ...props
-}: Omit<SelectPrimitive.Item.Props, 'className'> & { className?: string }) {
+}: Omit<ComponentProps<typeof SelectItemPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
+}) {
   return (
-    <SelectPrimitive.Item
-      data-slot='select-item'
+    <SelectItemPrimitive
       data-menu-row=''
       className={cn(menuRowVariants(), 'group/menu-row', className)}
       {...props}
     >
       <span data-menu-indicator='' className={menuIndicatorSlot}>
-        <SelectPrimitive.ItemIndicator className={menuIndicatorClassName}>
+        <SelectItemIndicatorPrimitive keepMounted className={listIndicatorClassName}>
           <MenuTick />
-        </SelectPrimitive.ItemIndicator>
+        </SelectItemIndicatorPrimitive>
       </span>
-      <SelectPrimitive.ItemText className='flex min-w-0 flex-1 items-center gap-2'>
-        {children}
-      </SelectPrimitive.ItemText>
-    </SelectPrimitive.Item>
+      {children}
+    </SelectItemPrimitive>
+  )
+}
+
+/** A row's icon, before its text: the trigger shows the picked row's with `SelectValueIcon`. */
+function SelectItemIcon({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof SelectItemIconPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <SelectItemIconPrimitive
+      className={cn(
+        "flex shrink-0 items-center [&_svg:not([class*='text-'])]:text-muted-foreground",
+        className,
+      )}
+      {...props}
+    />
   )
 }
 
 function SelectSeparator({
   className,
   ...props
-}: Omit<SelectPrimitive.Separator.Props, 'className'> & {
+}: Omit<ComponentProps<typeof SelectSeparatorPrimitive>, 'className'> & {
   className?: string
 }) {
   return (
-    <SelectPrimitive.Separator
-      data-slot='select-separator'
+    <SelectSeparatorPrimitive
       className={cn(menuSeparatorClassName, className)}
       {...props}
     />
-  )
-}
-
-const scrollButtonClassName =
-  'from-popover text-muted-foreground absolute inset-x-0 z-10 flex h-6 cursor-default items-center justify-center to-transparent transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing)'
-
-function SelectScrollUpButton({
-  className,
-  ...props
-}: Omit<SelectPrimitive.ScrollUpArrow.Props, 'className'> & { className?: string }) {
-  return (
-    <SelectPrimitive.ScrollUpArrow
-      data-slot='select-scroll-up-button'
-      className={cn(scrollButtonClassName, 'top-0 bg-linear-to-b', className)}
-      {...props}
-    >
-      <IconPlaceholder
-        lucide='ChevronUpIcon'
-        tabler='IconChevronUp'
-        hugeicons='ArrowUp01Icon'
-        phosphor='CaretUpIcon'
-        remixicon='RiArrowUpSLine'
-        aria-hidden
-      />
-    </SelectPrimitive.ScrollUpArrow>
-  )
-}
-
-function SelectScrollDownButton({
-  className,
-  ...props
-}: Omit<SelectPrimitive.ScrollDownArrow.Props, 'className'> & { className?: string }) {
-  return (
-    <SelectPrimitive.ScrollDownArrow
-      data-slot='select-scroll-down-button'
-      className={cn(scrollButtonClassName, 'bottom-0 bg-linear-to-t', className)}
-      {...props}
-    >
-      <IconPlaceholder
-        lucide='ChevronDownIcon'
-        tabler='IconChevronDown'
-        hugeicons='ArrowDown01Icon'
-        phosphor='CaretDownIcon'
-        remixicon='RiArrowDownSLine'
-        aria-hidden
-      />
-    </SelectPrimitive.ScrollDownArrow>
   )
 }
 
@@ -459,13 +526,15 @@ export {
   Select,
   SelectContent,
   SelectGroup,
+  SelectGroupLabel,
   SelectItem,
-  SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
+  SelectItemIcon,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
+  SelectValueIcon,
   selectTriggerVariants,
+  overTrigger,
   triggerInset,
+  triggerShift,
 }

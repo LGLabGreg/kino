@@ -688,26 +688,26 @@ export function createHighlight(layer: HTMLElement): Highlight {
 }
 
 /**
- * Follows the row Base UI marks `data-highlighted` in a menu or a list box,
- * or the row whose submenu is open. While the pointer is over `bounds` (the
+ * Follows the row marked `data-highlighted` in a menu (by Base UI) or a list
+ * (by ui-sdk), or the row whose submenu is open. While the pointer is over `bounds` (the
  * popup, by default) the highlight stays where it is when no row is
  * highlighted, as when it crosses a separator or a label, or in the moment
  * between one submenu closing and the next opening, so it always slides on.
  * It fades once the pointer has left. A submenu's first highlight starts on
- * the row of the item that opened it. Over a popup Base UI keeps mounted
- * while closed (the Select's), it starts afresh on every open.
+ * the row of the item that opened it. Over a popup kept mounted while
+ * closed, it starts afresh on every open.
  */
 /**
  * A popup's life as its rows' highlight sees it: `closing` once `data-open`
- * goes, `ending` while Base UI runs its exit, `closed` once that has ended.
+ * goes, `ending` while its exit runs, `closed` once that has ended.
  */
 export type PopupPhase = 'closed' | 'open' | 'closing' | 'ending'
 
 /**
  * The popup's next phase from its attributes now, and how its highlight
  * starts when it opens: `appear` after the popup had gone, `turn` (from where
- * it is) when it opens again before its close has ended. `endingChanged`: Base
- * UI's exit attribute came or went since the last look, which tells an exit
+ * it is) when it opens again before its close has ended. `endingChanged`: the
+ * exit attribute came or went since the last look, which tells an exit
  * that ran between two looks (one with no transition) from one not yet begun.
  */
 export function popupNext(

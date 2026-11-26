@@ -72,7 +72,7 @@ interface PhoneInputProps extends Omit<
   countries?: readonly CountryCode[]
   /** The language of the countries' names; the browser's by default. */
   locale?: string
-  /** What the button picks: it reads "Country: United Kingdom (+44)". */
+  /** What the button picks: it reads "Country: United Kingdom, +44". */
   label?: string
   searchPlaceholder?: string
   className?: string

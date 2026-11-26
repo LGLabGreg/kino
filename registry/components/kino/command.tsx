@@ -10,29 +10,45 @@ import {
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CutTooltip } from '@/registry/lib/cut'
 import {
-  FilterListEmpty,
-  FilterListGroupLabel,
-  FilterListItem,
-  FilterListList,
-  FilterListSeparator,
+  FilterListRows,
+  filterListGroupLabelClassName,
+  filterListItemClassName,
+  filterListMatchClassName,
+  filterListNoticeClassName,
   filterListScrollerClassName,
-  FilterListStatus,
+  filterListSeparatorClassName,
 } from '@/registry/lib/filter-list'
 import { leaveAsCopy } from '@/registry/lib/flow'
 import { MenuShortcut } from '@/registry/lib/menu'
 import { panelFooterTint } from '@/registry/lib/panel'
+import { mergeRefs } from '@/registry/lib/refs'
 import { followHeight, withoutTransition } from '@/registry/lib/resize'
 import { useEdgeFades } from '@/registry/lib/scroll'
 import { Swap } from '@/registry/lib/swap'
-import { Autocomplete as CommandPrimitive } from '@base-ui/react/autocomplete'
+import {
+  Command as CommandPrimitive,
+  CommandEmpty as CommandEmptyPrimitive,
+  CommandGroup as CommandGroupPrimitive,
+  CommandGroupLabel as CommandGroupLabelPrimitive,
+  CommandInput as CommandInputPrimitive,
+  CommandItem as CommandItemPrimitive,
+  CommandItemIcon as CommandItemIconPrimitive,
+  CommandItemText as CommandItemTextPrimitive,
+  CommandList as CommandListPrimitive,
+  CommandPage as CommandPagePrimitive,
+  type CommandProps as CommandPrimitiveProps,
+  CommandSeparator as CommandSeparatorPrimitive,
+  CommandShortcut as CommandShortcutPrimitive,
+  CommandStatus as CommandStatusPrimitive,
+  createCommandController,
+} from '@ui-sdk/react/command'
 import {
   type ComponentProps,
   createContext,
-  type ReactElement,
   type ReactNode,
   useContext,
   useEffect,
-  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -40,21 +56,20 @@ import {
 import { cn } from '@/lib/utils'
 
 /*
- * A command menu: Base UI's Autocomplete, always open, with its list in line
- * under the search, on its own or in a dialog. The rows, groups and the one
- * highlight that glides between them are the filter-list lib's, as on the
- * Combobox and the Autocomplete. A command that needs a choice opens a page:
- * its name sits at the start of the search, and Escape or Backspace on an
- * empty search goes back. Pages are a stack: a new page pushes the one before
- * it out across the start edge, and going back pulls it in again. The box
- * moves to the height of what matches.
+ * A command menu: ui-sdk's Command, its list in line under the search, on
+ * its own or in a dialog. The rows, groups and the one highlight that glides
+ * between them are the filter-list lib's, as on the Combobox and the
+ * Autocomplete. A command that needs a choice opens a page (its `page`, a
+ * `CommandPage`'s `value`, which is the page's name): the name sits at the
+ * start of the search, and Escape or Backspace on an empty search goes back.
+ * Pages are a stack: a new page pushes the one before it out across the
+ * start edge, and going back pulls it in again. The box moves to the height
+ * of what matches.
  */
 
 interface CommandContextValue {
   pages: readonly string[]
-  back: (() => void) | undefined
-  query: string
-  setQuery: (query: string) => void
+  back: () => void
   /** The pages have changed since the menu opened: a page that mounts now arrives. */
   moved: boolean
 }
@@ -67,126 +82,80 @@ function useCommand() {
   return context
 }
 
-type CommandProps<Item> = Omit<
-  CommandPrimitive.Root.Props<Item>,
-  'inline' | 'open' | 'value' | 'defaultValue' | 'onValueChange'
-> & {
+type CommandProps = Omit<CommandPrimitiveProps, 'className' | 'children'> & {
   className?: string
-  /**
-   * The pages opened from the first one, as their names: `['Assign to']`.
-   * Each new page starts with an empty search and its first row highlighted.
-   */
-  pages?: readonly string[]
+  children?: ReactNode
   /** The first page's name, announced when the person goes back to it. */
   label?: string
-  /** Called when the person goes back a page: Escape or Backspace on an empty search, or the page's name. */
-  onBack?: () => void
-  /** The search, when you hold it: empty it when you change `pages`. */
-  value?: string
-  /** The search to begin with. */
-  defaultValue?: string
-  /** Called when the search changes. */
-  onValueChange?: (value: string) => void
-  children?: ReactNode
 }
 
 /**
- * The menu. Give it the current page's `items`, as Base UI's Autocomplete
- * takes them. Picking a row runs its `onClick`, from a click or Enter.
+ * The menu. It keeps the commands whose name or keywords hold what was
+ * typed, as the Combobox does (`filter`), and the best match is highlighted,
+ * so Enter runs it.
+ * A command runs its `onSelect`, then the menu's `onAction`, from a click,
+ * Enter or its shortcut.
  */
-function Command<Item>({
+function Command({
   className,
-  items,
-  pages = [],
   label = 'Commands',
-  onBack,
-  value,
-  defaultValue = '',
-  onValueChange,
+  autoHighlight = true,
+  filter = 'contains',
+  pages,
+  defaultPages = [],
+  onPagesChange,
+  controller,
   children,
   ...props
-}: CommandProps<Item>) {
-  const [ownQuery, setOwnQuery] = useState(defaultValue)
-  const query = value ?? ownQuery
-  function setQuery(next: string) {
-    if (next === query) return
-    setOwnQuery(next)
-    onValueChange?.(next)
-  }
-  const page = pages.join('\u0000')
+}: CommandProps) {
+  const [ownPages, setOwnPages] = useState<string[]>(defaultPages)
+  const shown = pages ?? ownPages
+  const [ownController] = useState(createCommandController)
+  const control = controller ?? ownController
+  const page = shown.join('\u0000')
   // The page last seen, and whether it has changed since the menu opened:
   // a menu that opens on a page doesn't play a move.
   const [seen, setSeen] = useState({ page, moved: false })
-  // Base UI keeps the highlighted row's index when the items change, so a
-  // new page would open on the row the last one had: for one render it gets
-  // no items, which lets the highlight go, and then the page's own, whose
-  // first row it highlights. Both land before the page is painted.
-  const [emptied, setEmptied] = useState<{ cleared: boolean } | null>(null)
-  if (page !== seen.page) {
-    setSeen({ page, moved: true })
-    setOwnQuery('')
-    setEmptied({ cleared: query !== '' && value === undefined })
-  }
-  useLayoutEffect(() => {
-    if (!emptied) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the second of two renders Base UI needs, before the page is painted
-    setEmptied(null)
-    if (emptied.cleared) onValueChange?.('')
-  }, [emptied, onValueChange])
+  if (page !== seen.page) setSeen({ page, moved: true })
+  const context = useMemo(
+    () => ({ pages: shown, back: () => void control.pop(), moved: seen.moved }),
+    [shown, control, seen.moved],
+  )
   return (
-    <CommandRoot
-      inline
-      open
-      autoHighlight='always'
-      keepHighlight
-      value={query}
-      onValueChange={setQuery}
-      items={emptied ? [] : items}
+    <CommandPrimitive
+      controller={control}
+      autoHighlight={autoHighlight}
+      filter={filter}
+      pages={shown}
+      onPagesChange={(next, details) => {
+        setOwnPages(next)
+        onPagesChange?.(next, details)
+      }}
+      // The filter-list lib’s rows look for the box they sit in, and their
+      // highlight follows it while it is open, which a menu always is.
+      data-filter-list-content=''
+      data-open=''
+      // In a dialog, its footer stays on the dialog's bottom edge as the height changes.
+      data-panel='parts'
+      className={cn(
+        'group/command bg-popover text-popover-foreground relative flex min-w-0 flex-col overflow-clip rounded-(--surface-radius) text-sm ring-1 ring-foreground/10 forced-colors:outline',
+        panelFooterTint,
+        // In a dialog, the dialog is the box.
+        'in-data-[slot=dialog-content]:rounded-none in-data-[slot=dialog-content]:bg-transparent in-data-[slot=dialog-content]:ring-0 in-data-[slot=dialog-content]:forced-colors:outline-0',
+        className,
+      )}
       {...props}
     >
-      <CommandContext.Provider
-        value={{
-          pages,
-          back: onBack,
-          query,
-          setQuery,
-          moved: seen.moved,
-        }}
-      >
-        <div
-          data-slot='command'
-          // The filter-list lib’s rows look for the box they sit in, and their
-          // highlight follows it while it is open, which a menu always is.
-          data-filter-list-content=''
-          data-open=''
-          // In a dialog, its footer stays on the dialog's bottom edge as the height changes.
-          data-panel='parts'
-          className={cn(
-            'group/command bg-popover text-popover-foreground relative flex min-w-0 flex-col overflow-clip rounded-(--surface-radius) text-sm ring-1 ring-foreground/10 forced-colors:outline',
-            panelFooterTint,
-            // In a dialog, the dialog is the box.
-            'in-data-[slot=dialog-content]:rounded-none in-data-[slot=dialog-content]:bg-transparent in-data-[slot=dialog-content]:ring-0 in-data-[slot=dialog-content]:forced-colors:outline-0',
-            className,
-          )}
-        >
-          {children}
-          {/* Says which page opened, since a name change on the search isn't read out. */}
-          <div role='status' className='sr-only'>
-            {seen.moved ? (pages.at(-1) ?? label) : null}
-          </div>
+      <CommandContext value={context}>
+        {children}
+        {/* Says which page opened, since a name change on the search isn't read out. */}
+        <div role='status' className='sr-only'>
+          {seen.moved ? (shown.at(-1) ?? label) : null}
         </div>
-      </CommandContext.Provider>
-    </CommandRoot>
+      </CommandContext>
+    </CommandPrimitive>
   )
 }
-
-/*
- * Base UI types its Root as two overloads, one for groups and one for a flat
- * list, so props that may hold either fit neither: this is its own Props type.
- */
-const CommandRoot = CommandPrimitive.Root as <Item>(
-  props: CommandPrimitive.Root.Props<Item>,
-) => ReactElement
 
 /** The current page's name: a press on it goes back. */
 function CommandPageName({ page }: { page: string }) {
@@ -197,7 +166,7 @@ function CommandPageName({ page }: { page: string }) {
       .closest('[data-slot=command]')
       ?.querySelector<HTMLElement>('[data-slot=command-input]')
       ?.focus()
-    back?.()
+    back()
   }
   return (
     <CutTooltip
@@ -207,13 +176,6 @@ function CommandPageName({ page }: { page: string }) {
           size='xs'
           data-command-back=''
           onClick={goBack}
-          onKeyDown={(event) => {
-            // As from the search: Escape goes back a page, not out of the dialog.
-            if (event.key !== 'Escape' && event.key !== 'Backspace') return
-            event.preventDefault()
-            event.stopPropagation()
-            goBack(event)
-          }}
           className='min-w-0'
         >
           <IconPlaceholder
@@ -237,54 +199,25 @@ function CommandPageName({ page }: { page: string }) {
 }
 
 /**
- * What a key does in the search before Base UI sees it, or nothing. Escape
- * empties a search first, then goes back a page, and only then is left to
- * close the dialog; Backspace on an empty search goes back.
- */
-function searchKey(
-  key: string,
-  { query, depth }: { query: string; depth: number },
-): 'clear' | 'back' | null {
-  if (key === 'Escape') {
-    if (query) return 'clear'
-    return depth > 0 ? 'back' : null
-  }
-  if (key === 'Backspace' && !query && depth > 0) return 'back'
-  return null
-}
-
-/**
  * The search, as the menu's first line. On a page it starts with the page's
- * name, which goes back when pressed.
+ * name, which goes back when pressed. Escape empties a search first, then
+ * goes back a page, and only then closes a dialog around it.
  */
 function CommandInput({
   className,
-  onKeyDown,
   ...props
-}: Omit<CommandPrimitive.Input.Props, 'className'> & { className?: string }) {
-  const { pages, back, query, setQuery } = useCommand()
+}: Omit<ComponentProps<typeof CommandInputPrimitive>, 'className'> & {
+  className?: string
+}) {
+  const { pages } = useCommand()
   const page = pages.at(-1)
-  function keyDown(event: Parameters<NonNullable<typeof onKeyDown>>[0]) {
-    onKeyDown?.(event)
-    if (event.defaultPrevented || event.baseUIHandlerPrevented) return
-    const action = searchKey(event.key, { query, depth: pages.length })
-    if (!action) return
-    // Base UI's Escape, and the dialog's, which closes where the document hears it.
-    event.preventBaseUIHandler()
-    event.preventDefault()
-    event.stopPropagation()
-    if (action === 'clear') setQuery('')
-    else back?.()
-  }
   return (
-    <div data-slot='command-input-group' className={searchLineClassName}>
+    <div data-command-input-group='' className={searchLineClassName}>
       {/* The search's icon gives way to the page's name, and back. */}
       <Swap align='start' className='-ms-1 max-w-[50%] shrink-0 ps-1'>
         {page ? <CommandPageName page={page} /> : searchLineIcon}
       </Swap>
-      <CommandPrimitive.Input
-        data-slot='command-input'
-        onKeyDown={keyDown}
+      <CommandInputPrimitive
         className={cn(
           searchLineInputClassName,
           // Its forced-colours outline drawn inside, where the dialog's edge can't clip it.
@@ -298,12 +231,11 @@ function CommandInput({
 }
 
 /**
- * The rows, with the highlight that glides between them. Give it a function
- * child, called for each group or item that matches the search. It scrolls
- * past 24rem. Inside a dialog the dialog follows the height; on a page the
- * list does. A page that shows something above its rows, such as an answer
- * or a preview, gives it as `lead`: the lead scrolls with its rows held
- * under it, and the page moves as one.
+ * The rows, with the highlight that glides between them: `CommandPage`s,
+ * groups and commands. It scrolls past 24rem. Inside a dialog the dialog
+ * follows the height; on a page the list does. A page that shows something
+ * above its rows, such as an answer or a preview, gives it as `lead`: the
+ * lead scrolls with its rows held under it, and the page moves as one.
  */
 function CommandList({
   className,
@@ -311,7 +243,9 @@ function CommandList({
   children,
   ref,
   ...props
-}: ComponentProps<typeof FilterListList> & {
+}: Omit<ComponentProps<typeof CommandListPrimitive>, 'className' | 'children'> & {
+  className?: string
+  children?: ReactNode
   /** What the page shows above its rows. */
   lead?: ReactNode
 }) {
@@ -324,6 +258,8 @@ function CommandList({
   const frameRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
+  const fades = useEdgeFades<HTMLDivElement>()
+  const listRef = useMemo(() => mergeRefs(ref, fades), [ref, fades])
   useEffect(() => {
     const frame = frameRef.current
     if (!frame || !innerRef.current) return
@@ -331,21 +267,23 @@ function CommandList({
     return followHeight(frame, innerRef.current)
   }, [])
   const list = (
-    <FilterListList
-      ref={ref}
+    <CommandListPrimitive
+      ref={listRef}
       className={cn(
-        'group-has-[[data-slot=command-empty]:not(:empty)]/command:hidden',
-        className,
+        filterListScrollerClassName,
+        // Collapsed rather than hidden while nothing matches, so the input's
+        // aria-controls still names a listbox, as an expanded combobox must.
+        'group-has-[[data-slot=command-empty][data-empty]]/command:max-h-0 group-has-[[data-slot=command-empty][data-empty]]/command:overflow-hidden',
       )}
       {...props}
     >
-      {children}
-    </FilterListList>
+      <FilterListRows className={className}>{children}</FilterListRows>
+    </CommandListPrimitive>
   )
   return (
     <div
       ref={frameRef}
-      data-slot='command-list-frame'
+      data-command-list-frame=''
       data-page-direction={went.back ? 'back' : 'forward'}
       // Clipped at its bottom only on a page, where it follows the height: in
       // a dialog the dialog's own edge clips what leaves.
@@ -367,8 +305,7 @@ function CommandList({
         <div
           key={page}
           ref={pageMotion(layerRef, page)}
-          data-slot='command-page'
-          data-page={page}
+          data-command-page={page}
           data-fresh={moved ? '' : undefined}
           className={pageClassName}
         >
@@ -389,16 +326,16 @@ function CommandLead({ lead, children }: { lead: ReactNode; children: ReactNode 
   const fades = useEdgeFades<HTMLDivElement>()
   return (
     <div
-      data-slot='command-lead-page'
+      data-command-lead-page=''
       className='flex min-h-0 flex-1 flex-col *:[[role=listbox]]:flex-none *:[[role=listbox]]:not-has-[[role=option]]:hidden'
     >
       {/* A highlight that lands on a row never scrolls what the lead shows. */}
       <div
         ref={fades}
-        data-slot='command-lead-scroller'
+        data-command-lead-scroller=''
         className={cn(filterListScrollerClassName, 'relative')}
       >
-        <div data-slot='command-lead'>{lead}</div>
+        <div data-command-lead=''>{lead}</div>
       </div>
       {children}
     </div>
@@ -406,18 +343,8 @@ function CommandLead({ lead, children }: { lead: ReactNode; children: ReactNode 
 }
 
 /*
- * Both pages move together on `layout`, the new one from the end edge going
- * on and from the start edge going back, and each fades as it travels, so a
- * shorter `--command-slide` (on the menu or anything above it) still reads as
- * one page giving way to the next. With less motion nothing travels: the new
- * page fades in and the old one goes at once.
- */
-const pageClassName =
-  'min-h-0 [--page-from:1] [--page-to:-1] rtl:[--page-sign:-1] group-data-[page-direction=back]/pages:[--page-from:-1] group-data-[page-direction=back]/pages:[--page-to:1] flex flex-col transition-[translate,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-fresh:starting:translate-x-[calc(var(--command-slide,100%)*var(--page-from)*var(--page-sign,1))] data-fresh:starting:opacity-0 data-leaving:translate-x-[calc(var(--command-slide,100%)*var(--page-to)*var(--page-sign,1))] data-leaving:opacity-0 motion-reduce:transition-opacity motion-reduce:data-fresh:starting:translate-x-0 motion-reduce:data-leaving:translate-x-0 motion-reduce:data-leaving:transition-none'
-
-/*
- * How a page of commands gives way to the next. Base UI unmounts a page's rows the moment its
- * items change, so the old page leaves as a copy, through the flow lib's
+ * How a page of commands gives way to the next. A page's rows go the moment
+ * it changes, so the old page leaves as a copy, through the flow lib's
  * `leaveAsCopy`, in a layer outside the list that scrolls. Kept outside
  * components: the React Compiler drops a forced reflow written inside one.
  */
@@ -447,7 +374,7 @@ function pageMotion(layer: { current: HTMLElement | null }, key: string) {
   return (page: HTMLElement | null) => {
     if (!page) return
     const returning = layer.current?.querySelector<HTMLElement>(
-      `:scope > [data-page="${CSS.escape(key)}"]`,
+      `:scope > [data-command-page="${CSS.escape(key)}"]`,
     )
     if (returning && page.hasAttribute('data-fresh')) {
       const drawn = drawnNow(returning)
@@ -467,7 +394,7 @@ function pageMotion(layer: { current: HTMLElement | null }, key: string) {
 }
 
 /** What scrolls in a page: its rows, and its lead. */
-const SCROLLERS = '[role=listbox], [data-slot=command-lead-scroller]'
+const SCROLLERS = '[role=listbox], [data-command-lead-scroller]'
 
 function leavePage(page: HTMLElement, layer: HTMLElement) {
   // Read now, while the page is still laid out: once removed it has no box.
@@ -500,46 +427,146 @@ function leavePage(page: HTMLElement, layer: HTMLElement) {
   })
 }
 
-/** A group of rows, with its `items`, as Base UI's Autocomplete takes them. */
-function CommandGroup(props: CommandPrimitive.Group.Props) {
-  return <CommandPrimitive.Group data-slot='command-group' {...props} />
+/*
+ * Both pages move together on `layout`, the new one from the end edge going
+ * on and from the start edge going back, and each fades as it travels, so a
+ * shorter `--command-slide` (on the menu or anything above it) still reads as
+ * one page giving way to the next. With less motion nothing travels: the new
+ * page fades in and the old one goes at once.
+ */
+const pageClassName =
+  'min-h-0 [--page-from:1] [--page-to:-1] rtl:[--page-sign:-1] group-data-[page-direction=back]/pages:[--page-from:-1] group-data-[page-direction=back]/pages:[--page-to:1] flex flex-col transition-[translate,opacity] duration-(--motion-layout-duration) ease-(--motion-layout-easing) data-fresh:starting:translate-x-[calc(var(--command-slide,100%)*var(--page-from)*var(--page-sign,1))] data-fresh:starting:opacity-0 data-leaving:translate-x-[calc(var(--command-slide,100%)*var(--page-to)*var(--page-sign,1))] data-leaving:opacity-0 motion-reduce:transition-opacity motion-reduce:data-fresh:starting:translate-x-0 motion-reduce:data-leaving:translate-x-0 motion-reduce:data-leaving:transition-none'
+
+/** The commands one page holds; `value` is the page's name. The first page has none. */
+function CommandPage(props: ComponentProps<typeof CommandPagePrimitive>) {
+  return <CommandPagePrimitive {...props} />
 }
 
-function CommandGroupLabel(props: ComponentProps<typeof FilterListGroupLabel>) {
-  return <FilterListGroupLabel data-slot='command-group-label' {...props} />
+function CommandGroup(props: ComponentProps<typeof CommandGroupPrimitive>) {
+  return <CommandGroupPrimitive {...props} />
 }
 
-const CommandCollection = CommandPrimitive.Collection
-
-/** A command: the menus' row. Its `onClick` runs on a click or on Enter. */
-function CommandItem(props: Omit<ComponentProps<typeof FilterListItem>, 'indicator'>) {
-  return <FilterListItem data-slot='command-item' {...props} />
+function CommandGroupLabel({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandGroupLabelPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandGroupLabelPrimitive
+      className={cn(filterListGroupLabelClassName, className)}
+      {...props}
+    />
+  )
 }
 
-/** A command's shortcut, at the row's end: `Kbd` keys, as in the menus. */
-function CommandShortcut(props: ComponentProps<typeof MenuShortcut>) {
-  return <MenuShortcut data-slot='command-shortcut' {...props} />
+/** A command: the menus' row. It runs on a click, on Enter or on its `shortcut`. */
+function CommandItem({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandItemPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandItemPrimitive
+      data-menu-row=''
+      className={cn(
+        filterListItemClassName,
+        'data-pending:text-muted-foreground',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
 
-function CommandSeparator(props: ComponentProps<typeof FilterListSeparator>) {
-  return <FilterListSeparator data-slot='command-separator' {...props} />
+/** A command's text, with the part that matched the search in bold. */
+function CommandItemText({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandItemTextPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandItemTextPrimitive
+      className={cn(filterListMatchClassName, className)}
+      {...props}
+    />
+  )
 }
 
-/** What shows when nothing matches: say what was looked for. */
-function CommandEmpty(props: ComponentProps<typeof FilterListEmpty>) {
-  return <FilterListEmpty data-slot='command-empty' {...props} />
+/** A command's icon, before its text. */
+function CommandItemIcon({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandItemIconPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandItemIconPrimitive
+      className={cn(
+        "flex shrink-0 items-center [&_svg:not([class*='text-'])]:text-muted-foreground",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A command's shortcut, at the row's end: its `shortcut`, or `Kbd` keys, as in the menus. */
+function CommandShortcut(props: ComponentProps<typeof CommandShortcutPrimitive>) {
+  return <CommandShortcutPrimitive render={<MenuShortcut />} {...props} />
+}
+
+function CommandSeparator({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandSeparatorPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandSeparatorPrimitive
+      className={cn(filterListSeparatorClassName, className)}
+      {...props}
+    />
+  )
+}
+
+/** What shows when nothing matches, announced as it appears: say what was looked for. */
+function CommandEmpty({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandEmptyPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandEmptyPrimitive
+      className={cn(filterListNoticeClassName, className)}
+      {...props}
+    />
+  )
 }
 
 /** Announces a search that is running, or how many commands it found. */
-function CommandStatus(props: ComponentProps<typeof FilterListStatus>) {
-  return <FilterListStatus data-slot='command-status' {...props} />
+function CommandStatus({
+  className,
+  ...props
+}: Omit<ComponentProps<typeof CommandStatusPrimitive>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <CommandStatusPrimitive
+      className={cn(filterListNoticeClassName, className)}
+      {...props}
+    />
+  )
 }
 
 /** The line under the rows, for the keys that work here. */
 function CommandFooter({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
-      data-slot='command-footer'
+      data-command-footer=''
       data-panel='footer'
       className={cn(
         // Its own tint, over a page that leaves, so the rows pass under it as the box resizes; it rides
@@ -562,7 +589,7 @@ function CommandHint({
 }: ComponentProps<'span'> & { keys: ReactNode }) {
   return (
     <span
-      data-slot='command-hint'
+      data-command-hint=''
       className={cn('inline-flex items-center gap-1.5', className)}
       {...props}
     >
@@ -608,7 +635,6 @@ function CommandDialog({
 
 export {
   Command,
-  CommandCollection,
   CommandDialog,
   CommandEmpty,
   CommandFooter,
@@ -617,10 +643,12 @@ export {
   CommandHint,
   CommandInput,
   CommandItem,
+  CommandItemIcon,
+  CommandItemText,
   CommandList,
+  CommandPage,
   CommandSeparator,
   CommandShortcut,
   CommandStatus,
-  searchKey,
 }
 export type { CommandProps }

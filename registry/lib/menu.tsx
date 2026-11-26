@@ -1,12 +1,5 @@
 'use client'
 
-import { Button } from '@/registry/components/kino/button'
-import {
-  fieldClearClassName,
-  searchLineClassName,
-  searchLineIcon,
-  searchLineInputClassName,
-} from '@/registry/components/kino/input'
 import { separatorVariants } from '@/registry/components/kino/separator'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import {
@@ -26,7 +19,7 @@ import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import { cva, type VariantProps } from 'class-variance-authority'
-import { type ComponentProps, type ReactNode, useEffect, useRef } from 'react'
+import { type ComponentProps, useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -59,41 +52,28 @@ function MenuHighlight({ className, ...props }: ComponentProps<'div'>) {
 /**
  * The box: it grows out of what opened it and folds back into it, and holds
  * the highlight. Every prop goes to Base UI's Popup but `className`, which
- * goes to the list inside, and `search`. A list taller than the screen, or
+ * goes to the list inside. A list taller than the screen, or
  * than `--menu-max-height` (24rem unless a menu that holds more sets it),
- * scrolls. A menu wrapped in Base UI's `Menu.FilterProvider` takes its
- * `MenuSearch` and `MenuEmpty` in `search`, which stays at the top while the
- * rows scroll under it.
+ * scrolls. A menu you search is a Popover holding a Combobox instead.
  */
 function MenuPopup({
   className,
   children,
   style,
-  search,
   ...props
 }: Omit<MenuPrimitive.Popup.Props, 'className'> & {
   className?: string
-  search?: ReactNode
 }) {
   const { dir, style: growStyle, anchor } = basePopupGrow(useDirection())
   const listRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
   const fades = useEdgeFades<HTMLDivElement>()
-  const List = search ? MenuPrimitive.List : 'div'
   useEffect(() => {
     const list = listRef.current
     const popup = list?.closest<HTMLElement>('[data-menu-popup]')
     if (!list || !popup || !layerRef.current) return
     return followRows(list, layerRef.current, { popup })
   }, [])
-  // A search keeps the box at the height it opened at, so the field stays
-  // under the caret while rows come and go, and Base UI never moves the box.
-  const searchable = Boolean(search)
-  useEffect(() => {
-    const popup = listRef.current?.closest<HTMLElement>('[data-menu-popup]')
-    if (!searchable || !popup) return
-    popup.style.minHeight = `min(${popup.offsetHeight}px, var(--available-height))`
-  }, [searchable])
   return (
     <MenuPrimitive.Popup
       data-menu-popup=''
@@ -111,14 +91,6 @@ function MenuPopup({
       )}
       {...props}
     >
-      {search ? (
-        <div
-          data-slot='menu-search'
-          className={cn('shrink-0', popupGrowContentClassName)}
-        >
-          {search}
-        </div>
-      ) : null}
       {/* The rows scroll inside the surface, so their fading edges leave its shadow, ring and outline whole. Never sideways: at some zooms a scrollbar takes a fraction of a pixel more than the box made room for. */}
       <div
         ref={fades}
@@ -128,8 +100,7 @@ function MenuPopup({
           edgeFadeClassName,
         )}
       >
-        {/* With a search, the rows are Base UI's List, which the filter reads; without, the popup is the menu. */}
-        <List
+        <div
           ref={listRef}
           data-slot='menu-list'
           className={cn(
@@ -143,7 +114,7 @@ function MenuPopup({
         >
           <MenuHighlight ref={layerRef} />
           {children}
-        </List>
+        </div>
       </div>
       <MenuPrimitive.Arrow {...anchor} />
     </MenuPrimitive.Popup>
@@ -242,6 +213,14 @@ function MenuLinkItem({
 /** The tick: it scales in when picked and out when cleared. */
 const menuIndicatorClassName =
   'grid place-items-center transition-[opacity,scale] duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-starting-style:scale-50 data-starting-style:opacity-0 data-ending-style:scale-50 data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) motion-reduce:scale-100 motion-reduce:data-starting-style:scale-100 motion-reduce:data-ending-style:scale-100'
+
+/**
+ * The tick of a ui-sdk list's item, kept mounted (`keepMounted`): it scales
+ * in when its item is picked (`data-selected`) and out when cleared, turning
+ * back from where it is.
+ */
+const listIndicatorClassName =
+  'grid place-items-center opacity-0 transition-[opacity,scale] duration-(--motion-exit-duration) ease-(--motion-exit-easing) motion-safe:scale-50 data-[selected]:opacity-100 data-[selected]:duration-(--motion-enter-duration) data-[selected]:ease-(--motion-enter-easing) motion-safe:data-[selected]:scale-100'
 
 /*
  * Where the tick sits: in the gutter, or at the end of the row when
@@ -350,54 +329,6 @@ function MenuLabel({
 const menuNoticeClassName =
   'text-muted-foreground flex items-center justify-center gap-2 px-(--control-padding) text-center text-sm [overflow-wrap:anywhere] not-empty:min-h-20 not-empty:flex-1 not-empty:py-4'
 
-/**
- * The search at the top of a menu wrapped in Base UI's `Menu.FilterProvider`,
- * for `MenuPopup`'s `search`: its icon lines up with the rows' text, and a
- * Clear button shows while it holds text. Name it with `aria-label`.
- */
-function MenuSearch({
-  className,
-  ...props
-}: Omit<MenuPrimitive.Input.Props, 'className'> & { className?: string }) {
-  return (
-    <div data-slot='menu-search-field' className={cn(searchLineClassName, 'pe-1.5')}>
-      {searchLineIcon}
-      <MenuPrimitive.Input
-        className={cn(searchLineInputClassName, className)}
-        {...props}
-      />
-      <MenuPrimitive.Clear
-        data-field-clear=''
-        aria-label='Clear search'
-        render={
-          <Button
-            variant='ghost'
-            size='icon-xs'
-            className={cn('text-muted-foreground', fieldClearClassName)}
-          />
-        }
-      >
-        <IconPlaceholder
-          lucide='XIcon'
-          tabler='IconX'
-          hugeicons='Cancel01Icon'
-          phosphor='XIcon'
-          remixicon='RiCloseLine'
-          aria-hidden
-        />
-      </MenuPrimitive.Clear>
-    </div>
-  )
-}
-
-/** What a search that matches nothing says, under the search, announced as it appears. */
-function MenuEmpty({
-  className,
-  ...props
-}: Omit<MenuPrimitive.Empty.Props, 'className'> & { className?: string }) {
-  return <MenuPrimitive.Empty className={cn(menuNoticeClassName, className)} {...props} />
-}
-
 /** The Separator's line between groups of rows, across the list's 4px margin. */
 const menuSeparatorClassName = cn(separatorVariants(), '-mx-1 my-1 w-auto')
 
@@ -487,19 +418,18 @@ function MenuSubContent({
 export {
   MenuCheckboxItem,
   MenuContent,
-  MenuEmpty,
   MenuHighlight,
   MenuItem,
   MenuLabel,
   MenuLinkItem,
   MenuPopup,
   MenuRadioItem,
-  MenuSearch,
   MenuSeparator,
   MenuShortcut,
   MenuSubContent,
   MenuSubTrigger,
   MenuTick,
+  listIndicatorClassName,
   menuIndicatorClassName,
   menuIndicatorSlot,
   menuInset,

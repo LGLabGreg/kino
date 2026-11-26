@@ -74,6 +74,20 @@ export const panelDialogClassName =
 export const panelSheetClassName =
   'bg-background text-foreground relative flex w-full flex-col rounded-t-(--surface-radius-lg) border-t text-sm shadow-xl after:absolute after:inset-x-0 after:top-full after:h-12 after:bg-inherit forced-colors:outline'
 
+/**
+ * A popup of ui-sdk's shown as a sheet, such as a Popover's or a Select's on
+ * a phone: on its content, as wide as the screen up to 40rem and clear of the
+ * screen's top. Beside `panelSheetBackdropClassName`.
+ */
+export const popupSheetClassName =
+  'data-[presentation=sheet]:max-h-[calc(100dvh-(--spacing(12)))] data-[presentation=sheet]:w-full data-[presentation=sheet]:max-w-160 data-[presentation=sheet]:self-center'
+
+/** The panel of such a sheet, clear of the safe area at its foot. Starts with a `PanelHandle`. */
+export const popupSheetPanelClassName = cn(
+  panelSheetClassName,
+  'pb-[env(safe-area-inset-bottom)]',
+)
+
 /** The bar at the top of a sheet that says it can be dragged. */
 export function PanelHandle({ className }: { className?: string }) {
   return (
