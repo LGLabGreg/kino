@@ -17,11 +17,13 @@ import {
 import {
   popupGrowClassName,
   popupGrowContentClassName,
-  popupPositionerProps,
+  basePositionerProps,
   popupSurfaceClassName,
-  usePopupGrow,
+  basePopupGrow,
+  usePopupLayer,
 } from '@/registry/lib/popup'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
+import { useDirection } from '@base-ui/react/direction-provider'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import { cva, type VariantProps } from 'class-variance-authority'
 import { type ComponentProps, type ReactNode, useEffect, useRef } from 'react'
@@ -73,7 +75,7 @@ function MenuPopup({
   className?: string
   search?: ReactNode
 }) {
-  const { dir, style: growStyle, anchor } = usePopupGrow()
+  const { dir, style: growStyle, anchor } = basePopupGrow(useDirection())
   const listRef = useRef<HTMLDivElement>(null)
   const layerRef = useRef<HTMLDivElement>(null)
   const fades = useEdgeFades<HTMLDivElement>()
@@ -158,9 +160,9 @@ function MenuContent({
 }: ComponentProps<typeof MenuPopup> &
   Pick<MenuPrimitive.Positioner.Props, 'side' | 'align' | 'sideOffset' | 'alignOffset'>) {
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={usePopupLayer()}>
       <MenuPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         side={side}
         align={align}
         sideOffset={sideOffset}
@@ -468,9 +470,9 @@ function MenuSubContent({
 }: ComponentProps<typeof MenuPopup> &
   Pick<MenuPrimitive.Positioner.Props, 'sideOffset' | 'alignOffset'>) {
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={usePopupLayer()}>
       <MenuPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         side='inline-end'
         align='start'
         sideOffset={sideOffset}

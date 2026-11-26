@@ -346,7 +346,7 @@ function DatePickerTrigger({
   const picker = useDatePicker('DatePickerTrigger')
   return (
     <PopoverTrigger
-      data-slot='date-picker-trigger'
+      data-date-picker-trigger=''
       disabled={picker.disabled || picker.readOnly}
       render={
         <InputGroupButton
@@ -613,7 +613,7 @@ function DatePickerButton({
   const written = writtenValue(picker.value, picker.locale, format, picker.hourCycle)
   return (
     <PopoverTrigger
-      data-slot='date-picker-button'
+      data-date-picker-button=''
       data-placeholder={written ? undefined : ''}
       ref={setAnchor}
       disabled={picker.disabled || picker.readOnly}
@@ -692,19 +692,13 @@ function DatePickerContent({
   ref?: Ref<HTMLDivElement>
 }) {
   const picker = useDatePicker('DatePickerContent')
-  const popup = useRef<HTMLDivElement>(null)
-  const popupRef = useMemo(() => mergeRefs(ref, popup), [ref])
   return (
     <PopoverContent
-      ref={popupRef}
+      ref={ref}
       anchor={picker.anchor}
       align='start'
       aria-label={props['aria-label'] ?? picker.labels.open}
-      initialFocus={() =>
-        popup.current?.querySelector<HTMLElement>(
-          '[data-slot=calendar-day][tabindex="0"], [data-slot=calendar-choice][tabindex="0"]',
-        ) ?? true
-      }
+      initialFocus='[data-slot=calendar-day][tabindex="0"], [data-slot=calendar-choice][tabindex="0"]'
       className={cn(
         'w-auto flex-row flex-wrap items-start max-sm:justify-center',
         className,

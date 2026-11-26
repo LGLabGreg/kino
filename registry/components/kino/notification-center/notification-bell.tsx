@@ -2,9 +2,9 @@
 
 import { Button } from '@/registry/components/kino/button'
 import { bellLabel } from '@/registry/components/kino/notification-center/notification-list'
+import { PopoverTrigger } from '@/registry/components/kino/popover'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { CountBadge } from '@/registry/lib/count-badge'
-import { PopoverSheetTrigger } from '@/registry/lib/popover-sheet'
 
 import { cn } from '@/lib/utils'
 
@@ -28,7 +28,7 @@ function NotificationBell({
 }) {
   return (
     <span data-slot='notification-bell' className={cn('relative inline-flex', className)}>
-      <PopoverSheetTrigger
+      <PopoverTrigger
         render={
           <Button variant='ghost' size='icon' aria-label={bellLabel(title, count)} />
         }
@@ -41,7 +41,7 @@ function NotificationBell({
           hugeicons='Notification03Icon'
           aria-hidden
         />
-      </PopoverSheetTrigger>
+      </PopoverTrigger>
       <CountBadge count={count} locale={locale} />
     </span>
   )

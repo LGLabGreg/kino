@@ -17,10 +17,16 @@ import {
   pickClassName,
   rowTintClassName,
 } from '@/registry/lib/highlight'
-import { HOVER_DELAY, popupPositionerProps, usePopupGrow } from '@/registry/lib/popup'
+import {
+  HOVER_DELAY,
+  basePositionerProps,
+  basePopupGrow,
+  usePopupLayer,
+} from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { transitionsSettled, withoutTransition } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
+import { useDirection } from '@base-ui/react/direction-provider'
 import { NavigationMenu as NavigationMenuPrimitive } from '@base-ui/react/navigation-menu'
 import {
   type ComponentProps,
@@ -146,8 +152,8 @@ function NavigationMenu({
   // a panel open on first paint should skip the grow.
   const [instant] = useState<GlideInstant>(() => {
     let openOnMount = (props.value ?? props.defaultValue ?? null) !== null
-    const instant: GlideInstant = ({ positioner, first }) => {
-      const now = positioner.hasAttribute('data-instant')
+    const instant: GlideInstant = ({ placed, first }) => {
+      const now = placed.hasAttribute('data-instant')
       if (!first) return now
       const skip = now && openOnMount
       openOnMount = false
@@ -156,7 +162,7 @@ function NavigationMenu({
     return instant
   })
   const hoveredAt = useRef(0)
-  const { dir, anchor } = usePopupGrow()
+  const { dir, anchor } = basePopupGrow(useDirection())
   return (
     <HoveredAtContext value={hoveredAt}>
       <GlideGroupMemory>
@@ -174,9 +180,9 @@ function NavigationMenu({
           {...props}
         >
           {children}
-          <NavigationMenuPrimitive.Portal>
+          <NavigationMenuPrimitive.Portal container={usePopupLayer()}>
             <NavigationMenuPrimitive.Positioner
-              {...popupPositionerProps}
+              {...basePositionerProps}
               side='bottom'
               align='center'
               sideOffset={8}
@@ -200,7 +206,7 @@ function NavigationMenu({
                   shadow
                 />
                 {/* Opened again soon after it folded, it grows from where it went. */}
-                <GlideContent reopen='grow' instant={instant}>
+                <GlideContent reopen='grow' instant={instant} placedBy='base-ui'>
                   <NavigationMenuPrimitive.Viewport className='relative' />
                 </GlideContent>
                 <NavigationMenuPrimitive.Arrow {...anchor} />

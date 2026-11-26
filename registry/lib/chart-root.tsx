@@ -24,7 +24,14 @@ import {
 } from '@/registry/lib/chart-state'
 import { useControllable } from '@/registry/lib/controllable'
 import { CutTooltip } from '@/registry/lib/cut'
+import {
+  GlideContent,
+  tooltipBoxClassName,
+  tooltipLabelClassName,
+  TooltipSurface,
+} from '@/registry/lib/glide'
 import { numberFormatter } from '@/registry/lib/number-format'
+import { basePopupGrow, basePositionerProps, usePopupLayer } from '@/registry/lib/popup'
 import { reducesMotion } from '@/registry/lib/reduce-motion'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { FOLLOWS_TRANSITION } from '@/registry/lib/resize'
@@ -1993,8 +2000,62 @@ function ChartFrame({
   )
 }
 
+/**
+ * The tooltip's box, for a chart's `Tooltip.Root` of the old library, whose
+ * triggers share one handle; inside a `GlideGroupMemory`, it slides from
+ * trigger to trigger. `anchor` places it against what it shows. The Tooltip
+ * component draws the same box on ui-sdk.
+ */
+function ChartTooltipBox({
+  className,
+  children,
+  style,
+  side = 'top',
+  align = 'center',
+  sideOffset = 6,
+  alignOffset = 0,
+  anchor: placeAgainst,
+  ...props
+}: Omit<TooltipPrimitive.Popup.Props, 'className'> & {
+  className?: string
+} & Pick<
+    TooltipPrimitive.Positioner.Props,
+    'side' | 'align' | 'sideOffset' | 'alignOffset' | 'anchor'
+  >) {
+  const { dir, anchor } = basePopupGrow(useDirection())
+  return (
+    <TooltipPrimitive.Portal container={usePopupLayer()}>
+      <TooltipPrimitive.Positioner
+        {...basePositionerProps}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        alignOffset={alignOffset}
+        anchor={placeAgainst}
+        positionMethod='fixed'
+      >
+        <TooltipPrimitive.Popup
+          data-slot='tooltip-content'
+          // Portalled out of the page's tree, so it takes the reading direction with it.
+          dir={dir}
+          style={style}
+          className={tooltipBoxClassName}
+          {...props}
+        >
+          <TooltipSurface />
+          <GlideContent placedBy='base-ui'>
+            <div className={cn(tooltipLabelClassName, className)}>{children}</div>
+          </GlideContent>
+          <TooltipPrimitive.Arrow {...anchor} />
+        </TooltipPrimitive.Popup>
+      </TooltipPrimitive.Positioner>
+    </TooltipPrimitive.Portal>
+  )
+}
+
 export {
   SeriesKey,
+  ChartTooltipBox,
   type ChartBrowseReader,
   type ChartItem,
   type ChartFocusProps,

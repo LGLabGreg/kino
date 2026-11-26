@@ -1,6 +1,5 @@
 'use client'
 
-import { TooltipPopup } from '@/registry/components/kino/tooltip'
 import {
   type AxisNames,
   axisLayerClassName,
@@ -37,6 +36,7 @@ import {
   summaryOf,
 } from '@/registry/lib/chart-math'
 import {
+  ChartTooltipBox,
   type ChartFormat,
   ChartGroup,
   ChartLegendToggles,
@@ -1469,7 +1469,7 @@ interface ChartTooltipItem {
 }
 
 type ChartTooltipProps = Omit<
-  ComponentProps<typeof TooltipPopup>,
+  ComponentProps<typeof ChartTooltipBox>,
   'children' | 'anchor'
 > & {
   /** Adds a row with the total of the shown values; on by default when the series stack. */
@@ -1564,7 +1564,7 @@ function ChartTooltipPopup({
   point,
   className,
   ...props
-}: ComponentProps<typeof TooltipPopup> & { point: ChartPoint | null }) {
+}: ComponentProps<typeof ChartTooltipBox> & { point: ChartPoint | null }) {
   const { plot } = useChartRootValue()
   const x = point?.x ?? 0
   const y = point?.y ?? 0
@@ -1582,7 +1582,7 @@ function ChartTooltipPopup({
     [plot, x, y],
   )
   return (
-    <TooltipPopup
+    <ChartTooltipBox
       sideOffset={8}
       anchor={anchor}
       className={cn('max-w-72 px-2.5 py-2', className)}

@@ -17,12 +17,14 @@ import {
 import {
   popupGrowClassName,
   popupGrowContentClassName,
-  popupPositionerProps,
+  basePositionerProps,
   popupSurfaceClassName,
-  usePopupGrow,
+  basePopupGrow,
+  usePopupLayer,
 } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { edgeFadeClassName, followEdges } from '@/registry/lib/scroll'
+import { useDirection } from '@base-ui/react/direction-provider'
 import { Select as SelectPrimitive } from '@base-ui/react/select'
 import { cva, type VariantProps } from 'class-variance-authority'
 import {
@@ -245,7 +247,7 @@ function SelectPopup({
   ...props
 }: Omit<SelectPrimitive.Popup.Props, 'className'> & { className?: string }) {
   const triggerRef = use(TriggerContext)
-  const { dir, style: growStyle, anchor } = usePopupGrow()
+  const { dir, style: growStyle, anchor } = basePopupGrow(useDirection())
   const popupRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
@@ -338,9 +340,9 @@ function SelectContent({
     'alignItemWithTrigger' | 'side' | 'align' | 'sideOffset' | 'alignOffset'
   >) {
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={usePopupLayer()}>
       <SelectPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         alignItemWithTrigger={alignItemWithTrigger}
         side={side}
         align={align}

@@ -1,6 +1,7 @@
 'use client'
 
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
+import { gripClassName } from '@/registry/lib/grip'
 import { followHeight } from '@/registry/lib/resize'
 import {
   edgeFadeClassName,
@@ -8,14 +9,14 @@ import {
   scrollRegionRingClassName,
   useScrollRegion as useSharedScrollRegion,
 } from '@/registry/lib/scroll'
-import { type RefObject, useEffect } from 'react'
+import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
 /*
- * What Dialog, Alert dialog, Sheet and Drawer share: the overlay, a box that
- * follows its content's height, the close button, and the header, title,
- * description, body and footer. Each component names its own parts with
+ * What Dialog, Alert dialog, Sheet, Drawer and a Popover shown as a sheet
+ * share: the overlay, a box that follows its content's height, the close
+ * button, the handle, and the header, title, description, body and footer. Each component names its own parts with
  * `data-slot`; the parts the panel itself looks for carry `data-panel`
  * (`body`, `footer`, `handle`), so the same selectors work in all four. A
  * component that brings its own footer into a panel, as a command menu in a
@@ -31,12 +32,54 @@ export const panelOverlayClassName =
   'fixed inset-0 isolate z-50 bg-black/15 transition-opacity duration-(--motion-enter-duration) ease-(--motion-enter-easing) data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) data-starting-style:opacity-0 supports-backdrop-filter:backdrop-blur-xs supports-[-webkit-touch-callout:none]:absolute supports-[-webkit-touch-callout:none]:min-h-dvh dark:bg-black/45'
 
 /**
+ * The same dim and blur behind a popup ui-sdk shows as a sheet, such as a
+ * Popover on a phone: ui-sdk paints the `::backdrop` of the sheet's host, its
+ * parent, with `--sheet-backdrop`, and fades it in and out.
+ */
+export const panelSheetBackdropClassName =
+  '[--sheet-backdrop:--alpha(var(--color-black)/15%)] dark:[--sheet-backdrop:--alpha(var(--color-black)/45%)] supports-backdrop-filter:[*:has(>&[data-presentation=sheet])::backdrop]:backdrop-blur-xs'
+
+/**
  * The dim over a panel while another opens on top of it: a dialog under
- * another dialog (its viewport is `group/dialog-viewport`), or a sheet or
- * drawer under another one.
+ * another dialog (ui-sdk marks the content around the surface
+ * `data-nested-open`), or a sheet or drawer under another one. Only the
+ * content's own surface dims: the dialog on top sits inside it.
  */
 export const panelStackDimClassName =
-  'before:pointer-events-none before:absolute before:inset-0 before:z-20 before:rounded-[inherit] before:bg-black/0 before:transition-colors before:duration-(--motion-enter-duration) before:ease-(--motion-enter-fade-easing) group-data-nested-dialog-open/dialog-viewport:before:bg-black/10 data-nested-drawer-open:before:bg-black/10 dark:group-data-nested-dialog-open/dialog-viewport:before:bg-black/40 dark:data-nested-drawer-open:before:bg-black/40'
+  'before:pointer-events-none before:absolute before:inset-0 before:z-20 before:rounded-[inherit] before:bg-black/0 before:transition-colors before:duration-(--motion-enter-duration) before:ease-(--motion-enter-fade-easing) [[data-nested-open]>&]:before:bg-black/10 data-nested-drawer-open:before:bg-black/10 dark:[[data-nested-open]>&]:before:bg-black/40 dark:data-nested-drawer-open:before:bg-black/40'
+
+/**
+ * A dialog's box on the screen's top layer: it rises `--dialog-rise` into
+ * the centre, and steps back while another dialog is open on top of it. On a
+ * screen under `sm` it is a sheet that slides up from the bottom edge. A
+ * strip under it, in the colour the sheet ends in, covers the gap, the ring
+ * and the shadow when a spring overshoots. Laid out `inline`, it sits above
+ * its own dim, which ui-sdk then renders after it: one step over the dim's
+ * `z-50`. Holds a `PanelSurface`.
+ */
+export const panelDialogClassName =
+  'group/panel fixed inset-0 z-51 m-auto flex h-fit w-[calc(100%-(--spacing(8)))] max-w-md min-w-0 flex-col transition-[translate,scale,opacity] duration-(--motion-enter-duration) ease-(--motion-enter-easing) focus-visible:outline-hidden data-ending-style:translate-y-[calc(var(--dialog-rise,1rem)/2)] data-ending-style:scale-98 data-ending-style:opacity-0 data-ending-style:duration-(--motion-exit-duration) data-ending-style:ease-(--motion-exit-easing) data-nested-open:scale-(--dialog-recede-scale,0.95) data-starting-style:translate-y-[var(--dialog-rise,1rem)] data-starting-style:scale-97 data-starting-style:opacity-0 motion-reduce:transition-[opacity] motion-reduce:data-ending-style:translate-y-0! motion-reduce:data-ending-style:scale-100! motion-reduce:data-ending-style:opacity-0! motion-reduce:data-starting-style:translate-y-0! motion-reduce:data-starting-style:scale-100! motion-reduce:data-starting-style:opacity-0! max-sm:mb-0 max-sm:w-full max-sm:max-w-none max-sm:origin-bottom max-sm:after:absolute max-sm:after:inset-x-0 max-sm:after:top-full max-sm:after:h-24 max-sm:after:bg-background max-sm:has-data-[panel=footer]:after:bg-(--panel-footer) max-sm:data-ending-style:translate-y-full max-sm:data-ending-style:scale-100 max-sm:data-ending-style:opacity-100 max-sm:data-starting-style:translate-y-full max-sm:data-starting-style:scale-100 max-sm:data-starting-style:opacity-100'
+
+/**
+ * A panel's box on the bottom edge, as wide as the screen up to 40rem, its
+ * top corners rounded. A strip under it, in its colour, covers the gap when
+ * a spring overshoots. Starts with a `PanelHandle`.
+ */
+export const panelSheetClassName =
+  'bg-background text-foreground relative flex w-full flex-col rounded-t-(--surface-radius-lg) border-t text-sm shadow-xl after:absolute after:inset-x-0 after:top-full after:h-12 after:bg-inherit forced-colors:outline'
+
+/** The bar at the top of a sheet that says it can be dragged. */
+export function PanelHandle({ className }: { className?: string }) {
+  return (
+    <div
+      data-panel='handle'
+      aria-hidden
+      className={cn('flex h-5 shrink-0 items-end justify-center', className)}
+    >
+      <span className={cn(gripClassName, 'h-1 w-10')} />
+    </div>
+  )
+}
 
 /** The close button's place: 10px nearer the corner than the content, lower under a drawer's handle. */
 export const panelCloseClassName =
@@ -56,11 +99,69 @@ export function PanelCloseIcon() {
 }
 
 /**
- * The header ends 6px short of the close button, and sits closer under a
+ * A dialog's surface. When its content changes height while it is open, the
+ * box resizes and the footer stays on its bottom edge. `closeButton` goes
+ * inside what scrolls, so it leaves with the header when the whole dialog
+ * scrolls.
+ */
+export function PanelSurface({
+  closeButton,
+  children,
+}: {
+  closeButton?: ReactNode
+  children: ReactNode
+}) {
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const scrollRegion = useScrollRegion(innerRef)
+  useFollowHeight(surfaceRef, innerRef)
+
+  return (
+    <div
+      ref={surfaceRef}
+      data-slot='panel-surface'
+      data-close-button={closeButton ? '' : undefined}
+      className={cn(
+        'group/panel-surface bg-background text-foreground ring-foreground/10 @container relative overflow-clip rounded-(--surface-radius) text-sm shadow-xl ring-1 transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none forced-colors:outline max-sm:rounded-b-none',
+        panelStackDimClassName,
+        panelCloseRoomClassName,
+      )}
+    >
+      {/*
+       * As tall as the screen less a margin: past that, the body scrolls
+       * between the header and the footer. On a screen under 28rem tall that
+       * would leave the body a slit, so the whole dialog scrolls instead, as
+       * it does when there is no body. The screen is the window, or for a
+       * dialog laid out `inline`, the size container it sits in, such as a
+       * preview's frame. A form around the parts takes no box, so they still
+       * lay out here.
+       */}
+      <div
+        ref={innerRef}
+        {...scrollRegion}
+        className='focus-visible:ring-ring/50 relative flex max-h-[calc(100cqh-(--spacing(8)))] scrollbar-thin flex-col overscroll-contain rounded-[inherit] focus-visible:ring-3 focus-visible:outline-hidden focus-visible:-outline-offset-2 focus-visible:ring-inset max-sm:max-h-[calc(100cqh-(--spacing(12)))] max-sm:pb-[env(safe-area-inset-bottom)] not-has-data-[panel=body]:overflow-y-auto *:[form]:contents [@media(height<28rem)]:overflow-y-auto [@container_(height<28rem)]:overflow-y-auto'
+      >
+        {children}
+        {closeButton}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The header ends 6px short of the close button, by the room its surface
+ * keeps for one (`panelCloseRoomClassName`), and sits closer under a
  * drawer's handle. Above a body it gives back the ring's room the body keeps.
  */
+/**
+ * The room a surface's header leaves for its close button. Every surface sets
+ * it, so a dialog opened inside another takes its own, never its parent's.
+ */
+export const panelCloseRoomClassName =
+  '[--panel-close-room:0px] data-close-button:[--panel-close-room:calc(var(--control-height-sm)-4px)]'
+
 export const panelHeaderClassName =
-  'flex shrink-0 flex-col gap-1.5 p-(--surface-padding-lg) group-data-close-button/panel-surface:pe-[calc(var(--surface-padding-lg)_+_var(--control-height-sm)_-_4px)] [[data-panel=handle]+&]:pt-2 [&:has(+[data-panel=body])]:pb-[calc(var(--surface-padding-lg)_-_--spacing(0.75))]'
+  'flex shrink-0 flex-col gap-1.5 p-(--surface-padding-lg) pe-[calc(var(--surface-padding-lg)+var(--panel-close-room,0px))] [[data-panel=handle]+&]:pt-2 [&:has(+[data-panel=body])]:pb-[calc(var(--surface-padding-lg)_-_--spacing(0.75))]'
 
 /** A long unbroken word breaks rather than run out of the panel. */
 export const panelTitleClassName =

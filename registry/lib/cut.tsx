@@ -8,7 +8,8 @@ import {
 } from '@/registry/components/kino/tooltip'
 import { overflows } from '@/registry/lib/scroll'
 import { SwapTextTitleContext } from '@/registry/lib/swap'
-import { type ReactElement, useEffect, useState } from 'react'
+import { mergeProps, type RenderProp } from '@ui-sdk/react/primitive'
+import { cloneElement, type ReactElement, useEffect, useState } from 'react'
 
 /*
  * Text cut short shows whole, one way: a label that truncates is marked
@@ -155,13 +156,8 @@ function CutTooltip({
   const lines = cut.length > 0 && text !== undefined ? [text] : cut
   return (
     <SwapTextTitleContext value={false}>
-      <Tooltip>
-        <TooltipTrigger
-          ref={setOwner}
-          disabled={disabled || lines.length === 0}
-          aria-describedby={undefined}
-          render={render}
-        />
+      <Tooltip disabled={disabled || lines.length === 0}>
+        <TooltipTrigger ref={setOwner} render={undescribed(render)} />
         <TooltipContent side={side} align={align}>
           <CutLines lines={lines} />
         </TooltipContent>
@@ -170,4 +166,17 @@ function CutTooltip({
   )
 }
 
-export { CutLines, CutTooltip, cutLines, cutsAcross, isCut, useCut }
+/**
+ * `render` as a tooltip's trigger that the tooltip doesn't describe, for one
+ * whose name already holds the whole text the tooltip shows: described too,
+ * it would be read twice.
+ */
+function undescribed(render: ReactElement): RenderProp {
+  return (props) => {
+    const own = { ...props }
+    delete own['aria-describedby']
+    return cloneElement(render, mergeProps(own, render.props as Record<string, unknown>))
+  }
+}
+
+export { CutLines, CutTooltip, cutLines, cutsAcross, isCut, undescribed, useCut }

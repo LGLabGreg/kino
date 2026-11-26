@@ -1,36 +1,49 @@
 'use client'
 
 import {
+  GLIDE_GROUP_CLOSE_DELAY,
   GlideContent,
   type GlideGroup,
   GlideGroupMemory,
   glidePopupClassName,
   GlideSurface,
-  glideTriggerProps,
   useGlideGroup,
   useGlideGroupItem,
 } from '@/registry/lib/glide'
 import {
   HOVER_DELAY,
+  POPUP_COLLISION_PADDING,
   popupGrowContentClassName,
-  popupPositionerProps,
-  usePopupGrow,
 } from '@/registry/lib/popup'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
-import { PreviewCard as PreviewCardPrimitive } from '@base-ui/react/preview-card'
-import { createContext, type ReactNode, use, useId } from 'react'
+import {
+  createHoverCardController,
+  HoverCard as HoverCardPrimitive,
+  HoverCardContent as HoverCardContentPrimitive,
+  type HoverCardController,
+  HoverCardTrigger as HoverCardTriggerPrimitive,
+} from '@ui-sdk/react/hover-card'
+import {
+  type ComponentProps,
+  createContext,
+  type ReactNode,
+  use,
+  useId,
+  useState,
+} from 'react'
 
 import { cn } from '@/lib/utils'
 
-type HoverCardContentProps = Omit<PreviewCardPrimitive.Popup.Props, 'className'> & {
+type HoverCardContentProps = Omit<
+  ComponentProps<typeof HoverCardContentPrimitive>,
+  'className' | 'children'
+> & {
   className?: string
-} & Pick<
-    PreviewCardPrimitive.Positioner.Props,
-    'side' | 'align' | 'sideOffset' | 'alignOffset'
-  >
+  children?: ReactNode
+}
 
 const GroupContext = createContext<GlideGroup<
-  PreviewCardPrimitive.Handle<unknown>,
+  HoverCardController<string>,
   HoverCardContentProps
 > | null>(null)
 const ItemContext = createContext<string | null>(null)
@@ -42,50 +55,79 @@ const ItemContext = createContext<string | null>(null)
  */
 function HoverCardGroup({ children }: { children: ReactNode }) {
   const { group, contentOf } = useGlideGroup<
-    PreviewCardPrimitive.Handle<unknown>,
+    HoverCardController<string>,
     HoverCardContentProps
-  >(() => PreviewCardPrimitive.createHandle<unknown>())
+  >(() => createHoverCardController<string>())
+  // The group's one box is placed as the shown link's content asks.
+  const [shown, setShown] = useState<string | null>(null)
+  const content = shown === null ? undefined : contentOf(shown)
+  const { side, align, sideOffset, alignOffset } = content ?? {}
   return (
     <GroupContext value={group}>
       <GlideGroupMemory>
         {children}
-        <PreviewCardPrimitive.Root handle={group.handle}>
-          {({ payload }) => {
-            const content = contentOf(payload)
-            return content ? <HoverCardPopup {...content} /> : null
+        <HoverCardPrimitive
+          controller={group.handle}
+          delay={HOVER_DELAY}
+          closeDelay={GLIDE_GROUP_CLOSE_DELAY}
+          onPayloadChange={(payload) => {
+            if (typeof payload === 'string') setShown(payload)
           }}
-        </PreviewCardPrimitive.Root>
+        >
+          {/* One popup for many triggers has no one name an agent could find
+              it by, so the agent bridge leaves it out. Its first card mounts a
+              fresh box, so ui-sdk places it with the card in it. */}
+          <HoverCardBox<string>
+            key={content ? 'card' : 'rest'}
+            side={side}
+            align={align}
+            sideOffset={sideOffset}
+            alignOffset={alignOffset}
+            keepMounted
+            data-agent-hidden
+          >
+            {({ payload }) => {
+              const shownContent = payload ? contentOf(payload) : undefined
+              return shownContent ? (
+                <HoverCardInside className={shownContent.className}>
+                  {shownContent.children}
+                </HoverCardInside>
+              ) : null
+            }}
+          </HoverCardBox>
+        </HoverCardPrimitive>
       </GlideGroupMemory>
     </GroupContext>
   )
 }
 
 /**
- * One hover card: a link and the card it previews. Inside a
- * `HoverCardGroup`, the group holds whether it is open, and Root props are
- * ignored.
+ * One hover card: a link and the card it previews. It waits 200ms before
+ * the card opens. Inside a `HoverCardGroup`, the group holds whether it is
+ * open, and its props are ignored.
  */
 function HoverCard({
   children,
+  delay = HOVER_DELAY,
   ...props
-}: Omit<PreviewCardPrimitive.Root.Props, 'children'> & {
-  children?: ReactNode
-}) {
+}: ComponentProps<typeof HoverCardPrimitive>) {
   const group = use(GroupContext)
   const id = useId()
   if (group) return <ItemContext value={id}>{children}</ItemContext>
-  return <PreviewCardPrimitive.Root {...props}>{children}</PreviewCardPrimitive.Root>
+  return (
+    <HoverCardPrimitive delay={delay} {...props}>
+      {children}
+    </HoverCardPrimitive>
+  )
 }
 
-/** The link the card previews. Renders an `<a>`, and waits 200ms before the card opens. */
-function HoverCardTrigger(props: PreviewCardPrimitive.Trigger.Props) {
+/** The link the card previews. Renders an `<a>`. */
+function HoverCardTrigger(props: ComponentProps<typeof HoverCardTriggerPrimitive>) {
   const group = use(GroupContext)
   const id = use(ItemContext)
   return (
-    <PreviewCardPrimitive.Trigger
-      data-slot='hover-card-trigger'
-      delay={HOVER_DELAY}
-      {...glideTriggerProps(group, id)}
+    <HoverCardTriggerPrimitive
+      {...(group && id ? { controller: group.handle, payload: id } : {})}
       {...props}
     />
   )
@@ -94,7 +136,7 @@ function HoverCardTrigger(props: PreviewCardPrimitive.Trigger.Props) {
 /**
  * The card. It grows out of its link, slides to the next link of its group,
  * and folds back in. `className` goes to the content inside the box; every
- * other prop goes to Base UI's Popup.
+ * other prop goes to ui-sdk's content.
  */
 function HoverCardContent(props: HoverCardContentProps) {
   const group = use(GroupContext)
@@ -102,66 +144,76 @@ function HoverCardContent(props: HoverCardContentProps) {
   // Inside a group, the group's one card shows this content.
   useGlideGroupItem(group, id, props)
   if (group && id) return null
-  return <HoverCardPopup {...props} />
+  return <HoverCardCard {...props} />
 }
 
-function HoverCardPopup({
-  className,
-  children,
-  style,
+/** The box: one for a card, one for a group, placed by ui-sdk. */
+function HoverCardBox<Payload>({
   side = 'bottom',
   align = 'center',
   sideOffset = 6,
-  alignOffset = 0,
+  className,
   ...props
-}: HoverCardContentProps) {
-  const { dir, anchor } = usePopupGrow()
+}: Omit<ComponentProps<typeof HoverCardContentPrimitive<Payload>>, 'className'> & {
+  className?: string
+}) {
+  return (
+    <HoverCardContentPrimitive<Payload>
+      side={side}
+      align={align}
+      sideOffset={sideOffset}
+      collisionPadding={POPUP_COLLISION_PADDING}
+      arrowPadding={0}
+      className={cn(
+        glidePopupClassName,
+        'text-popover-foreground max-w-(--available-width) text-sm [--glide-radius:var(--surface-radius)] [--popup-available-height:var(--available-height)]',
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** The box with the card in it, for one hover card. */
+function HoverCardCard({ className, children, ...props }: HoverCardContentProps) {
+  return (
+    <HoverCardBox {...props}>
+      <HoverCardInside className={className}>{children}</HoverCardInside>
+    </HoverCardBox>
+  )
+}
+
+/** What a box holds: its surface and the card, for one hover card or a group's. */
+function HoverCardInside({
+  className,
+  children,
+}: {
+  className?: string
+  children?: ReactNode
+}) {
   const fades = useEdgeFades<HTMLDivElement>()
   return (
-    <PreviewCardPrimitive.Portal>
-      <PreviewCardPrimitive.Positioner
-        {...popupPositionerProps}
-        side={side}
-        align={align}
-        sideOffset={sideOffset}
-        alignOffset={alignOffset}
-        positionMethod='fixed'
-      >
-        <PreviewCardPrimitive.Popup
-          data-slot='hover-card-content'
-          // Portalled out of the page's tree, so it takes the reading direction with it.
-          dir={dir}
-          style={style}
+    <>
+      <GlideSurface
+        fill='bg-popover'
+        ring='bg-foreground/10 forced-colors:bg-[CanvasText]'
+        shadow
+      />
+      <GlideContent>
+        <div
+          ref={fades}
           className={cn(
-            glidePopupClassName,
-            'text-popover-foreground max-w-(--available-width) text-sm [--glide-radius:var(--surface-radius)]',
+            'scrollbar-thin flex max-h-(--popup-available-height) w-80 max-w-full flex-col gap-(--surface-gap) overflow-y-auto overscroll-contain p-(--surface-padding)',
+            edgeFadeClassName,
+            popupGrowContentClassName,
+            'group-data-instant/popup:transition-none',
+            className,
           )}
-          {...props}
         >
-          <GlideSurface
-            fill='bg-popover'
-            ring='bg-foreground/10 forced-colors:bg-[CanvasText]'
-            shadow
-          />
-          <GlideContent>
-            <div
-              ref={fades}
-              data-slot='hover-card-body'
-              className={cn(
-                'scrollbar-thin flex max-h-(--available-height) w-80 max-w-full flex-col gap-(--surface-gap) overflow-y-auto overscroll-contain p-(--surface-padding)',
-                edgeFadeClassName,
-                popupGrowContentClassName,
-                'group-data-instant/popup:transition-none',
-                className,
-              )}
-            >
-              {children}
-            </div>
-          </GlideContent>
-          <PreviewCardPrimitive.Arrow {...anchor} />
-        </PreviewCardPrimitive.Popup>
-      </PreviewCardPrimitive.Positioner>
-    </PreviewCardPrimitive.Portal>
+          {children}
+        </div>
+      </GlideContent>
+    </>
   )
 }
 

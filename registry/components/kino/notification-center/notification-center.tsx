@@ -20,13 +20,13 @@ import {
   useCenter,
   useRow,
 } from '@/registry/components/kino/notification-center/notification-parts'
+import { PopoverFooter } from '@/registry/components/kino/popover'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { PopoverSheetFooter } from '@/registry/lib/popover-sheet'
 import { settle } from '@/registry/lib/settle'
 import { Swap } from '@/registry/lib/swap'
 import { type ComponentProps, type ReactNode, useId, useState } from 'react'
@@ -35,8 +35,8 @@ import { cn } from '@/lib/utils'
 
 /*
  * A bell with how many are unread, which opens the notifications grouped by
- * day, with All and Unread tabs: a popover, or a bottom sheet on a phone.
- * Nothing is marked read by being seen, only by opening a row, its own
+ * day, with All and Unread tabs: a popover, or a bottom sheet on a phone
+ * unless motion is reduced. Nothing is marked read by being seen, only by opening a row, its own
  * button, or Mark all as read. Three variants:
  *
  * - `triage`, the default: short rows, many to a screen, for a product that
@@ -108,9 +108,9 @@ function NotificationCenter({
   return (
     <NotificationShell
       {...props}
-      onOpenChange={(open, eventDetails) => {
-        onOpenChange?.(open, eventDetails)
-        if (!open && !eventDetails.isCanceled) setTaken([])
+      onOpenChange={(open, details) => {
+        onOpenChange?.(open, details)
+        if (!open && !details.canceled) setTaken([])
       }}
       // Archives made while Undo shows come back together.
       onArchived={(archived) => setTaken((was) => [...was, archived])}
@@ -424,7 +424,7 @@ function InboxFooter({
   const count = taken.reduce((sum, archived) => sum + archived.items.length, 0)
   if (count === 0 && !children) return null
   return (
-    <PopoverSheetFooter className='min-h-(--control-height) flex-row @xs:justify-start'>
+    <PopoverFooter className='min-h-(--control-height) @xs:justify-start'>
       <Swap
         block
         fill
@@ -461,7 +461,7 @@ function InboxFooter({
           <div className='flex w-full items-center'>{children}</div>
         )}
       </Swap>
-    </PopoverSheetFooter>
+    </PopoverFooter>
   )
 }
 

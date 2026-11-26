@@ -10,6 +10,7 @@ import {
   panelDescriptionClassName,
   panelFooterClassName,
   panelFooterTint,
+  panelCloseRoomClassName,
   panelHeaderClassName,
   panelOverlayClassName,
   panelStackDimClassName,
@@ -17,7 +18,7 @@ import {
   useFollowHeight,
   useScrollRegion,
 } from '@/registry/lib/panel'
-import { physicalSide } from '@/registry/lib/popup'
+import { physicalSide, usePopupLayer } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { transitionsSettled } from '@/registry/lib/resize'
 import { useDirection } from '@base-ui/react/direction-provider'
@@ -259,6 +260,7 @@ function SheetSurface({
       className={cn(
         // Not a flex box: the inner box keeps its own height while this one animates to it.
         'group/panel-surface @container relative min-h-0 overflow-clip rounded-[inherit] transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) motion-reduce:transition-none',
+        panelCloseRoomClassName,
         followsHeight ? 'max-h-full' : 'h-full',
       )}
     >
@@ -323,8 +325,9 @@ function SheetContent({
   // Portalled out of the page's tree, so it takes the reading direction with it.
   const direction = useDirection()
   const overlay = useRef<HTMLDivElement>(null)
+  const layer = usePopupLayer()
   return (
-    <SheetPortal container={container}>
+    <SheetPortal container={container ?? layer}>
       <SheetOverlay ref={overlay} />
       <SheetPrimitive.Viewport
         data-slot='sheet-viewport'

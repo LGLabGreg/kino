@@ -9,10 +9,12 @@ import {
   noticeTextClassName,
   noticeTitleClassName,
 } from '@/registry/lib/notice'
+import { usePersistentLayer } from '@/registry/lib/popup'
+import { mergeRefs } from '@/registry/lib/refs'
 import { useDirection } from '@base-ui/react/direction-provider'
 import { Toast as ToastPrimitive } from '@base-ui/react/toast'
 import { cva } from 'class-variance-authority'
-import { type ComponentProps, createContext, use } from 'react'
+import { type ComponentProps, createContext, use, useMemo, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -32,6 +34,7 @@ function ToastViewport({
   variant = 'list',
   container,
   className,
+  ref,
   ...props
 }: Omit<ToastPrimitive.Viewport.Props, 'className'> & { className?: string } & {
   /** `list` keeps every toast open in a column; `deck` stacks them until hover or focus spreads them. */
@@ -41,16 +44,24 @@ function ToastViewport({
 }) {
   // The viewport is portalled out of the page, so it takes the reading direction with it.
   const direction = useDirection()
+  const [layer, setLayer] = useState<HTMLElement | null>(null)
+  // In `<body>`, it sits above ui-sdk's popups, which open in the top layer;
+  // in a `container`, it stays in that box.
+  const persistent = container === undefined
+  usePersistentLayer(persistent ? layer : null)
+  const own = useMemo(() => mergeRefs(ref, setLayer), [ref])
   return (
     <ToastPrimitive.Portal container={container}>
       <ToastVariantContext value={variant}>
         <ToastPrimitive.Viewport
+          ref={own}
+          popover={persistent ? 'manual' : undefined}
           data-slot='toast-viewport'
           data-variant={variant}
           dir={direction}
           className={cn(
             // As wide as a phone's screen allows, with the same margin on each side as below.
-            'group/toast-viewport fixed end-4 bottom-4 z-50 w-88 max-w-[calc(100vw-(--spacing(8)))] focus-visible:outline-hidden',
+            'group/toast-viewport fixed inset-auto end-4 bottom-4 z-50 m-0 w-88 overflow-visible border-0 bg-transparent p-0 text-inherit max-w-[calc(100vw-(--spacing(8)))] focus-visible:outline-hidden',
             className,
           )}
           {...props}

@@ -1,9 +1,9 @@
 'use client'
 
 import {
-  anchorOffset,
   anchorStrip,
   physicalSide,
+  popupGrowContentClassName,
   type PopupSide,
   type ReadingDirection,
   type ScreenBox,
@@ -36,7 +36,7 @@ import { cn } from '@/lib/utils'
  * relative to the popup: the box when open, the strip while opening and
  * closing, and the last box's size while it slides to a new one. One clip, so
  * an open, a slide and a close each turn back from wherever the last one left
- * it. When Base UI places the popup somewhere else, the whole popup shifts
+ * it. When the popup is placed somewhere else, the whole popup shifts
  * back to where it showed and glides to its new place on a `translate` of
  * its own, so the clip keeps its own clock on the way: a tooltip that follows
  * the pointer finishes opening while it moves.
@@ -51,8 +51,7 @@ export const GLIDE_GROUP_CLOSE_DELAY = 150
 
 /**
  * How long a group remembers where its popup was after it closed, in ms, so
- * one that opens again soon carries on from there. Base UI's tooltip warm
- * window.
+ * one that opens again soon carries on from there: the tooltips' warm window.
  */
 export const GLIDE_MEMORY_MS = 400
 
@@ -67,7 +66,7 @@ export type GlidePhase = 'waiting' | 'rest' | 'open' | 'slide' | 'close'
 export type GlideCue =
   | {
       kind: 'measured'
-      /** Base UI asks for no animation. */
+      /** The library asks for no animation. */
       instant: boolean
       /** The popup moved only because the page scrolled, so the clip already follows. */
       scrolled: boolean
@@ -108,8 +107,8 @@ export function glideNext(
     return phase === 'open' || phase === 'slide' ? ['rest', 'rest'] : [phase, 'stay']
   }
   if (phase === 'waiting') {
-    // Carrying on from the group's last popup wins over Base UI's instant
-    // open, which is how its warm window opens the next one.
+    // Carrying on from the group's last popup wins over an instant open,
+    // which is how the warm window opens the next one.
     if (cue.remembered === 'slide') return ['slide', 'slide-again']
     if (cue.remembered === 'grow') return ['open', 'grow-again']
     return cue.instant ? ['rest', 'snap'] : ['open', 'grow']
@@ -147,8 +146,8 @@ export function insetBox(clip: string, frame: ScreenBox): ScreenBox | null {
 }
 
 /**
- * The shift that keeps a popup where it is on screen once Base UI has placed
- * it from `from` to `to`: `current` plus the move of its inline-start corner,
+ * The shift that keeps a popup where it is on screen once it has been placed
+ * from `from` to `to`: `current` plus the move of its inline-start corner,
  * which its content is laid out from.
  */
 export function rideOffset(
@@ -187,9 +186,9 @@ export interface GlideGroup<Handle, Content> {
 }
 
 /**
- * One popup for a group of triggers, such as a toolbar's tooltips: a Base UI
- * handle the triggers share, and the content of each item, by the id its
- * trigger sends as the payload.
+ * One popup for a group of triggers, such as a toolbar's tooltips: a handle
+ * or controller the triggers share, and the content of each item, by the id
+ * its trigger sends as the payload.
  */
 export function useGlideGroup<Handle, Content>(createHandle: () => Handle) {
   const [contents, setContents] = useState<Record<string, Content>>({})
@@ -221,8 +220,9 @@ export function useGlideGroupItem<Handle, Content>(
 }
 
 /**
- * What a trigger in a group passes to Base UI: the shared handle, its item's
- * id as the payload, and the short close delay that lets the popup slide on.
+ * What a trigger of the old library in a group takes: the shared handle, its
+ * item's id as the payload, and the short close delay that lets the popup
+ * slide on.
  */
 export function glideTriggerProps<Handle, Content>(
   group: GlideGroup<Handle, Content> | null,
@@ -319,13 +319,16 @@ const moved = (box: ScreenBox, [x, y]: Shift, sign: 1 | -1 = 1): ScreenBox => ({
   top: box.top + y * sign,
 })
 
-/** Where Base UI placed the popup, without the shift it shows at. */
+/** Where the popup was placed, without the shift it shows at. */
 const placeOf = (popup: HTMLElement, shift: Shift) => moved(boxOf(popup), shift, -1)
 
-/** Whether Base UI asks for no animation; `first` is the popup's first placing. */
+/**
+ * Whether the library asks for no animation; `placed` is the element it
+ * places, and `first` is the popup's first placing.
+ */
 export type GlideInstant = (parts: {
   popup: HTMLElement
-  positioner: HTMLElement
+  placed: HTMLElement
   first: boolean
 }) => boolean
 
@@ -337,6 +340,12 @@ interface GlideOptions {
    */
   reopen: 'slide' | 'grow'
   instant: GlideInstant
+  /**
+   * Which library places the popup: ui-sdk places the popup itself and keeps
+   * it in the page while closed; Base UI places a positioner around it and
+   * mounts it only while open.
+   */
+  placedBy: 'ui-sdk' | 'base-ui'
 }
 
 const popupInstant: GlideInstant = ({ popup, first }) =>
@@ -350,11 +359,11 @@ const popupInstant: GlideInstant = ({ popup, first }) =>
 function trackGlide(
   content: HTMLElement,
   memory: GlideMemory | null,
-  { reopen, instant }: GlideOptions,
+  { reopen, instant, placedBy }: GlideOptions,
 ) {
   const popup = content.parentElement
-  const positioner = popup?.parentElement
-  if (!popup || !positioner) return
+  const placed = placedBy === 'ui-sdk' ? popup : popup?.parentElement
+  if (!popup || !placed) return
   let phase: GlidePhase = 'waiting'
   let last = ''
   let popupBox: ScreenBox | null = null
@@ -411,15 +420,12 @@ function trackGlide(
     setHeld([0, 0])
   }
 
-  // The strip under the trigger, read from the anchor Base UI placed.
+  // The strip under the trigger, read from where the trigger was placed.
   const stripOf = (box: ScreenBox) => {
     const side = physicalSide(popup.dataset.side as PopupSide | undefined, direction())
     const across = side === 'top' || side === 'bottom'
-    const anchor = anchorOffset(popup, across)
-    const anchorLength = cssPixels(
-      positioner,
-      across ? '--anchor-width' : '--anchor-height',
-    )
+    const anchor = cssPixels(popup, '--arrow-offset')
+    const anchorLength = cssPixels(placed, across ? '--anchor-width' : '--anchor-height')
     const length = across ? box.width : box.height
     return anchorStrip(
       side,
@@ -438,7 +444,7 @@ function trackGlide(
     writeBox(popup, 'glide', box, box)
   }
 
-  // Base UI can move a closing popup before it has gone, such as to its next
+  // A closing popup can be moved before it has gone, such as to its next
   // trigger a frame before it opens it again: the shift keeps the fold where
   // it is on screen.
   const hold = () => {
@@ -456,7 +462,7 @@ function trackGlide(
   const fold = () => {
     const [next, step] = glideNext(phase, { kind: 'ending' })
     if (popupBox) {
-      // Base UI can take the closing content out of flow: the box keeps its size.
+      // The closing content can be taken out of flow: the box keeps its size.
       popup.style.width = `${popupBox.width}px`
       popup.style.height = `${popupBox.height}px`
       // The fold starts: aim it at the trigger open now.
@@ -476,11 +482,35 @@ function trackGlide(
     return (reopen === 'slide' ? memory.box : memory.strip) ? reopen : null
   }
 
+  // A ui-sdk popup stays in the page once it has closed, hidden: the next
+  // open starts afresh, as a Base UI popup mounted again does.
+  const reset = () => {
+    if (phase === 'waiting') return
+    if (memory && popupBox) memory.closedAt = performance.now()
+    phase = 'waiting'
+    delete popup.dataset.glide
+    popup.style.width = ''
+    popup.style.height = ''
+    settle()
+    popupBox = null
+    last = ''
+  }
+
+  // Not placed yet: Base UI keeps its positioner see-through until it has
+  // placed it, and ui-sdk sets the side once it has.
+  const waiting = () =>
+    placedBy === 'ui-sdk'
+      ? popup.hidden || !popup.dataset.side
+      : placed.style.opacity === '0'
+
   const write = () => {
-    // Base UI keeps the positioner see-through until it has placed it.
-    if (positioner.style.opacity === '0') return
+    if (placedBy === 'ui-sdk' && popup.hidden) {
+      reset()
+      return
+    }
+    if (waiting()) return
     if (popup.hasAttribute('data-ending-style')) {
-      // The fold is driven by our attribute, not Base UI's: should the popup
+      // The fold is driven by our attribute, not the library's: should the popup
       // open again before it has gone, the clip stays where the fold has got
       // to until the next write slides on from there.
       fold()
@@ -498,7 +528,7 @@ function trackGlide(
     writeBox(popup, 'strip', box, strip)
     const [next, step] = glideNext(phase, {
       kind: 'measured',
-      instant: instant({ popup, positioner, first: phase === 'waiting' }),
+      instant: instant({ popup, placed, first: phase === 'waiting' }),
       scrolled: scroll.followed(popupBox, box),
       // Under a pixel, the clip's edges simply follow the popup's.
       resized:
@@ -545,15 +575,34 @@ function trackGlide(
     enter(next)
   }
 
+  // What a write reads from the placed element's style. The tracker writes
+  // that style too, so a change of anything else is its own and skipped.
+  const placing = () =>
+    ['left', 'top', 'transform', 'opacity', '--anchor-width', '--anchor-height']
+      .map((name) => placed.style.getPropertyValue(name))
+      .join()
+  let seen = placing()
+  const placedMoved = () => {
+    const now = placing()
+    if (now === seen) return
+    seen = now
+    write()
+  }
+
   write()
   const resize = new ResizeObserver(write)
   resize.observe(popup)
+  const style = new MutationObserver(placedMoved)
+  style.observe(placed, { attributes: true, attributeFilter: ['style'] })
   const change = new MutationObserver(write)
-  change.observe(positioner, { attributes: true, attributeFilter: ['style'] })
-  change.observe(popup, { attributes: true, attributeFilter: ['data-ending-style'] })
+  change.observe(popup, {
+    attributes: true,
+    attributeFilter: ['data-ending-style', 'data-side', 'hidden'],
+  })
   content.addEventListener('transitionend', settled)
   return () => {
     resize.disconnect()
+    style.disconnect()
     change.disconnect()
     content.removeEventListener('transitionend', settled)
     scroll.stop()
@@ -587,10 +636,9 @@ function glideClip(offset: string, shrink = '0px') {
 
 /**
  * The popup's own classes. It fades as it folds, so the strip never lingers
- * as a line, and Base UI, which waits only for the popup's own transitions,
- * keeps it mounted until then. It glides to a new place on `layout`, also on
- * Base UI's instant open, which only skips the fade, and not under reduced
- * motion. Set `--glide-radius` beside them.
+ * as a line, and the library keeps it open until then. It glides to a new
+ * place on `layout`, also on an instant open, which only skips the fade, and
+ * not under reduced motion. Set `--glide-radius` beside them.
  */
 export const glidePopupClassName =
   'group/popup relative isolate [transition:opacity_calc(var(--motion-exit-duration)*0.6)_var(--motion-exit-easing),translate_var(--motion-layout-duration)_var(--motion-layout-easing)] motion-reduce:[transition-property:opacity,--held] data-ending-style:opacity-0 motion-reduce:data-starting-style:opacity-0 data-instant:[transition-property:--held,translate] motion-reduce:data-instant:transition-none'
@@ -615,7 +663,7 @@ export function GlideSurface({
       aria-hidden
       className={cn(
         // Far past the popup on every side, so the box can be drawn wherever
-        // it slides from; the positioner is fixed, so this never scrolls the page.
+        // it slides from; the popup is fixed, so this never scrolls the page.
         'pointer-events-none absolute -inset-[100vmax] -z-10',
         // Chromium runs the clip's transition on the compositor. A shadow
         // painted on the main thread stays where the box started until it
@@ -638,22 +686,24 @@ export function GlideSurface({
 
 /**
  * The popup's content, clipped to the same box as its surface. Goes after
- * `GlideSurface`, and before an anchor from `usePopupGrow`. `reopen` and
- * `instant` say how it starts (see `GlideOptions`); by default, a popup that
- * opens soon after its group's last one slides from it, and Base UI's
+ * `GlideSurface`, and in a popup of the old library, before an anchor from
+ * `basePopupGrow`. `reopen`, `instant` and `placedBy` say how it starts and
+ * who places it (see `GlideOptions`); by default, ui-sdk places it, a popup
+ * that opens soon after its group's last one slides from it, and
  * `data-instant` on the popup skips the grow.
  */
 export function GlideContent({
   children,
   reopen = 'slide',
   instant = popupInstant,
+  placedBy = 'ui-sdk',
 }: { children: ReactNode } & Partial<GlideOptions>) {
   const memory = use(GlideMemoryContext)
   // Stable, so a render doesn't start the tracking over.
   const track = useCallback(
     (element: HTMLDivElement | null) =>
-      element ? trackGlide(element, memory, { reopen, instant }) : undefined,
-    [memory, reopen, instant],
+      element ? trackGlide(element, memory, { reopen, instant, placedBy }) : undefined,
+    [memory, reopen, instant, placedBy],
   )
   return (
     <div
@@ -665,3 +715,26 @@ export function GlideContent({
     </div>
   )
 }
+
+/** A tooltip's box: the glide popup, with a control's corner. */
+export const tooltipBoxClassName = cn(
+  glidePopupClassName,
+  '[--glide-radius:var(--control-radius-capped)]',
+)
+
+/** A tooltip's fill and hairline, inverted from the page. */
+export function TooltipSurface() {
+  return (
+    <GlideSurface
+      fill='bg-foreground forced-colors:bg-[Canvas]'
+      ring='bg-foreground forced-colors:bg-[CanvasText]'
+    />
+  )
+}
+
+/** A tooltip's label, inside `GlideContent`. */
+export const tooltipLabelClassName = cn(
+  'text-background max-w-64 px-2 py-1 text-xs leading-snug text-pretty forced-colors:text-[CanvasText]',
+  popupGrowContentClassName,
+  'group-data-instant/popup:transition-none',
+)

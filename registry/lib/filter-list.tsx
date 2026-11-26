@@ -27,14 +27,16 @@ import {
 import {
   popupGrowClassName,
   popupGrowContentClassName,
-  popupPositionerProps,
+  basePositionerProps,
   popupSurfaceClassName,
-  usePopupGrow,
+  basePopupGrow,
+  usePopupLayer,
 } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { followHeight } from '@/registry/lib/resize'
 import { edgeFadeClassName, useEdgeFades } from '@/registry/lib/scroll'
 import { Combobox as FilterListPrimitive } from '@base-ui/react/combobox'
+import { useDirection } from '@base-ui/react/direction-provider'
 import {
   type ComponentProps,
   createContext,
@@ -477,11 +479,11 @@ function FilterListContent({
   anchor,
   ...props
 }: FilterListContentProps) {
-  const { dir, style: growStyle, anchor: anchorProps } = usePopupGrow()
+  const { dir, style: growStyle, anchor: anchorProps } = basePopupGrow(useDirection())
   return (
-    <FilterListPrimitive.Portal>
+    <FilterListPrimitive.Portal container={usePopupLayer()}>
       <FilterListPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         side={side}
         align={align}
         sideOffset={sideOffset}

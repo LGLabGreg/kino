@@ -153,9 +153,9 @@ function CopyButton({
   if (iconOnly) {
     return (
       <>
-        <Tooltip>
-          {/* It stays open on the press, so the tooltip can say how it went. */}
-          <TooltipTrigger closeOnClick={false} render={button} />
+        {/* It stays open on the press, so the tooltip can say how it went. */}
+        <Tooltip closeOnPress={false}>
+          <TooltipTrigger render={button} />
           <TooltipContent {...tooltipProps}>{result ?? name}</TooltipContent>
         </Tooltip>
         {region}

@@ -54,7 +54,6 @@ import { mergeRefs } from '@/registry/lib/refs'
 import { Swap } from '@/registry/lib/swap'
 import {
   type ComponentProps,
-  type CSSProperties,
   type MouseEvent,
   useCallback,
   useId,
@@ -81,18 +80,6 @@ type CalendarState = ReturnType<typeof useCalendarState>
 /** How far the months and choices slide and zoom; a buyer's `--calendar-slide` and `--calendar-zoom` win. */
 const motion =
   '[--swap-slide:var(--calendar-slide,1.5rem)] [--swap-zoom:var(--calendar-zoom,0.92)]'
-
-/** The calendar's motion variables as set where `element` sits, for a popover that renders away from it. */
-function motionVariables(element: HTMLElement | null): CSSProperties {
-  if (!element) return {}
-  const style = getComputedStyle(element)
-  const variables: Record<string, string> = {}
-  for (const name of ['--calendar-slide', '--calendar-zoom']) {
-    const value = style.getPropertyValue(name).trim()
-    if (value) variables[name] = value
-  }
-  return variables
-}
 
 /** How a picker of months or years moved to its page: a turn slides, a change of level zooms. */
 type ChoiceMove = { slide?: 1 | -1; zoom?: 'in' | 'out' }
@@ -271,10 +258,6 @@ function MonthPopover({
   const [level, setLevel] = useState<ChoiceLevel>('months')
   // The month just picked, which keeps the pill while the popover closes.
   const [picked, setPicked] = useState<string | null>(null)
-  // The popover sits in the page's body, away from the calendar: it takes the
-  // calendar's motion variables as they are where its heading sits.
-  const [distances, setDistances] = useState<CSSProperties>({})
-  const [body, setBody] = useState<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   // Where the popover hangs from: its heading, until a pick turns the months
   // and the heading slides away with them; from then it stays where it was,
@@ -302,7 +285,6 @@ function MonthPopover({
         setPicked(null)
         setLevel('months')
         setOpened((count) => count + 1)
-        setDistances(motionVariables(triggerRef.current))
       }}
     >
       <CutTooltip
@@ -338,42 +320,36 @@ function MonthPopover({
       <PopoverContent
         aria-label={level === 'months' ? state.labels.months : state.labels.years}
         anchor={anchor}
-        style={distances}
         className={`w-[calc(var(--control-height)*7)] gap-1 ${motion}`}
-        initialFocus={() =>
-          body?.querySelector<HTMLElement>('[data-slot=calendar-choice][tabindex="0"]') ??
-          true
-        }
+        initialFocus='[data-slot=calendar-choice][tabindex="0"]'
       >
-        <div ref={setBody} className='contents'>
-          <ChoicePicker
-            key={opened}
-            labels={state.labels}
-            locale={state.locale}
-            rtl={state.rtl}
-            rules={{ min: state.min, max: state.max }}
-            today={state.today}
-            picked={picked ?? month}
-            opensOn={{ level: 'months', year: shown.year }}
-            final='months'
-            onLevelChange={setLevel}
-            onPick={(value, event) => {
-              left.current = triggerRef.current?.getBoundingClientRect() ?? null
-              const shownFirst = state.goTo(
-                value,
-                offset,
-                event.nativeEvent,
-                event.currentTarget,
-              )
-              if (shownFirst === null) return
-              // This heading leaves with the months it named, and the popover
-              // with it: focus goes to the heading that takes its place.
-              setPicked(value)
-              setOpen(false)
-              focusHeadingAfter(triggerRef.current, offset)
-            }}
-          />
-        </div>
+        <ChoicePicker
+          key={opened}
+          labels={state.labels}
+          locale={state.locale}
+          rtl={state.rtl}
+          rules={{ min: state.min, max: state.max }}
+          today={state.today}
+          picked={picked ?? month}
+          opensOn={{ level: 'months', year: shown.year }}
+          final='months'
+          onLevelChange={setLevel}
+          onPick={(value, event) => {
+            left.current = triggerRef.current?.getBoundingClientRect() ?? null
+            const shownFirst = state.goTo(
+              value,
+              offset,
+              event.nativeEvent,
+              event.currentTarget,
+            )
+            if (shownFirst === null) return
+            // This heading leaves with the months it named, and the popover
+            // with it: focus goes to the heading that takes its place.
+            setPicked(value)
+            setOpen(false)
+            focusHeadingAfter(triggerRef.current, offset)
+          }}
+        />
       </PopoverContent>
     </Popover>
   )

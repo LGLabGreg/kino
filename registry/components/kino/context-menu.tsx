@@ -12,7 +12,7 @@ import {
   MenuSubContent,
   MenuSubTrigger,
 } from '@/registry/lib/menu'
-import { popupPositionerProps } from '@/registry/lib/popup'
+import { basePositionerProps, usePopupLayer } from '@/registry/lib/popup'
 import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu'
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'
 import type { ComponentProps } from 'react'
@@ -49,9 +49,9 @@ function ContextMenuContent({
 }: ComponentProps<typeof MenuPopup> &
   Pick<ContextMenuPrimitive.Positioner.Props, 'sideOffset' | 'alignOffset'>) {
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={usePopupLayer()}>
       <ContextMenuPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         sideOffset={sideOffset}
         alignOffset={alignOffset}
       >

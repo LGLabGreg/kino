@@ -10,3 +10,23 @@ export function reducesMotion(element: Element | null = document.documentElement
     element?.closest("[data-motion='reduce']") != null
   )
 }
+
+/**
+ * Calls `onChange` when motion may have stopped or started being reduced:
+ * the device's setting changed, or `data-motion` changed anywhere on the
+ * page. For `useSyncExternalStore` with `reducesMotion`. Returns what stops it.
+ */
+export function watchReducedMotion(onChange: () => void) {
+  const device = window.matchMedia('(prefers-reduced-motion: reduce)')
+  device.addEventListener('change', onChange)
+  const page = new MutationObserver(onChange)
+  page.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-motion'],
+    subtree: true,
+  })
+  return () => {
+    device.removeEventListener('change', onChange)
+    page.disconnect()
+  }
+}

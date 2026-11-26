@@ -19,7 +19,7 @@ import {
 } from '@/registry/components/kino/tooltip'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
 import { useControllable } from '@/registry/lib/controllable'
-import { CutLines, CutTooltip, useCut } from '@/registry/lib/cut'
+import { CutLines, CutTooltip, undescribed, useCut } from '@/registry/lib/cut'
 import { GLIDE_GROUP_CLOSE_DELAY } from '@/registry/lib/glide'
 import {
   followPick,
@@ -747,15 +747,10 @@ function RowTooltip({ tooltip, row }: { tooltip?: ReactNode; row: ReactElement }
   const shown = rail ? Boolean(tooltip) : cut.length > 0
   return (
     <SwapTextTitleContext value={false}>
-      <Tooltip>
-        <TooltipTrigger
-          ref={setElement}
-          disabled={!shown}
-          // Its name holds the whole label already, covered or cut.
-          aria-describedby={undefined}
-          render={row}
-        />
-        <TooltipContent side='inline-end'>
+      <Tooltip disabled={!shown}>
+        {/* Its name holds the whole label already, covered or cut. */}
+        <TooltipTrigger ref={setElement} render={undescribed(row)} />
+        <TooltipContent side='end'>
           {rail ? tooltip : <CutLines lines={cut} />}
         </TooltipContent>
       </Tooltip>

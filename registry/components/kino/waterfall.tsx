@@ -1,7 +1,6 @@
 'use client'
 
 import { useSpinner } from '@/registry/components/kino/spinner'
-import { TooltipPopup } from '@/registry/components/kino/tooltip'
 import { Tree, TreeItem } from '@/registry/components/kino/tree'
 import { useAnnouncer } from '@/registry/lib/announce'
 import {
@@ -13,6 +12,7 @@ import {
   labelStep,
 } from '@/registry/lib/chart-math'
 import {
+  ChartTooltipBox,
   type ChartFormat,
   ChartLegendToggles,
   ChartStyle,
@@ -921,7 +921,7 @@ function WaterfallSpan({
 function WaterfallTooltip({
   className,
   ...props
-}: Omit<ComponentProps<typeof TooltipPopup>, 'children' | 'anchor'>) {
+}: Omit<ComponentProps<typeof ChartTooltipBox>, 'children' | 'anchor'>) {
   const { spans, config, kinds, write, messages, id } = useWaterfall()
   const { active } = use(WaterfallActiveContext)
   // Escape closes it until another span is lit, or this one again.
@@ -948,7 +948,7 @@ function WaterfallTooltip({
         disableHoverablePopup
       >
         {span && (
-          <TooltipPopup
+          <ChartTooltipBox
             side='top'
             sideOffset={8}
             anchor={span.bar}
@@ -996,7 +996,7 @@ function WaterfallTooltip({
                 </div>
               )}
             </div>
-          </TooltipPopup>
+          </ChartTooltipBox>
         )}
       </TooltipPrimitive.Root>
     </GlideGroupMemory>

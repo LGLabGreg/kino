@@ -24,7 +24,17 @@ import {
   visibleItems,
   withoutItems,
 } from '@/registry/components/kino/notification-center/notification-list'
-import { Tabs, TabsPanel, TabsList, TabsTab } from '@/registry/components/kino/tabs'
+import {
+  Popover,
+  PopoverBody,
+  PopoverClose,
+  PopoverContent,
+  PopoverFooter,
+  PopoverHeader,
+  type PopoverOpenChangeDetails,
+  PopoverTitle,
+} from '@/registry/components/kino/popover'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@/registry/components/kino/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -49,16 +59,6 @@ import {
   rowHighlightClassName,
   tintedRowTextClassName,
 } from '@/registry/lib/highlight'
-import {
-  PopoverSheet,
-  PopoverSheetBody,
-  PopoverSheetContent,
-  PopoverSheetFooter,
-  PopoverSheetHeader,
-  itemPressDetails,
-  type PopoverSheetOpenChangeDetails,
-  PopoverSheetTitle,
-} from '@/registry/lib/popover-sheet'
 import { markMounted, mergeRefs } from '@/registry/lib/refs'
 import { Swap } from '@/registry/lib/swap'
 import {
@@ -80,7 +80,7 @@ import { cn } from '@/lib/utils'
 
 /*
  * What every notification center shares: the bell, the panel it opens (a
- * popover, or a bottom sheet on a phone), the All and Unread tabs, the days
+ * popover, or a bottom sheet on a phone unless motion is reduced), the All and Unread tabs, the days
  * the notifications fall on, and the rows' common parts. A row that leaves
  * fades where it was on `exit` while the rows under it glide up on `layout`
  * to close its gap (`useFlow`), and focus moves to the row that takes its
@@ -101,12 +101,12 @@ export interface NotificationCenterProps {
   onOpenNotification?: (item: NotificationItem, event: MouseEvent) => void
   open?: boolean
   defaultOpen?: boolean
-  onOpenChange?: (open: boolean, eventDetails: PopoverSheetOpenChangeDetails) => void
+  onOpenChange?: (open: boolean, details: PopoverOpenChangeDetails) => void
   /** Which notifications show: `all`, or only those still `unread`. */
   tab?: NotificationTab
   defaultTab?: NotificationTab
   onTabChange?: (tab: NotificationTab) => void
-  /** Whether the popover traps focus. The sheet on a phone does too, unless this is `false`. */
+  /** Whether the popover holds the focus and makes the page inert. The sheet on a phone always does. */
   modal?: boolean
   /** What the notifications are called: the panel's title and the bell's name. */
   title?: string
@@ -254,14 +254,14 @@ function NotificationShell({
     setKept([])
     changeTab(next)
   }
-  const [isOpen, setOpen] = useControllable<boolean, [PopoverSheetOpenChangeDetails]>(
+  const [isOpen, setOpen] = useControllable<boolean, [PopoverOpenChangeDetails]>(
     openProp,
     defaultOpen,
     onOpenChange,
   )
-  const changeOpen = (next: boolean, details: PopoverSheetOpenChangeDetails) => {
+  const changeOpen = (next: boolean, details: PopoverOpenChangeDetails) => {
     setOpen(next, details)
-    if (!next && !details.isCanceled) setKept([])
+    if (!next && !details.canceled) setKept([])
   }
   // What a handler that runs later, such as an action's once its promise
   // settles, works on: the list and the tab as they are then.
@@ -269,7 +269,6 @@ function NotificationShell({
   useLayoutEffect(() => {
     latest.current = { items, tab }
   })
-  const tabsRef = useRef<HTMLDivElement>(null)
   const announcer = useAnnouncer()
   const unread = unreadCount(items)
 
@@ -364,7 +363,6 @@ function NotificationShell({
           ids: [item.id],
         })
       onOpenNotification?.(item, event)
-      changeOpen(false, itemPressDetails(event.nativeEvent))
     },
     opens: (item) => item.href !== undefined || onOpenNotification !== undefined,
     announce: announcer.announce,
@@ -382,33 +380,36 @@ function NotificationShell({
 
   return (
     <CenterContext value={api}>
-      <PopoverSheet open={isOpen} onOpenChange={changeOpen} modal={modal}>
+      {/* A bottom sheet on a phone, where a list this long needs the screen's width, unless motion is reduced. */}
+      <Popover open={isOpen} onOpenChange={changeOpen} modal={modal} presentation='auto'>
         <NotificationBell
           count={unread}
           title={title}
           locale={localeProp}
           className={className}
         />
-        <PopoverSheetContent
-          fixedHeight
+        <PopoverContent
+          align='end'
           // The picked tab, so a press of Enter on opening never marks everything read.
-          initialFocus={() =>
-            tabsRef.current?.querySelector<HTMLElement>('[aria-selected=true]') ?? true
-          }
+          initialFocus='[role=tab][aria-selected=true]'
+          // A header, a body that scrolls and a footer. The popover is always
+          // `--notification-center-height` tall, so the other tab never resizes it;
+          // the sheet follows what it holds.
+          className='min-h-0 w-(--notification-center-width,24rem) gap-0 p-0 group-data-[presentation=popover]/popup:h-(--notification-center-height,32rem) group-data-[presentation=popover]/popup:max-h-[calc(var(--popup-available-height)-2px)]'
         >
           <Tabs
             value={tab}
             onValueChange={(next) => setTab(next as NotificationTab)}
             className='contents'
           >
-            <PopoverSheetHeader className='gap-3'>
+            <PopoverHeader className='shrink-0 gap-3 px-(--popover-edge) pt-(--popover-edge) pb-2 group-data-[presentation=sheet]/popup:pb-5'>
               <div className='flex min-h-(--control-height-sm) items-center gap-2'>
-                <PopoverSheetTitle className='min-w-0 flex-1 wrap-break-word'>
+                <PopoverTitle className='min-w-0 flex-1 text-base wrap-break-word'>
                   {title}
-                </PopoverSheetTitle>
+                </PopoverTitle>
                 <Header unread={unread} markAllRead={markAllRead} />
               </div>
-              <TabsList ref={tabsRef} className='self-stretch *:w-full'>
+              <TabsList className='self-stretch *:w-full'>
                 <TabsTab value='all' className='flex-1'>
                   All
                 </TabsTab>
@@ -426,9 +427,9 @@ function NotificationShell({
                   </Swap>
                 </TabsTab>
               </TabsList>
-            </PopoverSheetHeader>
+            </PopoverHeader>
             {/* Rows sit `--notification-inset` in from the body's sides, so their content lines up with the title. */}
-            <PopoverSheetBody className='min-h-full px-[calc(var(--popover-sheet-edge)-var(--notification-inset))] pb-1.5 [--notification-inset:calc(var(--control-padding)*0.8)]'>
+            <PopoverBody className='min-h-full px-[calc(var(--popover-edge)-var(--notification-inset))] pb-1.5 [--notification-inset:calc(var(--control-padding)*0.8)]'>
               {(['all', 'unread'] as const).map((value) => (
                 <TabsPanel
                   key={value}
@@ -446,18 +447,16 @@ function NotificationShell({
                   />
                 </TabsPanel>
               ))}
-            </PopoverSheetBody>
+            </PopoverBody>
           </Tabs>
           {below}
           {footer ? (
             // From the start edge, as in the popover, not a dialog's buttons at the end.
-            <PopoverSheetFooter className='flex-row @xs:justify-start'>
-              {footer}
-            </PopoverSheetFooter>
+            <PopoverFooter className='@xs:justify-start'>{footer}</PopoverFooter>
           ) : null}
           {announcer.region}
-        </PopoverSheetContent>
-      </PopoverSheet>
+        </PopoverContent>
+      </Popover>
       {arrivalRegion}
     </CenterContext>
   )
@@ -663,29 +662,35 @@ function NotificationOpen({
   }
   const cover =
     'focus-visible:outline-hidden after:absolute after:inset-0 after:rounded-[inherit] forced-colors:focus-visible:after:outline-2 forced-colors:focus-visible:after:outline-[Highlight]'
-  if (item.href !== undefined) {
-    return (
-      <a
-        id={titleId}
-        href={item.href}
-        data-notification-control='open'
-        onClick={(event) => open(item, event)}
-        className={cn(textClassName, cover)}
-      >
-        {label}
-      </a>
-    )
-  }
+  // Opening a row closes the panel. The app hears of it once the click has
+  // closed it, from the box around, so its `preventDefault()`, such as a
+  // router's, stops the link but never the close.
   return (
-    <button
-      type='button'
-      id={titleId}
-      data-notification-control='open'
-      onClick={(event) => open(item, event)}
-      className={cn(textClassName, cover, 'text-start')}
-    >
-      {label}
-    </button>
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the click comes from the link or button inside, which answers the keys too.
+    <span className='contents' onClick={(event) => open(item, event)}>
+      {item.href !== undefined ? (
+        <PopoverClose
+          render={({ children, ...props }) => (
+            <a {...props} href={item.href}>
+              {children}
+            </a>
+          )}
+          id={titleId}
+          data-notification-control='open'
+          className={cn(textClassName, cover)}
+        >
+          {label}
+        </PopoverClose>
+      ) : (
+        <PopoverClose
+          id={titleId}
+          data-notification-control='open'
+          className={cn(textClassName, cover, 'text-start')}
+        >
+          {label}
+        </PopoverClose>
+      )}
+    </span>
   )
 }
 

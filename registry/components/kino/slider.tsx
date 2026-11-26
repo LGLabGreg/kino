@@ -2,6 +2,7 @@
 
 import { useFieldProps } from '@/registry/lib/field-control'
 import { numberFormatter } from '@/registry/lib/number-format'
+import { usePopupLayer } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { markResizing } from '@/registry/lib/resize'
 import {
@@ -397,9 +398,10 @@ function SliderThumbValue({
     },
     [control],
   )
+  const layer = usePopupLayer()
   return (
     <TooltipPrimitive.Root open={open}>
-      <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Portal container={layer}>
         <TooltipPrimitive.Positioner
           anchor={control}
           side='top'

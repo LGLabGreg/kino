@@ -19,9 +19,10 @@ import {
 } from '@/registry/lib/menu'
 import {
   popupGrowClassName,
-  popupPositionerProps,
+  basePositionerProps,
   popupSurfaceClassName,
-  usePopupGrow,
+  basePopupGrow,
+  usePopupLayer,
 } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { followEdges } from '@/registry/lib/scroll'
@@ -31,6 +32,7 @@ import {
   type TriggerTokenContent,
   textFieldEditor,
 } from '@/registry/lib/trigger-editor'
+import { useDirection } from '@base-ui/react/direction-provider'
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover'
 import {
   type ComponentProps,
@@ -554,11 +556,11 @@ function TriggerMenuContent({
     'side' | 'align' | 'sideOffset' | 'alignOffset'
   >) {
   const { anchor } = useTriggerMenu()
-  const { dir, style: growStyle, anchor: anchorProps } = usePopupGrow()
+  const { dir, style: growStyle, anchor: anchorProps } = basePopupGrow(useDirection())
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={usePopupLayer()}>
       <PopoverPrimitive.Positioner
-        {...popupPositionerProps}
+        {...basePositionerProps}
         side={side}
         align={align}
         sideOffset={sideOffset}
