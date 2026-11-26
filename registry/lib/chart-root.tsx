@@ -3,6 +3,7 @@
 import { AnimatedNumber } from '@/registry/components/kino/animated-number'
 import { Button, buttonVariants } from '@/registry/components/kino/button'
 import { announce } from '@/registry/lib/announce'
+import { type ChartAgentMoves, chart as chartPrimitive } from '@/registry/lib/chart-agent'
 import {
   type ChartConfig,
   type ChartDatum,
@@ -38,6 +39,7 @@ import { FOLLOWS_TRANSITION, holdResizing } from '@/registry/lib/resize'
 import { revealBehavior, revealBy } from '@/registry/lib/scroll'
 import { Swap } from '@/registry/lib/swap'
 import { isRTL } from '@ui-sdk/core'
+import { type PartProps, usePart, usePrimitive } from '@ui-sdk/react/primitive'
 import { Toggle as TogglePrimitive } from '@ui-sdk/react/toggle'
 import {
   createTooltipController,
@@ -1618,9 +1620,16 @@ function plotPointOf(event: {
  * press, Enter or Space picks the one reached. The tooltip's one trigger
  * fills it.
  */
-function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
+function ChartBrowse({
+  reader,
+  agentRef,
+}: {
+  reader: ChartBrowseReader
+  /** Where the browse stop's moves go for the chart's agent primitive, as the keys run them. */
+  agentRef: RefObject<ChartAgentMoves | null>
+}) {
   const {
-    reader: { holds },
+    reader: { holds, items },
     status,
     messages,
     plot,
@@ -1646,6 +1655,62 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
     setLast(null)
     setFocus(reader.start)
   }, [restart, reader, setFocus])
+
+  // The moves the keys and an agent share.
+  const reach = (next: ChartTarget) => {
+    setLast(next)
+    setFocus(next)
+  }
+  /** Opens `target`, as Enter does, and starts the keys again from the new view's first stop; false when it doesn't open. */
+  const openAt = (target: ChartTarget) => {
+    const zoom = reader.open(target)
+    if (!zoom) return false
+    zoom()
+    setRestart(true)
+    return true
+  }
+  /** Goes back out, as Escape does once nothing is lit; false when there is nowhere to go. */
+  const goBack = () => {
+    if (!reader.back) return false
+    reader.back()
+    setLast(null)
+    return true
+  }
+  // An agent's focus brings its stop into view, as the keys do, though the plot doesn't hold focus.
+  const agentReveal = useRef(false)
+  useLayoutEffect(() => {
+    // A row by its key, and the name an agent knows it by.
+    const rowOf = (key: string) => {
+      const name = reader.table.rows.find((row) => row.key === key)?.name ?? key
+      const target = items.find((each) => targetKey(each) === key && holds(each))
+      if (!target) throw new Error(`No row "${name}" in the chart now.`)
+      return { target, name }
+    }
+    agentRef.current = {
+      focus: (key) => {
+        agentReveal.current = true
+        reach(rowOf(key).target)
+      },
+      open: (key) => {
+        const { target, name } = rowOf(key)
+        if (!openAt(target)) throw new Error(`"${name}" doesn't open.`)
+      },
+      // As Escape: the tooltip closes first, and only then does what was opened close.
+      back: () => {
+        if (focus !== null) {
+          setFocus(null)
+          return
+        }
+        if (!goBack()) throw new Error('Nothing is focused or opened.')
+      },
+    }
+  })
+  useLayoutEffect(
+    () => () => {
+      agentRef.current = null
+    },
+    [agentRef],
+  )
   // In a chart that scrolls sideways, the keys bring the mark they reach into view, clear of
   // the axes that stay at its sides; the pointer only lights what is already in view.
   const anchor = focus === null ? null : reader.anchor(focus)
@@ -1655,9 +1720,16 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
   useEffect(() => {
     if (focusKey === revealed.current) return
     revealed.current = focusKey
+    const byAgent = agentReveal.current
+    agentReveal.current = false
     const element = plot.current
     const frame = element?.parentElement
-    if (anchorX === null || !element || !frame || !element.matches(':focus-visible'))
+    if (
+      anchorX === null ||
+      !element ||
+      !frame ||
+      !(byAgent || element.matches(':focus-visible'))
+    )
       return
     if (frame.scrollWidth <= frame.clientWidth) return
     const box = element.getBoundingClientRect()
@@ -1752,24 +1824,17 @@ function ChartBrowse({ reader }: { reader: ChartBrowseReader }) {
         if (event.key === 'Escape' && reader.back) {
           event.preventDefault()
           event.stopPropagation()
-          reader.back()
-          setLast(null)
+          goBack()
           return
         }
-        if (event.key === 'Enter' || event.key === ' ') {
-          const zoom = reader.open(reached)
-          if (zoom) {
-            event.preventDefault()
-            zoom()
-            setRestart(true)
-            return
-          }
+        if ((event.key === 'Enter' || event.key === ' ') && openAt(reached)) {
+          event.preventDefault()
+          return
         }
         const next = reader.step(reached, event.key)
         if (next !== null) {
           event.preventDefault()
-          setLast(next)
-          setFocus(next)
+          reach(next)
           return
         }
         if (selectable && (event.key === 'Enter' || event.key === ' ')) {
@@ -1951,43 +2016,91 @@ function ChartFrame({
   const figureRef = useMemo(() => mergeRefs(figure, ref, markMounted), [figure, ref])
   const descriptionId = `${root.id}-description`
   const { browse } = root.reader
+  const agent = useChartAgent(root.status, browse)
+  const text = usePart(
+    agent.handle,
+    'description',
+    {},
+    { id: descriptionId, className: 'sr-only', children: description },
+    'p',
+  )
+  const frame = usePart(
+    agent.handle,
+    'root',
+    {},
+    {
+      render: <figure ref={figureRef} />,
+      // ui-sdk names the figure `data-slot='chart'`; the chart's own name is an attribute of its own.
+      [`data-${slot}`]: '',
+      'data-chart': root.id,
+      'data-measuring': measuring ? '' : undefined,
+      'aria-label': root.label,
+      // Yours, as you pass them, come after the chart's own, as on any element.
+      ...props,
+      // Your description, beside the chart's own.
+      'aria-describedby':
+        [props['aria-describedby'], description ? descriptionId : null]
+          .filter(Boolean)
+          .join(' ') || undefined,
+      className: cn(
+        chartFrameClassName,
+        // Waiting for the plot's size, everything but the legend holds its place unseen.
+        'data-measuring:*:not-data-[slot=chart-legend]:invisible',
+        // The server draws left to right, so a page in right to left shows it only once it has read its direction.
+        'rtl:not-data-mounted:*:invisible',
+        className,
+      ),
+      style: inset
+        ? ({ '--chart-inset': `${inset}px`, ...style } as CSSProperties)
+        : style,
+      children: (
+        <>
+          <ChartStyle id={root.id} config={root.config} series={root.series} />
+          {description && text}
+          {children}
+          {browse && <ChartBrowse reader={browse} agentRef={agent.moves} />}
+          <ChartStatusOverlay empty={empty} />
+          {browse && <ChartDataTable table={browse.table} />}
+        </>
+      ),
+    } as PartProps<'figure'>,
+    'figure',
+  )
   return (
     <ChartRootContext value={root}>
       <ChartFocus root={root} {...focus}>
-        <figure
-          ref={figureRef}
-          data-slot={slot}
-          data-chart={root.id}
-          data-measuring={measuring ? '' : undefined}
-          aria-label={root.label}
-          aria-describedby={description ? descriptionId : undefined}
-          className={cn(
-            chartFrameClassName,
-            // Waiting for the plot's size, everything but the legend holds its place unseen.
-            'data-measuring:*:not-data-[slot=chart-legend]:invisible',
-            // The server draws left to right, so a page in right to left shows it only once it has read its direction.
-            'rtl:not-data-mounted:*:invisible',
-            className,
-          )}
-          style={
-            inset ? ({ '--chart-inset': `${inset}px`, ...style } as CSSProperties) : style
-          }
-          {...props}
-        >
-          <ChartStyle id={root.id} config={root.config} series={root.series} />
-          {description && (
-            <p id={descriptionId} className='sr-only'>
-              {description}
-            </p>
-          )}
-          {children}
-          {browse && <ChartBrowse reader={browse} />}
-          <ChartStatusOverlay empty={empty} />
-          {browse && <ChartDataTable table={browse.table} />}
-        </figure>
+        {frame}
       </ChartFocus>
     </ChartRootContext>
   )
+}
+
+/**
+ * The chart's agent primitive (`registry/lib/chart-agent.ts`): its status
+ * and data table, and, on a chart the keys browse, the browse stop's moves,
+ * which `ChartBrowse` hands in as it renders.
+ */
+function useChartAgent(status: ChartStatus, browse: ChartBrowseReader | null) {
+  const [moves] = useState<RefObject<ChartAgentMoves | null>>(() => ({
+    current: null,
+  }))
+  const [delegate] = useState<ChartAgentMoves>(() => {
+    const current = () => {
+      if (!moves.current) throw new Error('The chart has nothing to browse now.')
+      return moves.current
+    }
+    return {
+      focus: (key) => current().focus(key),
+      open: (key) => current().open(key),
+      back: () => current().back(),
+    }
+  })
+  const handle = usePrimitive(chartPrimitive, {
+    status,
+    table: browse?.table ?? null,
+    moves: browse ? delegate : null,
+  })
+  return { handle, moves }
 }
 
 /**

@@ -944,7 +944,7 @@ function seriesWords(
     tooltip: (item) => <ChartTooltipContent index={item.index} />,
     table: {
       header: messages.category,
-      columns: own ? [own.name] : shown.map((key) => config[key]?.label ?? key),
+      columns: own ? [own.name] : shown.map((key) => seriesName(config, key)),
       rows: stops.map((stop) => ({
         key: stop.key,
         name: input.stopText(stop),

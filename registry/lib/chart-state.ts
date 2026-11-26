@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react'
-
 /*
  * The chart root's logic, as pure functions: what it shows, what it points
  * at, what is leaving, what its data table holds and how long a move runs.
@@ -109,7 +107,7 @@ export interface ChartTableRow {
  */
 export interface ChartTable {
   header: string
-  columns: readonly ReactNode[]
+  columns: readonly string[]
   rows: readonly ChartTableRow[]
   footer: readonly string[]
 }

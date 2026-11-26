@@ -168,7 +168,7 @@ function Sparkline({
 }: SparklineProps) {
   const keys = Object.keys(props.config)
   const shared = {
-    'data-slot': 'sparkline',
+    'data-sparkline': '',
     ...props,
     domain: sparklineDomain(props.data, keys, variant, domain, fit),
     messages: { ...sparklineMessages, ...messages },
