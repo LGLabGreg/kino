@@ -1,5 +1,7 @@
 'use client'
 
+import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
+import { CutTooltip } from '@/registry/lib/cut'
 import { useFoldMove } from '@/registry/lib/fold'
 import { scrollRegionRingClassName, useScrollRegion } from '@/registry/lib/scroll'
 import {
@@ -7,6 +9,7 @@ import {
   type CodeToken,
   highlightCode,
   holdColours,
+  languageName,
   lineSet,
   plainTokens,
 } from '@/registry/lib/syntax'
@@ -156,23 +159,91 @@ const lineMarkClassName =
 
 const SIGNS: Record<LineMark, string> = { added: '+', removed: '−', highlighted: '' }
 
-/** One line: its number, its sign when it is added or removed, and its tokens. */
+/** A stretch of a line's text, and whether the line kept it or changed it, such as a diff's words. */
+type LineWord = { op: 'same' | 'added' | 'removed'; text: string }
+
+/** A token, or the part of one, and whether it sits in a word its line changed. */
+type MarkedToken = CodeToken & { changed: boolean }
+
+/**
+ * A line's tokens cut where its changed words start and end, so each piece
+ * is either kept or changed. `words` spell the same line as `tokens` do;
+ * where they run short, the rest is kept.
+ */
+function markWords(
+  tokens: readonly CodeToken[],
+  words: readonly LineWord[],
+): MarkedToken[] {
+  // Where each changed stretch of the line starts and ends, in characters.
+  const stretches: [number, number][] = []
+  let at = 0
+  for (const word of words) {
+    if (word.op !== 'same') stretches.push([at, at + word.text.length])
+    at += word.text.length
+  }
+  const pieces: MarkedToken[] = []
+  let start = 0
+  for (const token of tokens) {
+    const end = start + token.content.length
+    let from = start
+    for (const [stretchStart, stretchEnd] of stretches) {
+      if (stretchEnd <= from || stretchStart >= end) continue
+      if (stretchStart > from) {
+        pieces.push({
+          ...token,
+          content: token.content.slice(from - start, stretchStart - start),
+          changed: false,
+        })
+        from = stretchStart
+      }
+      const to = Math.min(stretchEnd, end)
+      pieces.push({
+        ...token,
+        content: token.content.slice(from - start, to - start),
+        changed: true,
+      })
+      from = to
+    }
+    if (from < end)
+      pieces.push({
+        ...token,
+        content: token.content.slice(from - start),
+        changed: false,
+      })
+    start = end
+  }
+  return pieces
+}
+
+// A changed word inside an added or removed line: a deeper band of the line's colour.
+const changedWordClassName =
+  'rounded-[2px] data-[mark=added]:bg-[color-mix(in_oklab,var(--code-added)_16%,transparent)] data-[mark=removed]:bg-[color-mix(in_oklab,var(--code-removed)_16%,transparent)] forced-colors:underline'
+
+/** One line: its number, its sign when it is added or removed, and its tokens, with the words it changed marked. */
 function CodeLine({
   number,
   mark,
   tokens,
+  words,
   lineNumbers,
   signs,
   className,
   ...props
 }: ComponentProps<'span'> & {
-  number: number
+  /** Left out for a line the shown text doesn't number, such as a diff's removed line. */
+  number?: number
   mark?: LineMark
   tokens: CodeToken[]
+  /** The words an added or removed line kept and changed, from its partner on the other side. */
+  words?: readonly LineWord[]
   lineNumbers: boolean
   /** Whether the block has added or removed lines, so every line keeps a column for the sign. */
   signs: boolean
 }) {
+  const pieces =
+    words && (mark === 'added' || mark === 'removed')
+      ? markWords(tokens, words)
+      : tokens.map((token) => ({ ...token, changed: false }))
   return (
     <span
       data-slot='code-line'
@@ -201,11 +272,16 @@ function CodeLine({
         </span>
       ) : null}
       <span className='flex-1 whitespace-pre'>
-        {tokens.map((token, index) => (
+        {pieces.map((token, index) => (
           <span
             key={index}
-            style={token.color ? { color: token.color } : undefined}
-            className={token.italic ? 'italic' : undefined}
+            data-mark={token.changed ? mark : undefined}
+            // A changed word takes the text colour on its band: a token's own colour, such as a string's green, falls under contrast there.
+            style={token.color && !token.changed ? { color: token.color } : undefined}
+            className={cn(
+              token.italic && 'italic',
+              token.changed && changedWordClassName,
+            )}
           >
             {token.content}
           </span>
@@ -344,13 +420,65 @@ function CodeScroller({
   )
 }
 
+// The card code sits in, and its header: what the Code block and the Diff share.
+const codeCardClassName =
+  'bg-card text-card-foreground flex min-w-0 flex-col overflow-clip rounded-(--surface-radius) border text-sm'
+const codeHeaderClassName =
+  'flex min-h-(--control-height-lg) min-w-0 items-center gap-2 border-b ps-(--surface-padding) pe-1.5'
+
+/** What a code card's header names: a file with its icon, or else the language. */
+function CodeTitle({
+  title,
+  language,
+  id,
+}: {
+  title?: string
+  language: CodeLanguage
+  id?: string
+}) {
+  return (
+    <>
+      {title !== undefined ? (
+        <IconPlaceholder
+          lucide='FileCodeIcon'
+          tabler='IconFileCode'
+          hugeicons='FileScriptIcon'
+          phosphor='FileCodeIcon'
+          remixicon='RiFileCodeLine'
+          aria-hidden
+          className='text-muted-foreground size-4 shrink-0'
+        />
+      ) : null}
+      <CutTooltip
+        render={
+          <span
+            id={id}
+            data-cut
+            dir='auto'
+            className={cn(
+              'min-w-0 flex-1 truncate text-xs',
+              title !== undefined ? 'font-mono' : 'text-muted-foreground font-medium',
+            )}
+          >
+            {title ?? languageName(language)}
+          </span>
+        }
+      />
+    </>
+  )
+}
+
 export {
   CodeLine,
+  CodeTitle,
+  codeCardClassName,
+  codeHeaderClassName,
   CodeLines,
+  markWords,
   CodeScroller,
   fileValue,
   gutterWidth,
   lineMarks,
   useCodeTokens,
 }
-export type { CodeBlockProps, CodeFile, LineList, LineMark }
+export type { CodeBlockProps, CodeFile, LineList, LineMark, MarkedToken }

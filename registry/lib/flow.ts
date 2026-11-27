@@ -315,8 +315,10 @@ export function leaveAsCopies(leaving: readonly Leaving[]): HTMLElement[] {
   withoutTransition(
     copies,
     () => {
+      // A neighbour taken out in the same batch of changes, such as the text
+      // between two words, is no place to go back before: the copy goes last.
       leaving.forEach(({ parent, next = null }, at) =>
-        parent.insertBefore(copies[at]!, next),
+        parent.insertBefore(copies[at]!, next?.parentNode === parent ? next : null),
       )
       leaving.forEach(({ from }, at) => taken.push(...from(copies[at]!)))
     },
@@ -491,6 +493,8 @@ export function followFlow(
     row instanceof HTMLTableElement || row instanceof HTMLTableSectionElement
   const heights = new WeakMap<Element, number>()
   const widths = new WeakMap<Element, number>()
+  const aroundOnly = (entries: readonly ResizeObserverEntry[]) =>
+    entries.every((entry) => around.has(entry.target))
   const resizes = new ResizeObserver((entries) => {
     let moves = false
     let narrowed = false
@@ -521,7 +525,12 @@ export function followFlow(
     changedInside = false
     const change = { moved: moves, narrowed, inside }
     if (resizeGlides(change)) glide()
-    else measure()
+    // What sits around the row only grew or shrank in height, such as the
+    // frame that follows it while it moves: nothing in the row moved
+    // against it, so what was seen still holds. Measuring every item on
+    // every frame of that move held the main thread (LGL-654: a Text
+    // diff's words, about 330 reads a frame).
+    else if (!aroundOnly(entries) || narrowed || inside) measure()
     resized?.(resizeJumps(change))
   })
 

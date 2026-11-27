@@ -10,11 +10,13 @@ import {
   type CodeFile,
   CodeLines,
   CodeScroller,
+  CodeTitle,
+  codeCardClassName,
+  codeHeaderClassName,
   fileValue,
   useCodeTokens,
 } from '@/registry/lib/code-lines'
 import { useControllable } from '@/registry/lib/controllable'
-import { CutTooltip } from '@/registry/lib/cut'
 import { bringTopBack } from '@/registry/lib/fold'
 import { followHeight } from '@/registry/lib/resize'
 import { codeLines, languageName } from '@/registry/lib/syntax'
@@ -30,20 +32,6 @@ import { cn } from '@/lib/utils'
 
 /** Lines past the collapsed ones that aren't worth hiding: showing them costs less than a click. */
 const COLLAPSE_SLACK = 3
-
-function FileIcon() {
-  return (
-    <IconPlaceholder
-      lucide='FileCodeIcon'
-      tabler='IconFileCode'
-      hugeicons='FileScriptIcon'
-      phosphor='FileCodeIcon'
-      remixicon='RiFileCodeLine'
-      aria-hidden
-      className='text-muted-foreground size-4 shrink-0'
-    />
-  )
-}
 
 function CodeBody({
   file,
@@ -197,16 +185,10 @@ function CodeBlock({
       ref={rootRef}
       data-slot='code-block'
       data-streaming={streaming ? '' : undefined}
-      className={cn(
-        'bg-card text-card-foreground flex min-w-0 flex-col overflow-clip rounded-(--surface-radius) border text-sm',
-        className,
-      )}
+      className={cn(codeCardClassName, className)}
     >
       <FileSwitch tabbed={tabbed} value={fileValue(active)} onValueChange={setValue}>
-        <div
-          data-slot='code-block-header'
-          className='flex min-h-(--control-height-lg) min-w-0 items-center gap-2 border-b ps-(--surface-padding) pe-1.5'
-        >
+        <div data-slot='code-block-header' className={codeHeaderClassName}>
           {tabbed ? (
             <TabsList
               variant='line'
@@ -224,26 +206,7 @@ function CodeBlock({
               ))}
             </TabsList>
           ) : (
-            <>
-              {active.title !== undefined ? <FileIcon /> : null}
-              <CutTooltip
-                render={
-                  <span
-                    id={titleId}
-                    data-cut
-                    dir='auto'
-                    className={cn(
-                      'min-w-0 flex-1 truncate text-xs',
-                      active.title !== undefined
-                        ? 'font-mono'
-                        : 'text-muted-foreground font-medium',
-                    )}
-                  >
-                    {active.title ?? languageName(active.language)}
-                  </span>
-                }
-              />
-            </>
+            <CodeTitle title={active.title} language={active.language} id={titleId} />
           )}
           <CopyButton
             value={active.code}
