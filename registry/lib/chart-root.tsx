@@ -2139,9 +2139,11 @@ function ChartTooltipBox({
 }
 
 /**
- * The reading direction around `root`'s element, read from the element once
- * it is on the page and again whenever a `dir` on the page changes, so a
- * chart in a box of its own direction follows that box. A new direction
+ * The reading direction around `root`'s element, read once it is on the page
+ * and again whenever a `dir` on the page changes, so a chart in a box of its
+ * own direction follows that box. It reads the element's parent unless the
+ * element has a `dir` of its own: a chart that scrolls sideways sets the
+ * opposite direction on its element, and reading that would flip it. A new direction
  * mirrors the chart at once, so a right-to-left page never sees it slide
  * across on load.
  */
@@ -2153,7 +2155,11 @@ function useReadingDirection(root: RefObject<HTMLElement | null>): ReadingDirect
     if (!element) return
     const resizing = holdResizing(element)
     const read = (commit: (apply: () => void) => void) => {
-      const next = isRTL(element) ? 'rtl' : 'ltr'
+      const next = isRTL(
+        element.hasAttribute('dir') ? element : (element.parentElement ?? element),
+      )
+        ? 'rtl'
+        : 'ltr'
       if (next === shown.current) return
       shown.current = next
       resizing.hold()

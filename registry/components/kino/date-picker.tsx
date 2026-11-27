@@ -360,12 +360,15 @@ function DatePickerInput({
             className={cn(
               inputControlClassName,
               rangeDateClassName,
-              'px-0 text-start tabular-nums placeholder:text-sm',
+              'px-0 text-start tabular-nums placeholder:text-sm supports-[field-sizing:content]:grow',
             )}
           />
         </>
       )}
-      <span data-date-picker-end='' className='flex shrink-0 items-center gap-0.5 pe-1.5'>
+      <span
+        data-date-picker-end=''
+        className='ms-auto flex shrink-0 items-center gap-0.5 pe-1.5'
+      >
         <InputInvalidIcon className='pe-1' />
         {children}
         <BoxTrigger />

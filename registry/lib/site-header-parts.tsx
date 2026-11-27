@@ -486,6 +486,29 @@ function useHeaderFit(ref: RefObject<HTMLElement | null>) {
   }, [ref])
 }
 
+/**
+ * Whether a header that draws in is drawn in. It draws in as soon as the page
+ * scrolls, even under the pointer, or a scroll there shows a wide bar until
+ * the pointer leaves. Back at the top it stays drawn in while the pointer is
+ * on it, so nothing slides from under the pointer, and an open menu holds it
+ * either way.
+ */
+function headerDrawn({
+  drawn,
+  scrolled,
+  pointed,
+  open,
+}: {
+  drawn: boolean
+  scrolled: boolean
+  pointed: boolean
+  open: boolean
+}): boolean {
+  if (open) return drawn
+  if (!scrolled && pointed) return drawn
+  return scrolled
+}
+
 /** Where the page has scrolled to, as the header shows it. */
 interface HeaderScroll {
   /** Past the top: the header shows its surface. */
@@ -540,8 +563,9 @@ function headerScroll({
  * A header that holds keyboard focus or an open menu never hides.
  *
  * With `draws`, it also marks `data-drawn` as it marks `data-scrolled`, but
- * holds it while the header is in use, under the pointer or with a menu
- * open, so what moves on it never slides out from under the pointer.
+ * holds it while a menu is open, and keeps it while the pointer is on the
+ * header back at the top, so what moves on it never slides out from under
+ * the pointer as it is about to be used.
  */
 function useHeaderScroll(
   ref: RefObject<HTMLElement | null>,
@@ -565,7 +589,7 @@ function useHeaderScroll(
       header.toggleAttribute('data-scrolled', state.scrolled)
       header.toggleAttribute('data-hidden', state.hidden)
       if (!draws) return
-      if (!pointed && !open()) drawn = state.scrolled
+      drawn = headerDrawn({ drawn, scrolled: state.scrolled, pointed, open: open() })
       header.toggleAttribute('data-drawn', drawn)
     }
     const update = () => {
@@ -624,6 +648,7 @@ function useHeaderScroll(
 }
 
 export {
+  headerDrawn,
   headerFits,
   headerScroll,
   type HeaderScroll,
