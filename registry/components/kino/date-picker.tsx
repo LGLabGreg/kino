@@ -382,11 +382,14 @@ function DatePickerTrigger({
   className,
   children,
   format,
+  size = 'default',
   'aria-label': ariaLabel,
   ref,
   ...props
 }: Omit<ComponentProps<typeof DatePickerTriggerPrimitive>, 'className' | 'children'> & {
   className?: string
+  /** The button's size: `sm` sits in a row of small controls, such as a toolbar's. */
+  size?: 'default' | 'sm'
   /** Shown while no date is picked, such as "Pick a date". */
   children?: ReactNode
   /** How the value is written, as `Intl.DateTimeFormat` takes it: 14 Nov 2026 by default, and 2–8 Nov 2026 for a range. */
@@ -415,6 +418,7 @@ function DatePickerTrigger({
           {...own}
           aria-label={ariaLabel}
           variant='outline'
+          size={size}
           className={cn(
             'justify-start font-normal tabular-nums data-placeholder:text-muted-foreground',
             className,

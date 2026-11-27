@@ -232,8 +232,9 @@ function Toaster({
       <ToastRegion
         data-variant={variant}
         className={cn(
-          // As wide as a phone's screen allows, with the same margin on each side as below.
-          'group/toast-region end-4 bottom-4 w-88 max-w-[calc(100vw-(--spacing(8)))]',
+          // As wide as a phone's screen allows, with the same margin on each side as below; fixed
+          // from the server's page on, so the region never takes room beside what it sits in.
+          'group/toast-region fixed end-4 bottom-4 w-88 max-w-[calc(100vw-(--spacing(8)))]',
           className,
         )}
         {...props}

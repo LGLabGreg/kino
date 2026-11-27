@@ -35,12 +35,14 @@ import { cn } from '@/lib/utils'
 
 /**
  * What every list shares: a frame that follows the list's height as items
- * come, go and wrap, and clips nothing a raised item's shadow needs. While
+ * come, go and wrap, and clips nothing a raised item's shadow needs, but
+ * while it grows, when the list past its edge would make a scroller around
+ * it scroll (Greg, 2026-11-27: a Kanban column showed its scrollbar). While
  * an item glides in from past it, from where its copy was let go or from
  * another list, it clips nothing and sits above the lists beside it.
  */
 const frameClassName =
-  'relative [overflow-clip-margin:1rem] overflow-clip transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) has-[[data-settling]]:z-10 has-[[data-settling]]:overflow-visible motion-reduce:transition-none'
+  'relative [overflow-clip-margin:1rem] overflow-clip data-sizing:[overflow-clip-margin:0px] transition-[height] duration-(--motion-layout-duration) ease-(--motion-layout-easing) has-[[data-settling]]:z-10 has-[[data-settling]]:overflow-visible motion-reduce:transition-none'
 
 const listClassName = 'relative isolate flex gap-2 data-sorting:select-none'
 
@@ -256,9 +258,6 @@ function SortableItem({
     disabled,
     className: cn(
       'group/sortable-item bg-card text-card-foreground relative z-0 flex min-w-0 cursor-grab items-center gap-(--control-padding) rounded-(--list-radius) border p-(--control-padding) text-sm select-none [-webkit-touch-callout:none] data-disabled:cursor-default',
-      // A control inside it answers its own press, so it keeps its own cursor:
-      // the same kinds as the sort lib's sortControls, but the handle.
-      '[&_:is(a[href],button,input,select,textarea,label,summary,[contenteditable],[role=button],[role=link],[role=checkbox],[role=radio],[role=switch],[role=slider],[role=spinbutton],[role=textbox],[role=searchbox],[role=combobox],[role=option],[role=tab],[role=treeitem],[role=menuitem],[role=menuitemcheckbox],[role=menuitemradio],[data-slot=slider-control]):not([data-sortable-handle])]:cursor-auto',
       // Where a pointer would drop it: a dashed slot, its content hidden, tinted to read on a muted column too.
       'data-dragging:bg-foreground/5 data-dragging:border-foreground/20 data-dragging:border-dashed data-dragging:*:invisible',
       // It glides to a new place on `layout` (`followFlow`), and stays above
@@ -279,11 +278,13 @@ function SortableItem({
          * Its shadow fades in as it rises, on a layer of its own, so only
          * opacity moves. The copy a pointer drags is raised from the start,
          * and the item keeps its shadow as it glides from the copy into its
-         * place, then lets it fade.
+         * place, then lets it fade. One that moves to another list without
+         * a hand on it, by a menu or new data, rises the same way while it
+         * glides across, so the eye follows it to where it lands.
          */}
         <span
           aria-hidden
-          className='pointer-events-none absolute -inset-px rounded-[inherit] opacity-0 shadow-md [transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)] group-data-moving/sortable-item:opacity-100 group-data-moving/sortable-item:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-[settling=drop]/sortable-item:opacity-100 group-data-[settling=drop]/sortable-item:transition-none dark:shadow-black/60 [[data-drag-preview]>&]:opacity-100 [[data-drag-preview]>&]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] [[data-drag-preview]>&]:starting:opacity-0 [[data-holding]>&]:opacity-50 [[data-holding]>&]:[transition:opacity_var(--motion-press-duration)_var(--motion-press-easing)]'
+          className='pointer-events-none absolute -inset-px rounded-[inherit] opacity-0 shadow-md [transition:opacity_var(--motion-exit-duration)_var(--motion-exit-easing)] group-data-moving/sortable-item:opacity-100 group-data-moving/sortable-item:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] group-data-[settling=drop]/sortable-item:opacity-100 group-data-[settling=drop]/sortable-item:transition-none group-data-[settling=across]/sortable-item:opacity-100 group-data-[settling=across]/sortable-item:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] dark:shadow-black/60 [[data-drag-preview]>&]:opacity-100 [[data-drag-preview]>&]:[transition:opacity_var(--motion-enter-duration)_var(--motion-enter-easing)] [[data-drag-preview]>&]:starting:opacity-0 [[data-holding]>&]:opacity-50 [[data-holding]>&]:[transition:opacity_var(--motion-press-duration)_var(--motion-press-easing)]'
         />
       </>
     ),

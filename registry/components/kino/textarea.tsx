@@ -37,6 +37,8 @@ function TextareaControl({ className, autoResize = true, ...props }: TextareaPro
       className={cn(
         textareaControlClassName,
         autoResize && 'field-sizing-content',
+        // One row is a one-line field that grows as its text wraps, such as a title.
+        props.rows === 1 && 'min-h-0',
         className,
       )}
       {...props}

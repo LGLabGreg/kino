@@ -123,12 +123,12 @@ const filterListValueTriggerClassName = selectTriggerVariants()
 function FilterListValue({ id, children }: { id?: string; children: ReactNode }) {
   return (
     <>
-      {/* A bare label truncates; an icon and a label sit in a row. */}
+      {/* A bare label truncates; an icon and a label sit in a row, the label in a span that truncates. */}
       <span
         id={id}
         data-slot='filter-list-value'
         data-cut
-        className='flex min-w-0 flex-1 items-center gap-2 truncate in-data-placeholder:text-muted-foreground'
+        className='flex min-w-0 flex-1 items-center gap-2 truncate in-data-placeholder:text-muted-foreground [&>span:not([data-slot])]:min-w-0 [&>span:not([data-slot])]:truncate'
       >
         {children}
       </span>
@@ -186,11 +186,13 @@ function FilterListRows({
 
 /**
  * A row: the menus' own. Rows out of view skip style, layout and paint, so a
- * list of every country opens at once.
+ * list of every country opens at once. A skipped row keeps its own height:
+ * the intrinsic size is its content's, inside its `py-1`, or the list opens a
+ * row too tall, shrinks, and a long one flips to the other side as it does.
  */
 const filterListItemClassName = cn(
   menuRowVariants(),
-  'group/menu-row [contain-intrinsic-size:auto_var(--control-height-sm)] [content-visibility:auto]',
+  'group/menu-row [contain-intrinsic-size:auto_calc(var(--control-height-sm)-0.5rem)] [content-visibility:auto]',
 )
 
 /** The marked part of a row's text, the part that matched what was typed. */

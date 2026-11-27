@@ -33,6 +33,12 @@ import {
  * Combobox's value, so `onValueChange` hears every one.
  */
 
+/** Whether `query` adds a new tag: typed text that names a tag or a suggestion adds that one instead. */
+function addsNew(query: string, tags: readonly string[], suggestions: readonly string[]) {
+  const typed = query.trim()
+  return typed !== '' && !findTag(tags, typed) && !findTag(suggestions, typed)
+}
+
 /** Whether two tags are the same, ignoring case and the spaces around them. */
 function sameTag(a: string, b: string) {
   return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase()
@@ -109,6 +115,7 @@ const TagInputContext = createContext<{
   suggestions: readonly string[]
   query: string
   flash: { tag: string; key: number } | undefined
+  button: boolean
 } | null>(null)
 
 function useTagInput() {
@@ -123,6 +130,14 @@ type TagInputProps = Omit<
 > & {
   /** Tags to offer as you type. Without them, the field takes whatever is typed and opens no list. */
   suggestions?: readonly string[]
+  /**
+   * Opened from a `ComboboxTrigger` that shows the tags, with the
+   * `TagInputInput` in the popup, rather than typed into in place: the list
+   * opens with no suggestions too, to add one, and lists the tags added,
+   * ticked, so one can be taken off there. Text left typed when it closes
+   * is dropped, not added.
+   */
+  button?: boolean
 }
 
 /**
@@ -139,6 +154,7 @@ function TagInput({
   query: queryProp,
   defaultQuery = '',
   onQueryChange,
+  button = false,
   children,
   ...props
 }: TagInputProps) {
@@ -170,11 +186,11 @@ function TagInput({
     controller.setQuery('')
   }
 
-  // Without suggestions there is no list: Enter adds what was typed.
-  const listed = suggestions.length > 0
+  // Without suggestions there is no list in the field: Enter adds what was typed.
+  const listed = button || suggestions.length > 0
 
   return (
-    <TagInputContext value={{ add, tags, suggestions, query, flash }}>
+    <TagInputContext value={{ add, tags, suggestions, query, flash, button }}>
       <Combobox<string, true>
         multiple
         // Enter with nothing highlighted, or no list, adds what was typed.
@@ -289,7 +305,7 @@ function TagInputInput({
   onBlur,
   ...props
 }: ComponentProps<typeof ComboboxInput>) {
-  const { add, tags } = useTagInput()
+  const { add, tags, button } = useTagInput()
   return (
     <ComboboxInput
       enterKeyHint='enter'
@@ -322,7 +338,9 @@ function TagInputInput({
       }}
       onBlur={(event) => {
         onBlur?.(event)
-        if (event.currentTarget.value.trim() !== '') add([event.currentTarget.value])
+        // From a button, leaving the search closes the list: Escape or a press outside cancels.
+        if (!button && event.currentTarget.value.trim() !== '')
+          add([event.currentTarget.value])
       }}
       {...props}
     />
@@ -337,8 +355,10 @@ const TagInputContent = ComboboxContent
  * the typed text names a tag already added, it says so instead.
  */
 function TagInputEmpty({ children, ...props }: ComponentProps<typeof ComboboxEmpty>) {
-  const { tags, query } = useTagInput()
+  const { tags, suggestions, query } = useTagInput()
   const taken = query.trim() ? findTag(tags, query) : undefined
+  // While the list's last row adds what was typed, nothing is empty to say.
+  if (addsNew(query, tags, suggestions)) return null
   return (
     <ComboboxEmpty {...props}>
       {taken ? `${taken} is already added` : children}
@@ -348,8 +368,8 @@ function TagInputEmpty({ children, ...props }: ComponentProps<typeof ComboboxEmp
 
 /**
  * The suggestions not added yet that match what was typed, and a last row
- * that adds it as a new tag. Give it a function child to draw a row of your
- * own.
+ * that adds it as a new tag; from a button, the tags added too, ticked. Give
+ * it a function child to draw a row of your own.
  */
 function TagInputList({
   children,
@@ -357,17 +377,17 @@ function TagInputList({
 }: Omit<ComponentProps<typeof ComboboxList>, 'children'> & {
   children?: (tag: string) => ReactNode
 }) {
-  const { add, tags, suggestions, query } = useTagInput()
-  const typed = query.trim()
-  // Typed text that names a tag or a suggestion adds that one, not a new one.
-  const creates = typed !== '' && !findTag(tags, typed) && !findTag(suggestions, typed)
+  const { add, tags, suggestions, query, button } = useTagInput()
+  // From a button the list is where a tag comes off, so the added ones stay in it.
+  const rows = button
+    ? [...suggestions, ...tags.filter((tag) => !findTag(suggestions, tag))]
+    : suggestions.filter((suggestion) => !findTag(tags, suggestion))
+  const creates = addsNew(query, tags, suggestions)
   return (
     <ComboboxList {...props}>
-      {suggestions
-        .filter((suggestion) => !findTag(tags, suggestion))
-        .map((tag) =>
-          children ? children(tag) : <TagInputItem key={tag} value={tag} />,
-        )}
+      {rows.map((tag) =>
+        children ? children(tag) : <TagInputItem key={tag} value={tag} />,
+      )}
       {creates ? (
         <ComboboxCreate onCreate={(text) => add([text])}>
           {(state) => (
@@ -390,8 +410,10 @@ function TagInputItem({
 }: Omit<ComponentProps<typeof ComboboxItem>, 'value' | 'indicator'> & {
   value: string
 }) {
+  // In the field its chip shows it is added; from a button, its tick does.
+  const { button } = useTagInput()
   return (
-    <ComboboxItem value={value} label={value} indicator={false} {...props}>
+    <ComboboxItem value={value} label={value} indicator={button} {...props}>
       {children ?? value}
     </ComboboxItem>
   )
@@ -408,5 +430,5 @@ export {
   TagInputList,
   TagInputValue,
 }
-export { addTags, announcement, findTag, sameTag, splitTags }
+export { addsNew, addTags, announcement, findTag, sameTag, splitTags }
 export type { TagInputProps }

@@ -1,6 +1,11 @@
 'use client'
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/registry/components/kino/avatar'
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+  initials,
+} from '@/registry/components/kino/avatar'
 import { Card, CardLink } from '@/registry/components/kino/card'
 import { sectionColumnClassName } from '@/registry/lib/hero-parts'
 import type { SectionHeadingLevel } from '@/registry/lib/section-heading'
@@ -58,12 +63,6 @@ const testimonialsSectionClassName =
   '@container/testimonials relative isolate flex w-full min-w-0 flex-col overflow-x-clip bg-background'
 
 const testimonialsColumnClassName = sectionColumnClassName
-
-/** A name's initials: its first and last words' first letters, a hyphenated surname taking its first part's. */
-function initials(name: string) {
-  const words = name.split(/\s+/).filter(Boolean)
-  return `${words[0]?.[0] ?? ''}${words.length > 1 ? (words.at(-1)?.[0] ?? '') : ''}`
-}
 
 /** Their job and company on one line: Head of Product, Tessel. */
 function roleLine({ role, company }: Pick<Testimonial, 'role' | 'company'>) {
@@ -170,7 +169,6 @@ function TestimonialCard({
 }
 
 export {
-  initials,
   roleLine,
   NewTabNote,
   sourceLinkProps,

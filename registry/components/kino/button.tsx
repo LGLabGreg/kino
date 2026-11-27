@@ -24,8 +24,9 @@ const buttonVariants = cva(
           'border-border bg-background shadow-xs not-data-disabled:hover:bg-muted not-data-disabled:hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:not-data-disabled:hover:bg-input/50',
         secondary:
           'border-transparent bg-secondary text-secondary-foreground not-data-disabled:hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground',
+        // A ghost's hover darkens whatever it sits on, so it shows on a tinted surface too, such as a Kanban column.
         ghost:
-          'border-transparent not-data-disabled:hover:bg-muted not-data-disabled:hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:not-data-disabled:hover:bg-muted/50',
+          'border-transparent not-data-disabled:hover:bg-foreground/5 not-data-disabled:hover:text-foreground aria-expanded:bg-foreground/5 aria-expanded:text-foreground dark:not-data-disabled:hover:bg-foreground/8 dark:aria-expanded:bg-foreground/8',
         // The destructive colour on its own tint reads at 4:1 in light mode;
         // a fifth of the foreground mixed in takes the text past 4.5:1.
         destructive:

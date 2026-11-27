@@ -681,7 +681,8 @@ export const flowItemClassName =
 /**
  * A row whose `items` flow, in a frame that moves to the row's height as it
  * wraps: give `frame` and `row` to the two elements, the row inside the
- * frame. The frame needs a height transition and `overflow: clip`.
+ * frame. The frame needs a height transition and `overflow: clip`, and is
+ * marked `data-sizing` while it moves.
  */
 export function useFlow<Frame extends HTMLElement, Row extends HTMLElement>(
   items: string,
@@ -746,9 +747,19 @@ export function useFlow<Frame extends HTMLElement, Row extends HTMLElement>(
     })
     const stopHeight = followHeight(frame.current, row.current, {
       instant: () => jumps,
+      // Marked while it moves to the row's height, so it can clip to its own
+      // edge then: a row taller than it would otherwise add to what a
+      // scroller around it can scroll, and show its scrollbar for the move.
+      moving: () => {
+        frameNode.dataset.sizing = ''
+        return undefined
+      },
       // Its new height, once layout has it back: a frame already that tall
       // doesn't change size then, so the observer wouldn't see it.
-      settled: remember,
+      settled: () => {
+        delete frameNode.dataset.sizing
+        remember()
+      },
     })
     return () => {
       stopHeight()

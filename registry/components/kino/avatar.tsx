@@ -118,6 +118,12 @@ function AvatarFallback({
   )
 }
 
+/** A name's initials, for `AvatarFallback`: its first and last words' first letters, a hyphen parting words. */
+function initials(name: string) {
+  const words = name.split(/[\s-]+/).filter(Boolean)
+  return `${words[0]?.[0] ?? ''}${words.length > 1 ? (words.at(-1)?.[0] ?? '') : ''}`
+}
+
 /**
  * How far each face sits over the one before: a quarter of a face, but never
  * so far that a face you can act on shows less than a 24px target.
@@ -243,6 +249,7 @@ export {
   AvatarImage,
   AvatarStack,
   AvatarStackCount,
+  initials,
   stackCountLabel,
 }
 export type { AvatarSize }

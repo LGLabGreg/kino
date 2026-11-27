@@ -3,6 +3,7 @@
 import { announce } from '@/registry/lib/announce'
 import { translateOf } from '@/registry/lib/highlight'
 import { transitionsQuiet } from '@/registry/lib/resize'
+import { revealOnceStill } from '@/registry/lib/scroll'
 import {
   bindHold,
   type ChangeDetails,
@@ -445,6 +446,21 @@ interface SortParts<State> {
   follow: (el: HTMLElement) => () => void
 }
 
+/**
+ * Brings an item the keys carry into sight where it lands, past the glide
+ * that takes it there and a list around it that opens for it: the focus
+ * follows it, but focus scrolls to where it is on the way.
+ */
+function revealCarried(handle: HTMLElement, key: string) {
+  const root = handle.closest('[data-slot=sortable-group], [data-slot=sortable-list]')
+  requestAnimationFrame(() => {
+    const item = root?.querySelector<HTMLElement>(
+      `[data-key="${CSS.escape(key)}"][data-moving]`,
+    )
+    if (item) void revealOnceStill(item)
+  })
+}
+
 /** The item and handle slots, the same in a lone list and a group. */
 function itemSlots<State extends object & SortState, Api extends SortParts<State>>(
   slot: SlotFactory<State, Api>,
@@ -486,7 +502,10 @@ function itemSlots<State extends object & SortState, Api extends SortParts<State
         disabled: props.disabled || api.locked(state, key) ? '' : undefined,
       }),
       on: {
-        keydown: (event, { api, key }) => api.keydown(event as KeyboardEvent, key),
+        keydown: (event, { api, el, key }) => {
+          api.keydown(event as KeyboardEvent, key)
+          if (el) revealCarried(el, key)
+        },
         focusout: (event, { api, key }) =>
           leaveLater(event, (active) => api.leave(key, active)),
       },

@@ -1,7 +1,7 @@
 'use client'
 
 import { reducesMotion } from '@/registry/lib/reduce-motion'
-import { roleDuration, runningTransitions } from '@/registry/lib/resize'
+import { roleDuration, runningTransitions, transitionsQuiet } from '@/registry/lib/resize'
 import {
   type RefCallback,
   type RefObject,
@@ -363,6 +363,23 @@ export function revealBehavior(scroller: HTMLElement): ScrollBehavior {
   const reduced =
     reducesMotion(scroller) || roleDuration(scroller, 'morph', Number.NaN) === 0
   return reduced ? 'instant' : 'smooth'
+}
+
+/**
+ * Scrolls `element` into sight once it and every box around it stop moving,
+ * so an item that glides into a list, or into a column that is opening,
+ * comes into view where it lands rather than where it is on the way.
+ */
+export async function revealOnceStill(element: HTMLElement): Promise<void> {
+  const boxes: Element[] = []
+  for (let box: Element | null = element; box; box = box.parentElement) boxes.push(box)
+  await Promise.all(boxes.map((box) => transitionsQuiet(box)))
+  if (!element.isConnected) return
+  element.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest',
+    behavior: revealBehavior(element),
+  })
 }
 
 function reveal(scroller: HTMLElement, item: Element | null, behavior: ScrollBehavior) {
