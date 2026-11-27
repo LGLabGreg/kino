@@ -156,7 +156,7 @@ function MenuBox({
       className={cn(
         popupPlacedClassName,
         panelSheetBackdropClassName,
-        'flex max-h-[min(var(--available-height),var(--menu-max-height,24rem))] max-w-[min(20rem,var(--available-width))] flex-col text-sm',
+        'flex max-h-[min(var(--available-height),var(--menu-max-height,24rem))] max-w-[max(12rem,min(20rem,var(--available-width)))] flex-col text-sm',
         popupSheetClassName,
       )}
       {...props}
