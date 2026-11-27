@@ -38,3 +38,12 @@ export function markMounted(node: HTMLElement | null) {
   })
   return () => cancelAnimationFrame(frame)
 }
+
+/**
+ * Styles the document now, so what was just set is where a transition starts
+ * from, or the look an element is painted with before it moves. Returns the
+ * style it read, which no caller needs.
+ */
+export function commitStyles(el: Element) {
+  return getComputedStyle(el).transitionProperty
+}

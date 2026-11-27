@@ -22,6 +22,7 @@ const nativeSelectControl = definePrimitive({
   options: { onValueChange: 'callback' },
   // The primitive reads its options' type from this parameter; the select holds the value.
   state: (options: NativeSelectOptions) => {
+    // oxlint-disable-next-line typescript/no-meaningless-void-operator -- marks a parameter kept for its type
     void options
     return { value: '' }
   },

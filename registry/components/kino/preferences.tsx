@@ -1,5 +1,6 @@
 'use client'
 
+import { commitStyles } from '@/registry/lib/refs'
 import {
   type ColorSchemeState,
   createColorScheme,
@@ -108,7 +109,7 @@ function showScheme({ value, resolved }: ColorSchemeState) {
     '*,*::before,*::after{transition-property:transform,translate,scale,rotate,clip-path,opacity!important}'
   document.head.append(pause)
   writeScheme(html, value)
-  void getComputedStyle(html).colorScheme
+  commitStyles(html)
   requestAnimationFrame(() => pause.remove())
 }
 

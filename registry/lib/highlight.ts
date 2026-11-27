@@ -10,6 +10,7 @@
  * faded, it appears in place again (Greg, 2026-11-13).
  */
 
+import { commitStyles } from '@/registry/lib/refs'
 import {
   FOLLOWS_TRANSITION,
   runningTransitions,
@@ -512,7 +513,7 @@ export function createHighlight(layer: HTMLElement): Highlight {
       // when it slides into a new place.
       place(from ?? next.getBoundingClientRect(), next)
       // Painted where it appears before it may slide.
-      void getComputedStyle(layer).clipPath
+      commitStyles(layer)
     }
     enter(to)
     if (next) place(boxOf(next, layer.parentElement), next)

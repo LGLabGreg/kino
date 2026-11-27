@@ -1,7 +1,7 @@
 'use client'
 
 import { labelClassName } from '@/registry/components/kino/label'
-import { markMounted, mergeRefs } from '@/registry/lib/refs'
+import { commitStyles, markMounted, mergeRefs } from '@/registry/lib/refs'
 import { withoutTransition } from '@/registry/lib/resize'
 import { settle } from '@/registry/lib/settle'
 import {
@@ -494,7 +494,7 @@ function playExit(copy: HTMLElement, done: () => void) {
   )
   if (shown) return done()
   // Reading its style commits the look it arrives with, for the exit to start from.
-  void getComputedStyle(copy).opacity
+  commitStyles(copy)
   copy.style.removeProperty('opacity')
   copy.style.removeProperty('translate')
   copy.setAttribute('data-ending-style', '')

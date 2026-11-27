@@ -2,6 +2,7 @@
 
 import { announce } from '@/registry/lib/announce'
 import { translateOf } from '@/registry/lib/highlight'
+import { commitStyles } from '@/registry/lib/refs'
 import { transitionsQuiet } from '@/registry/lib/resize'
 import { revealOnceStill } from '@/registry/lib/scroll'
 import {
@@ -964,7 +965,7 @@ function glideFrom(item: HTMLElement, was: DOMRect) {
   if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) return
   item.dataset.flow = 'start'
   item.style.translate = `${x}px ${y}px`
-  void item.offsetHeight
+  commitStyles(item)
   delete item.dataset.flow
   item.style.translate = ''
 }

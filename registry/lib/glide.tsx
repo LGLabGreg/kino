@@ -8,6 +8,7 @@ import {
   type ReadingDirection,
   type ScreenBox,
 } from '@/registry/lib/popup'
+import { commitStyles } from '@/registry/lib/refs'
 import {
   FOLLOWS_TRANSITION,
   transitionTiming,
@@ -411,7 +412,7 @@ function trackGlide(
   const play = (next: 'open' | 'slide', from: ScreenBox | null, box: ScreenBox) => {
     enter('rest')
     if (from) writeBox(popup, 'glide', box, from)
-    void getComputedStyle(content).clipPath
+    commitStyles(content)
     enter(next)
     writeBox(popup, 'glide', box, box)
   }

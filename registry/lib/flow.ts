@@ -20,6 +20,7 @@
  */
 
 import { translateOf } from '@/registry/lib/highlight'
+import { commitStyles } from '@/registry/lib/refs'
 import {
   columnWidths,
   followHeight,
@@ -457,7 +458,7 @@ export function followFlow(
       item.dataset.flow = 'start'
       item.style.translate = `${x}px ${y}px`
     }
-    if (starts.length > 0) void row.offsetHeight
+    if (starts.length > 0) commitStyles(row)
     for (const [item] of starts) {
       delete item.dataset.flow
       item.style.translate = ''

@@ -1071,6 +1071,7 @@ function DayCalendar(allProps: CalendarDayProps) {
     maxDays?: number
   }
   // Only ever to the day here, and not an attribute of the root.
+  // oxlint-disable-next-line typescript/no-meaningless-void-operator -- marks a prop kept out of the rest
   void granularity
 
   const [own] = useState(createCalendarController)
@@ -1245,6 +1246,7 @@ function ChoiceCalendar({
   ...rest
 }: CalendarChoiceProps) {
   // Only ever single here, and not an attribute of the root.
+  // oxlint-disable-next-line typescript/no-meaningless-void-operator -- marks a prop kept out of the rest
   void mode
   const locale = useLocale(localeProp)
   const clock = useToday(timeZone)

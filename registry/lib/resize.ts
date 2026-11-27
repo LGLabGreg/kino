@@ -5,6 +5,8 @@
  * Compiler drops a forced reflow written inside one, and then the size jumps.
  */
 
+import { commitStyles } from '@/registry/lib/refs'
+
 const runs = new WeakMap<object, number>()
 
 /**
@@ -252,7 +254,7 @@ export function withoutTransition(
   change()
   // Reading one style styles the whole document, so every part, inside
   // too, takes the change, and drops a starting style, with none.
-  for (const one of elements) void getComputedStyle(one).transitionProperty
+  for (const one of elements) commitStyles(one)
   for (const release of held) release()
 }
 
