@@ -6,15 +6,15 @@ import {
   FilterListRows,
   filterListGroupLabelClassName,
   filterListItemClassName,
-  filterListMatchClassName,
   filterListNoticeClassName,
   filterListScrollerClassName,
   filterListSeparatorClassName,
+  type MatchMode,
+  MatchText,
 } from '@/registry/lib/filter-list'
 import { POPUP_COLLISION_PADDING, popupPlacedClassName } from '@/registry/lib/popup'
 import { mergeRefs } from '@/registry/lib/refs'
 import { useEdgeFades } from '@/registry/lib/scroll'
-import { matchRanges, matchSegments } from '@ui-sdk/core/text-match'
 import {
   TriggerMenu as TriggerMenuPrimitive,
   TriggerMenuContent as TriggerMenuContentPrimitive,
@@ -48,8 +48,6 @@ import { cn } from '@/lib/utils'
  * grown out from under the character, while focus stays in the field. Inside
  * a Token input, it suggests into the token input, and a pick is a token.
  */
-
-type MatchMode = Parameters<typeof matchRanges>[2]
 
 /** The characters that open the menu, by trigger, with how each one matches. */
 const TriggersContext = createContext<ReadonlyMap<string, MatchMode | null>>(new Map())
@@ -243,23 +241,11 @@ function TriggerMenuItem<T = string>({
  * the eye finds why it matched. ui-sdk's other lists mark it themselves; the
  * Trigger menu's leaves it to its rows.
  */
-function TriggerMenuItemText({
-  className,
-  children,
-  ...props
-}: Omit<ComponentProps<'span'>, 'children'> & { children: string }) {
+function TriggerMenuItemText(
+  props: Omit<ComponentProps<typeof MatchText>, 'query' | 'mode'>,
+) {
   const { query, mode } = use(QueryContext)
-  const segments =
-    query && mode ? matchSegments(children, matchRanges(children, query, mode)) : []
-  return (
-    <span className={cn(filterListMatchClassName, className)} {...props}>
-      {segments.length > 0
-        ? segments.map((segment, at) =>
-            segment.match ? <mark key={at}>{segment.text}</mark> : segment.text,
-          )
-        : children}
-    </span>
-  )
+  return <MatchText query={query} mode={mode} {...props} />
 }
 
 /** A suggestion's icon, before its text. */

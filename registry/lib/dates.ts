@@ -251,6 +251,32 @@ export function useToday(timeZone?: string): string | null {
   )
 }
 
+/*
+ * The time now, a minute at a time, shared by everything that shows how long
+ * ago something was. On the server, and before hydration, there is none, so a
+ * time is never written twice.
+ */
+let minute = 0
+
+function watchMinutes(change: () => void) {
+  const tick = () => {
+    minute = Date.now()
+    change()
+  }
+  tick()
+  const timer = setInterval(tick, 60_000)
+  return () => clearInterval(timer)
+}
+
+/** The time now in epoch ms, a minute at a time; null while the server renders, which can't know it. */
+export function useNow(): number | null {
+  return useSyncExternalStore(
+    watchMinutes,
+    () => minute || null,
+    () => null,
+  )
+}
+
 /** How the locale writes an empty date to type, such as `DD/MM/YYYY` or `MM/DD/YYYY`. */
 export function datePlaceholder(locale?: string): string {
   return plain.datePattern(locale).placeholder

@@ -6,9 +6,13 @@ import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
  * its remove button and its exit from here, so they all read as one.
  */
 
-/** Its look. Its side padding is the component's: a remove button at the end takes its place. */
+/**
+ * Its look. Its side padding is the component's: a remove button at the end
+ * takes its place. One that can't be taken as it is (`data-invalid`) turns
+ * destructive, and dashed under forced colours; the component says why.
+ */
 const chipClassName =
-  'bg-muted text-foreground flex h-(--control-height-xs) max-w-full min-w-0 shrink-0 cursor-default items-center gap-1 rounded-(--control-radius-xs) text-xs font-medium select-none forced-colors:border [&_svg:not([class*="size-"])]:size-3'
+  'bg-muted text-foreground flex h-(--control-height-xs) max-w-full min-w-0 shrink-0 cursor-default items-center gap-1 rounded-(--control-radius-xs) text-xs font-medium select-none forced-colors:border [&_svg:not([class*="size-"])]:size-3 data-invalid:bg-destructive/10 data-invalid:text-destructive dark:data-invalid:bg-destructive/20 forced-colors:data-invalid:outline-1 forced-colors:data-invalid:outline-offset-1 forced-colors:data-invalid:outline-dashed'
 
 /**
  * How it arrives once its field has painted (`data-mounted` on the element

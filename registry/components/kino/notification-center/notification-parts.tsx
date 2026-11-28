@@ -50,6 +50,7 @@ import {
   instantLabel,
   timeAgo,
   useLocale,
+  useNow,
   wallClock,
 } from '@/registry/lib/dates'
 import { useFlow } from '@/registry/lib/flow'
@@ -73,7 +74,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -160,31 +160,6 @@ function useRow() {
   const row = use(RowContext)
   if (!row) throw new Error('A notification row part must sit inside NotificationRow.')
   return row
-}
-
-/*
- * The time now, a minute at a time, shared by every open panel. On the server,
- * and before hydration, there is none, so a time is never written twice.
- */
-let minute = 0
-const MINUTE = 60_000
-
-function watchMinutes(change: () => void) {
-  const tick = () => {
-    minute = Date.now()
-    change()
-  }
-  tick()
-  const timer = setInterval(tick, MINUTE)
-  return () => clearInterval(timer)
-}
-
-function useNow(): number | null {
-  return useSyncExternalStore(
-    watchMinutes,
-    () => minute || null,
-    () => null,
-  )
 }
 
 /** The words a screen reader hears after a change. */

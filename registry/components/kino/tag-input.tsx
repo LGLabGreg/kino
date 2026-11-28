@@ -54,12 +54,20 @@ function sameTags(a: readonly string[], b: readonly string[]) {
   return a.length === b.length && a.every((tag, index) => tag === b[index])
 }
 
-/** What a paste or a typed comma holds: one tag per comma or line. */
-function splitTags(text: string) {
+/** What a paste holds: one tag per line or per `delimiters` character, a comma by default. */
+function splitTags(text: string, delimiters: readonly string[] = [',']) {
   return text
-    .split(/[,\n]/)
+    .split(delimiterPattern(delimiters))
     .map((part) => part.trim())
     .filter(Boolean)
+}
+
+/** Matches a line break or any one of `delimiters`. */
+function delimiterPattern(delimiters: readonly string[]) {
+  const escaped = delimiters.map((delimiter) =>
+    delimiter.replace(/[\\^$.*+?()[\]{}|-]/g, '\\$&'),
+  )
+  return new RegExp(`[\\r\\n${escaped.join('')}]`)
 }
 
 interface Added {
@@ -116,6 +124,8 @@ const TagInputContext = createContext<{
   query: string
   flash: { tag: string; key: number } | undefined
   button: boolean
+  delimiters: readonly string[]
+  split: (text: string) => string[]
 } | null>(null)
 
 function useTagInput() {
@@ -138,6 +148,17 @@ type TagInputProps = Omit<
    * is dropped, not added.
    */
   button?: boolean
+  /**
+   * The characters that end a tag as they are typed, and split a paste into
+   * tags beside its lines: a comma by default. Emails take `[',', ' ', ';']`.
+   */
+  delimiters?: readonly string[]
+  /**
+   * The tags a paste with delimiters or lines holds: split on them by
+   * default. Emails copied from a mail app (`Ana Lima <ana@kino.app>`) take
+   * a split that keeps only the addresses.
+   */
+  split?: (text: string) => string[]
 }
 
 /**
@@ -155,6 +176,8 @@ function TagInput({
   defaultQuery = '',
   onQueryChange,
   button = false,
+  delimiters = defaultDelimiters,
+  split = (text) => splitTags(text, delimiters),
   children,
   ...props
 }: TagInputProps) {
@@ -190,7 +213,9 @@ function TagInput({
   const listed = button || suggestions.length > 0
 
   return (
-    <TagInputContext value={{ add, tags, suggestions, query, flash, button }}>
+    <TagInputContext
+      value={{ add, tags, suggestions, query, flash, button, delimiters, split }}
+    >
       <Combobox<string, true>
         multiple
         // Enter with nothing highlighted, or no list, adds what was typed.
@@ -246,6 +271,8 @@ function TagInput({
   )
 }
 
+const defaultDelimiters: readonly string[] = [',']
+
 /** Where the tags show: the field, with the input after the last chip. */
 const TagInputChips = ComboboxChips
 
@@ -253,12 +280,23 @@ const TagInputChips = ComboboxChips
  * The tags, as chips. Give it a function child to draw a tag's content,
  * such as an icon beside its name.
  */
-function TagInputValue({ children }: { children?: (tag: string) => ReactNode }) {
+function TagInputValue({
+  children,
+  invalid,
+}: {
+  children?: (tag: string) => ReactNode
+  /** Whether a tag can't be taken as it is, such as an email with no domain: its chip shows the invalid look. Say why beside the field. */
+  invalid?: (tag: string) => boolean
+}) {
   return (
     <ComboboxValue>
       {(state) =>
         (state.value as string[]).map((tag) => (
-          <TagInputChip key={tag} value={tag}>
+          <TagInputChip
+            key={tag}
+            value={tag}
+            data-invalid={invalid?.(tag) ? '' : undefined}
+          >
             {children ? children(tag) : tag}
           </TagInputChip>
         ))
@@ -295,9 +333,9 @@ function TagInputChip({
 }
 
 /**
- * The text you type. Enter, or a comma, adds it as a tag; a paste with
- * commas or lines adds one tag for each, and what is left typed when focus
- * goes is kept as a tag.
+ * The text you type. Enter, or a delimiter such as a comma, adds it as a
+ * tag; a paste with delimiters or lines adds one tag for each, and what is
+ * left typed when focus goes is kept as a tag.
  */
 function TagInputInput({
   onKeyDown,
@@ -305,7 +343,7 @@ function TagInputInput({
   onBlur,
   ...props
 }: ComponentProps<typeof ComboboxInput>) {
-  const { add, tags, button } = useTagInput()
+  const { add, tags, button, delimiters, split } = useTagInput()
   return (
     <ComboboxInput
       enterKeyHint='enter'
@@ -319,7 +357,7 @@ function TagInputInput({
           event.key === 'Enter' &&
           !event.currentTarget.hasAttribute('aria-activedescendant') &&
           findTag(tags, typed) !== undefined
-        if (event.key !== ',' && !repeated) return
+        if (!delimiters.includes(event.key) && !repeated) return
         event.preventDefault()
         add([typed])
       }}
@@ -327,14 +365,14 @@ function TagInputInput({
         onPaste?.(event)
         if (event.defaultPrevented) return
         const pasted = event.clipboardData.getData('text')
-        if (!/[,\n]/.test(pasted)) return
+        if (!delimiterPattern(delimiters).test(pasted)) return
         event.preventDefault()
         const input = event.currentTarget
         const text =
           input.value.slice(0, input.selectionStart ?? input.value.length) +
           pasted +
           input.value.slice(input.selectionEnd ?? input.value.length)
-        add(splitTags(text))
+        add(split(text))
       }}
       onBlur={(event) => {
         onBlur?.(event)

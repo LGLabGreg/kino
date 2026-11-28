@@ -31,8 +31,9 @@ import {
 } from '@/registry/lib/popup'
 import { followHeight } from '@/registry/lib/resize'
 import { edgeFadeClassName } from '@/registry/lib/scroll'
+import { matchRanges, matchSegments } from '@ui-sdk/core/text-match'
 import { type PartProps, renderElement } from '@ui-sdk/react/primitive'
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ComponentProps, type ReactNode, useEffect, useRef } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -198,6 +199,38 @@ const filterListItemClassName = cn(
 /** The marked part of a row's text, the part that matched what was typed. */
 const filterListMatchClassName =
   'min-w-0 [&_mark]:bg-transparent [&_mark]:font-semibold [&_mark]:text-current'
+
+/** How a query matches a row's text: from the start of a word, anywhere, or as ui-sdk's matchRanges reads it. */
+type MatchMode = Parameters<typeof matchRanges>[2]
+
+/**
+ * `children` with the parts that match `query` in bold, so the eye finds why
+ * a row matched: for a list that filters rows of its own, as ui-sdk's lists
+ * mark theirs. With no query or no `mode`, the text as it is.
+ */
+function MatchText({
+  query,
+  mode = 'contains',
+  className,
+  children,
+  ...props
+}: Omit<ComponentProps<'span'>, 'children'> & {
+  children: string
+  query: string
+  mode?: MatchMode | null
+}) {
+  const segments =
+    query && mode ? matchSegments(children, matchRanges(children, query, mode)) : []
+  return (
+    <span className={cn(filterListMatchClassName, className)} {...props}>
+      {segments.length > 0
+        ? segments.map((segment, at) =>
+            segment.match ? <mark key={at}>{segment.text}</mark> : segment.text,
+          )
+        : children}
+    </span>
+  )
+}
 
 const filterListGroupLabelClassName = menuLabelClassName
 const filterListSeparatorClassName = menuSeparatorClassName
@@ -405,6 +438,7 @@ export {
   FilterListInputGroup,
   FilterListRows,
   FilterListValue,
+  MatchText,
   filterListButtonClassName,
   filterListContentClassName,
   filterListGroupLabelClassName,
@@ -416,3 +450,4 @@ export {
   filterListSeparatorClassName,
   filterListValueTriggerClassName,
 }
+export type { MatchMode }
