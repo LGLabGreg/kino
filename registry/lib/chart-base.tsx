@@ -1058,7 +1058,7 @@ function ChartTooltipContent({
             <span className={cn(tooltipQuietClassName, 'min-w-0 flex-1 truncate')}>
               {config[key]?.label ?? key}
               {near.at !== null && ` (${near.at})`}
-              {words.forecast(key, item) && ` · ${messages.forecast}`}
+              {words.forecast(key, item) && ` (${messages.forecast})`}
             </span>
             {before && (
               <ChangeText

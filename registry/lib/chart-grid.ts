@@ -383,7 +383,7 @@ function labelRoom(
   height: number,
 ): { width: number; height: number } {
   if (shape === 'square') return { width, height }
-  // A hexagon `w` wide is that wide for √3/6·w either side of its middle, and narrows to its points beyond.
+  // A hexagon `w` wide is that wide for √3/6 × w either side of its middle, and narrows to its points beyond.
   const half = height / 2
   const flat = 2 * Math.sqrt(3) * half
   return { width: width >= flat ? width : (width + flat) / 2, height: 0 }

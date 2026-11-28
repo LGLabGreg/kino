@@ -146,11 +146,8 @@ function SpotlightQuote({ testimonial }: { testimonial: Testimonial }) {
           <bdi className='font-medium'>{testimonial.name}</bdi>
           {line ? (
             <>
-              <span aria-hidden className='text-muted-foreground'>
-                {' · '}
-              </span>
               <span className='sr-only'>, </span>
-              <bdi className='text-muted-foreground'>{line}</bdi>
+              <bdi className='text-muted-foreground ms-2'>{line}</bdi>
             </>
           ) : null}
         </span>

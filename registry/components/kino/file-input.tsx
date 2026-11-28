@@ -126,20 +126,21 @@ function holdsOne({ multiple, maxFiles }: FileRules) {
   return !multiple || maxFiles === 1
 }
 
-/** The limits, stated up front: “PDF, PNG or SVG · Up to 50 MB each · 20 files at most”. */
+/** The limits, stated up front: “PDF, PNG or SVG, up to 50 MB each, 20 files at most”. */
 function limitsText(rules: FileRules, locale?: string) {
   const { accept, maxSize, maxFiles } = rules
   const one = holdsOne(rules)
-  return [
-    typesText(accept, locale),
-    maxSize === undefined
-      ? ''
-      : `up to ${formatFileSize(maxSize, locale)}${one ? '' : ' each'}`,
-    maxFiles === undefined || one ? '' : `${maxFiles} files at most`,
-  ]
-    .filter(Boolean)
-    .map(capitalize)
-    .join(' · ')
+  return capitalize(
+    [
+      typesText(accept, locale),
+      maxSize === undefined
+        ? ''
+        : `up to ${formatFileSize(maxSize, locale)}${one ? '' : ' each'}`,
+      maxFiles === undefined || one ? '' : `${maxFiles} files at most`,
+    ]
+      .filter(Boolean)
+      .join(', '),
+  )
 }
 
 /**
@@ -180,25 +181,25 @@ function rejectedTitle(rejected: readonly FileRejection[]) {
   return `${rejected.length} files weren’t added`
 }
 
-/** The batch's line while it runs: “2 of 5 uploaded · 12 of 20 MB”. */
+/** The batch's line while it runs: “2 of 5 uploaded, 12 of 20 MB”. */
 function progressText(summary: UploadSummary, locale?: string) {
-  return `${summary.done} of ${summary.count} uploaded · ${formatFileSize(summary.loaded, locale)} of ${formatFileSize(summary.total, locale)}`
+  return `${summary.done} of ${summary.count} uploaded, ${formatFileSize(summary.loaded, locale)} of ${formatFileSize(summary.total, locale)}`
 }
 
-/** The batch's line once nothing is left uploading: “5 files uploaded · 20 MB”, or what failed. */
+/** The batch's line once nothing is left uploading: “5 files uploaded, 20 MB”, or what failed. */
 function settledText(summary: UploadSummary, locale?: string) {
   const files = (count: number) => (count === 1 ? '1 file' : `${count} files`)
   if (summary.failed === 0)
-    return `${files(summary.done)} uploaded · ${formatFileSize(summary.total, locale)}`
+    return `${files(summary.done)} uploaded, ${formatFileSize(summary.total, locale)}`
   if (summary.done === 0)
     return summary.failed === 1 ? 'The upload failed' : `${files(summary.failed)} failed`
-  return `${summary.done} uploaded · ${summary.failed} failed`
+  return `${summary.done} uploaded, ${summary.failed} failed`
 }
 
-/** The line for files that go with the form: “3 files · 4.2 MB”. */
+/** The line for files that go with the form: “3 files, 4.2 MB”. */
 function heldText(summary: UploadSummary, locale?: string) {
   const files = summary.count === 1 ? '1 file' : `${summary.count} files`
-  return `${files} · ${formatFileSize(summary.total, locale)}`
+  return `${files}, ${formatFileSize(summary.total, locale)}`
 }
 
 /** The field's error while files that failed hold its form back. */
@@ -907,7 +908,7 @@ function FileInputItem({
       ref={refs}
       file={file}
       data-state={state}
-      // Named by its file and its line, read apart: "receipt.pdf, 1.2 MB · Uploaded".
+      // Named by its file and its line, read apart: "receipt.pdf, 1.2 MB, uploaded".
       aria-labelledby={`${id}-name ${id}-status`}
       render={<li />}
       className={cn(
@@ -1006,11 +1007,10 @@ function FileInputItem({
                 <span className='min-w-0 wrap-break-word'>{error}</span>
               </span>
             ) : (
-              <span className='flex min-w-0 items-center gap-1'>
+              <span className='flex min-w-0 items-center gap-2'>
                 <bdi className='shrink-0 tabular-nums'>{size}</bdi>
                 {shown === 'complete' ? (
                   <span className='text-foreground inline-flex shrink-0 items-center gap-1 [&_svg:not([class*="size-"])]:size-3.5'>
-                    <span aria-hidden>·</span>
                     <IconPlaceholder
                       lucide='CheckIcon'
                       tabler='IconCheck'
