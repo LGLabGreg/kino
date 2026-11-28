@@ -20,7 +20,7 @@
  */
 
 import { translateOf } from '@/registry/lib/highlight'
-import { commitStyles } from '@/registry/lib/refs'
+import { commitStyles, markMounted } from '@/registry/lib/refs'
 import {
   columnWidths,
   followHeight,
@@ -778,4 +778,52 @@ export function useFlow<Frame extends HTMLElement, Row extends HTMLElement>(
     }
   }, [items, key])
   return { frame, row }
+}
+
+/**
+ * Once `item` has left its list, focus goes to the control `target` picks in
+ * the item that took its place, else in the one before it, skipping copies
+ * still leaving; when none stays, to what `otherwise` gives. Call it as the
+ * item is taken out: it focuses on the next frame, once the item has gone.
+ */
+/**
+ * A list whose items glide when one comes or goes, keyed by `data-flow-key`:
+ * give the ref to the list, which is `group/flow relative isolate`, and
+ * `flowItemClassName` to each item. One that arrives after the first paint
+ * fades in.
+ */
+export function useFlowList<List extends HTMLElement>(
+  items = ':scope > [data-flow-key]',
+) {
+  const list = useRef<List>(null)
+  useEffect(() => {
+    const node = list.current
+    if (!node) return
+    const stopMounted = markMounted(node)
+    const stopFlow = followFlow(node, items, { key: 'data-flow-key' })
+    return () => {
+      stopFlow()
+      stopMounted?.()
+    }
+  }, [items])
+  return list
+}
+
+export function focusAfterLeaving(
+  item: HTMLElement | null,
+  target: string,
+  otherwise: () => HTMLElement | null,
+) {
+  const staying = (from: Element | null | undefined, step: 'next' | 'previous') => {
+    let at = from
+    while (at && at.hasAttribute('data-leaving'))
+      at = step === 'next' ? at.nextElementSibling : at.previousElementSibling
+    return at
+  }
+  const next =
+    staying(item?.nextElementSibling, 'next') ??
+    staying(item?.previousElementSibling, 'previous')
+  requestAnimationFrame(() => {
+    ;(next?.querySelector<HTMLElement>(target) ?? otherwise())?.focus()
+  })
 }

@@ -214,6 +214,9 @@ const itemMediaVariants = cva(
         /** A picture, cropped to a square. */
         image:
           'size-10 overflow-hidden rounded-(--control-radius-sm) group-data-[size=sm]/item:size-8 [&_img]:size-full [&_img]:object-cover',
+        /** A product's photo, large enough to see what it is, as in a cart. */
+        product:
+          'bg-muted size-16 overflow-hidden rounded-(--list-radius) group-data-[size=sm]/item:size-12 [&_img]:size-full [&_img]:object-cover',
       },
     },
     defaultVariants: { variant: 'default' },

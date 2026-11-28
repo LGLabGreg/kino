@@ -6,7 +6,6 @@ import { Button, buttonVariants } from '@/registry/components/kino/button'
 import {
   type PricingBilling,
   type PricingPlan,
-  moneyFormat,
   savingPercent,
   yearlyTotal,
 } from '@/registry/components/kino/pricing/pricing-model'
@@ -15,7 +14,7 @@ import {
   SegmentedControlItem,
 } from '@/registry/components/kino/segmented-control'
 import { IconPlaceholder } from '@/registry/icons/icon-placeholder'
-import { numberFormatter } from '@/registry/lib/number-format'
+import { formatAmount, moneyFormat } from '@/registry/lib/money'
 import type { SectionHeadingLevel } from '@/registry/lib/section-heading'
 import { Swap } from '@/registry/lib/swap'
 import { createContext, type MouseEvent, use } from 'react'
@@ -108,7 +107,7 @@ function PlanPrice({
   const amount = plan.price[billing]
   const free = plan.price.monthly === 0
   const total = yearlyTotal(plan)
-  const money = numberFormatter(locale, moneyFormat(currency, total)).format(total)
+  const money = formatAmount(total, currency, 'when-needed', locale)
   const small = size === 'sm'
   // As text, so the line rolls when it changes.
   const billed =
@@ -137,7 +136,7 @@ function PlanPrice({
         <AnimatedNumber
           value={amount}
           locale={locale}
-          format={moneyFormat(currency, amount)}
+          format={moneyFormat(currency, amount, 'when-needed')}
           className={cn(
             'text-foreground font-semibold tracking-tight',
             small ? 'text-2xl' : 'text-4xl',

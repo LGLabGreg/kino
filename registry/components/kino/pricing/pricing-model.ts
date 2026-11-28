@@ -73,19 +73,7 @@ function planStep(plans: PricingPlan[], from: string, to: string): 1 | -1 {
   return index(to) < index(from) ? -1 : 1
 }
 
-/** Money in whole units when it has no cents, so `$10` and `$12.50` read as they would on a bill. */
-function moneyFormat(currency: string, amount: number): Intl.NumberFormatOptions {
-  const digits = Number.isInteger(amount) ? 0 : 2
-  return {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }
-}
-
 export {
-  moneyFormat,
   planStep,
   savingPercent,
   yearlyTotal,

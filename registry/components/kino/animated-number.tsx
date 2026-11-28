@@ -156,8 +156,8 @@ function RollingNumber({
         className: cn('whitespace-nowrap tabular-nums', className),
         children: (
           <>
-            {/* The digits read left to right in every language; the parts around them follow the locale. */}
-            <span aria-hidden dir={direction} className='select-none'>
+            {/* The digits read left to right in every language; the parts around them follow the locale. An agent reads the row's text, where every digit of each reel would show. */}
+            <span aria-hidden data-agent-hidden dir={direction} className='select-none'>
               {/* Only the number rolls, so the words around it keep their letters joined. */}
               <Swap roll align='end'>
                 {sign}
@@ -255,6 +255,7 @@ function CountingNumber({
             <span
               ref={live}
               aria-hidden
+              data-agent-hidden
               dir={localeDirection(formatter)}
               className='shrink-0 select-none transition-[--animated-number-progress] duration-(--motion-draw-duration) ease-(--motion-draw-easing) motion-reduce:transition-none'
             >
